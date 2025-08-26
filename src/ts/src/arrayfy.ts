@@ -70,20 +70,15 @@ function makeParagraph(children = []): HTMLParagraphElement {
   return p;
 }
 
-function makeNoWrapSpan(children = []): HTMLSpanElement {
+function makePropertyContainer(children = []): HTMLSpanElement {
   const span = document.createElement('span');
-  span.style.marginRight = '10px';
-  span.style.paddingRight = '10px';
-  span.style.borderRight = 'solid 1px #ccc';
-  span.style.whiteSpace = 'nowrap';
-  span.style.display = 'inline-block';
-  span.style.lineHeight = '30px';
+  span.classList.add('propertyContainer');
   toElementArray(children).forEach(child => span.appendChild(child));
   return span;
 }
 
 function makeSectionLabel(text: string): HTMLSpanElement {
-  const span = makeNoWrapSpan([text]);
+  const span = makePropertyContainer([text]);
   span.style.width = '100px';
   span.style.borderStyle = 'none';
   span.style.borderRadius = '5px';
@@ -136,16 +131,17 @@ function makeButton(text = ''): HTMLButtonElement {
 
 function makePresetButton(
     name: string, text: string, description: string): HTMLButtonElement {
-  const button = makeButton(text);
+  const button = document.createElement('button');
   button.dataset.presetName = name;
-  button.style.height = '50px';
-  button.style.margin = '10px 5px 10px 0px';
-  button.style.padding = '5px 10px';
-  button.style.textAlign = 'center';
-  button.style.verticalAlign = 'middle';
+  button.classList.add('presetButton');
+  const img = document.createElement('img');
+  img.src = `img/preset/${name}.svg`;
   const span = document.createElement('span');
   span.textContent = description;
-  span.style.fontSize = '12px';
+  span.style.fontSize = 'smaller';
+  button.appendChild(img);
+  button.appendChild(document.createElement('br'))
+  button.appendChild(document.createTextNode(text));
   button.appendChild(document.createElement('br'))
   button.appendChild(span);
 
@@ -156,8 +152,9 @@ function makePresetButton(
   return button;
 }
 
-const hiddenFileBox = document.createElement('input');
 const dropTarget = document.createElement('div');
+const hiddenFileBox = document.createElement('input');
+const pasteTarget = document.createElement('input');
 const origCanvas = document.createElement('canvas');
 const bgColorBox = makeTextBox('#000');
 const resetTrimButton = makeButton('範囲をリセット');
@@ -262,6 +259,22 @@ async function main() {
   container = document.querySelector('#arrayfyContainer');
 
   {
+    dropTarget.style.display = 'none';
+    dropTarget.style.position = 'fixed';
+    dropTarget.style.left = '0px';
+    dropTarget.style.top = '0px';
+    dropTarget.style.width = '100%';
+    dropTarget.style.height = '100%';
+    dropTarget.style.background = '#000';
+    dropTarget.style.opacity = '0.5';
+    dropTarget.style.zIndex = '9999';
+    dropTarget.style.textAlign = 'center';
+    dropTarget.style.color = '#FFF';
+    dropTarget.style.paddingTop = 'calc(50vh - 2em)';
+    dropTarget.style.fontSize = '30px';
+    dropTarget.innerHTML = 'ドロップして読み込む';
+    document.body.appendChild(dropTarget);
+
     // 「ファイルが選択されていません」の表示が邪魔なので button で wrap する
     hiddenFileBox.type = 'file';
     hiddenFileBox.accept = 'image/*';
@@ -271,26 +284,57 @@ async function main() {
       hiddenFileBox.click();
     });
 
-    dropTarget.style.width = '100%';
-    dropTarget.style.padding = '30px 0px 30px 0px';
-    dropTarget.style.boxSizing = 'border-box';
-    dropTarget.style.borderRadius = '5px';
-    dropTarget.style.backgroundColor = '#cde';
-    dropTarget.style.textAlign = 'center';
-    dropTarget.appendChild(
-        document.createTextNode('ここに画像をドロップ、貼り付け、または '));
-    dropTarget.appendChild(fileBrowseButton);
+    pasteTarget.type = 'text';
+    pasteTarget.style.textAlign = 'center';
+    pasteTarget.style.width = '8em';
+    pasteTarget.placeholder = 'ここに貼り付け';
 
-    const p = makeParagraph([dropTarget]);
-    p.style.textAlign = 'center';
+    container.appendChild(makeParagraph([
+      makeSectionLabel('入力画像'),
+      '画像をドロップ、または ',
+      pasteTarget,
+      ' または ',
+      fileBrowseButton,
+      ' してください',
+    ]));
+  }
+
+  {
+    const p = makeParagraph([
+      makeSectionLabel('プリセット'),
+      '選んでください: ',
+      document.createElement('br'),
+      presetRgb565Be,
+      presetRgb332,
+      presetBwVpLf,
+      presetBwHpMf,
+    ]);
     container.appendChild(p);
   }
 
   {
     const p = makeParagraph([
       makeSectionLabel('トリミング'),
-      makeNoWrapSpan(['透明部分の背景色: ', bgColorBox]),
-      makeNoWrapSpan([resetTrimButton]),
+      makePropertyContainer([resetTrimButton]),
+    ]);
+    container.appendChild(p);
+  }
+
+  {
+    trimCanvas.style.width = '100%';
+    trimCanvas.style.height = '400px';
+    trimCanvas.style.boxSizing = 'border-box';
+    trimCanvas.style.border = 'solid 1px #444';
+    trimCanvas.style.backgroundImage = 'url(./img/checker.png)';
+    const p = makeParagraph([trimCanvas]);
+    p.style.textAlign = 'center';
+    container.appendChild(p);
+  }
+
+  {
+    const p = makeParagraph([
+      makeSectionLabel('透過色'),
+      makePropertyContainer(['塗りつぶす: ', bgColorBox]),
     ]);
     container.appendChild(p);
 
@@ -307,21 +351,12 @@ async function main() {
   }
 
   {
-    trimCanvas.style.maxWidth = '100%';
-    trimCanvas.style.boxSizing = 'border-box';
-    trimCanvas.style.backgroundColor = '#444';
-    const p = makeParagraph([trimCanvas]);
-    p.style.textAlign = 'center';
-    container.appendChild(p);
-  }
-
-  {
     const p = makeParagraph([
       makeSectionLabel('色調補正'),
-      makeNoWrapSpan(['ガンマ: ', gammaBox, '%']),
-      makeNoWrapSpan(['明度: ', brightnessBox, '%']),
-      makeNoWrapSpan(['コントラスト: ', contrastBox, '%']),
-      makeNoWrapSpan([invertBox.parentNode]),
+      makePropertyContainer(['ガンマ: ', gammaBox, '%']),
+      makePropertyContainer(['明度: ', brightnessBox, '%']),
+      makePropertyContainer(['コントラスト: ', contrastBox, '%']),
+      makePropertyContainer([invertBox.parentNode]),
     ]);
     container.appendChild(p);
 
@@ -338,8 +373,8 @@ async function main() {
   {
     const p = makeParagraph([
       makeSectionLabel('出力サイズ'),
-      makeNoWrapSpan([widthBox, ' x ', heightBox, ' px']),
-      makeNoWrapSpan(['拡縮方法: ', scalingMethodBox]),
+      makePropertyContainer([widthBox, ' x ', heightBox, ' px']),
+      makePropertyContainer(['拡縮方法: ', scalingMethodBox]),
     ]);
     container.appendChild(p);
 
@@ -351,23 +386,13 @@ async function main() {
         requestQuantize();
       });
     });
-  }
-
-  {
-    const p = makeParagraph([
-      makeSectionLabel('プリセット'),
-      '選んでください: ', document.createElement('br'), presetRgb565Be, ' ',
-      presetRgb332, ' ', presetBwVpLf, ' ', presetBwHpMf,
-      document.createElement('br'), '※選択すると以降の設定は上書きされます'
-    ]);
-    container.appendChild(p);
   }
 
   {
     const p = makeParagraph([
       makeSectionLabel('量子化'),
-      makeNoWrapSpan(['フォーマット: ', formatBox]),
-      makeNoWrapSpan(['ディザリング: ', ditherBox]),
+      makePropertyContainer(['フォーマット: ', formatBox]),
+      makePropertyContainer(['ディザリング: ', ditherBox]),
     ]);
     container.appendChild(p);
 
@@ -382,13 +407,13 @@ async function main() {
   }
 
   {
-    previewCanvas.style.maxWidth = '100%';
-    previewCanvas.style.boxSizing = 'border-box';
-    previewCanvas.style.border = '1px solid #444';
-    previewCanvas.style.backgroundColor = '#444';
+    previewCanvas.style.backgroundImage = 'url(./img/checker.png)';
     quantizeErrorBox.style.color = 'red';
     quantizeErrorBox.style.display = 'none';
     const p = makeParagraph([previewCanvas, quantizeErrorBox]);
+    p.style.height = '400px';
+    p.style.background = '#444';
+    p.style.border = 'solid 1px #444';
     p.style.textAlign = 'center';
     container.appendChild(p);
   }
@@ -396,11 +421,11 @@ async function main() {
   {
     const p = makeParagraph([
       makeSectionLabel('エンコード'),
-      makeNoWrapSpan(['チャネル順: ', channelOrderBox]),
-      makeNoWrapSpan(['ピクセル順: ', pixelOrderBox]),
-      makeNoWrapSpan(['バイト順: ', byteOrderBox]),
-      makeNoWrapSpan(['パッキング方向: ', packingBox]),
-      makeNoWrapSpan(['アドレス方向: ', addressingBox]),
+      makePropertyContainer(['チャネル順: ', channelOrderBox]),
+      makePropertyContainer(['ピクセル順: ', pixelOrderBox]),
+      makePropertyContainer(['バイト順: ', byteOrderBox]),
+      makePropertyContainer(['パッキング方向: ', packingBox]),
+      makePropertyContainer(['アドレス方向: ', addressingBox]),
     ]);
 
     container.appendChild(p);
@@ -417,8 +442,9 @@ async function main() {
 
   {
     const p = makeParagraph([
-      makeSectionLabel('コード生成'), makeNoWrapSpan(['列数: ', codeColsBox]),
-      makeNoWrapSpan(['インデント: ', indentBox])
+      makeSectionLabel('コード生成'),
+      makePropertyContainer(['列数: ', codeColsBox]),
+      makePropertyContainer(['インデント: ', indentBox])
     ]);
 
     container.appendChild(p);
@@ -460,14 +486,26 @@ async function main() {
   });
 
   // ドラッグ & ドロップ
-  dropTarget.addEventListener('dragover', (e) => {
+  document.body.addEventListener('dragover', (e) => {
     e.preventDefault();
+    e.stopPropagation();
+    const items = e.dataTransfer.items;
+    for (const item of items) {
+      if (item.kind === 'file') {
+        dropTarget.style.display = 'block';
+        break;
+      }
+    }
   });
   dropTarget.addEventListener('dragleave', (e) => {
     e.preventDefault();
+    e.stopPropagation();
+    dropTarget.style.display = 'none';
   });
   dropTarget.addEventListener('drop', (e) => {
     e.preventDefault();
+    e.stopPropagation();
+    dropTarget.style.display = 'none';
     const items = e.dataTransfer.items;
     for (const item of items) {
       if (item.kind === 'file') {
@@ -478,7 +516,7 @@ async function main() {
   });
 
   // 貼り付け
-  dropTarget.addEventListener('paste', (e) => {
+  pasteTarget.addEventListener('paste', (e) => {
     const items = e.clipboardData.items;
     for (const item of items) {
       if (item.kind === 'file') {
@@ -486,6 +524,12 @@ async function main() {
         break;
       }
     }
+  });
+  pasteTarget.addEventListener('input', (e) => {
+    pasteTarget.value = '';
+  });
+  pasteTarget.addEventListener('change', (e) => {
+    pasteTarget.value = '';
   });
 
   // トリミング操作
@@ -543,6 +587,15 @@ async function main() {
     trimCanvas.style.cursor = 'default';
     trimCanvas.releasePointerCapture(e.pointerId);
     requestUpdateTrimCanvas();
+  });
+  trimCanvas.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+  });
+  trimCanvas.addEventListener('touchmove', (e) => {
+    e.preventDefault();
+  });
+  trimCanvas.addEventListener('touchend', (e) => {
+    e.preventDefault();
   });
   resetTrimButton.addEventListener('click', () => {
     resetTrim();
@@ -638,9 +691,11 @@ function updateTrimCanvas(): void {
     updateTrimCanvasTimeoutId = -1;
   }
 
-  const rect = container.getBoundingClientRect();
-  trimCanvas.width = rect.width;
-  trimCanvas.height = Math.ceil(rect.width / 2);
+  // キャンバスの論理サイズを見かけ上のサイズに合わせる
+  // ただし枠線は含めない
+  const rect = trimCanvas.getBoundingClientRect();
+  trimCanvas.width = rect.width - 2;
+  trimCanvas.height = rect.height - 2;
 
   const canvasW = trimCanvas.width;
   const canvasH = trimCanvas.height;
@@ -1034,13 +1089,16 @@ function quantize(): void {
     // 小さい画像はプレビューを大きく表示
     {
       const borderWidth = 1;
-      const rect = container.getBoundingClientRect();
+      const rect = previewCanvas.parentElement.getBoundingClientRect();
       const viewW = rect.width - (borderWidth * 2);
-      const viewH = Math.ceil(viewW / 2);
+      const viewH = rect.height - (borderWidth * 2);
       const zoom =
           Math.max(1, Math.floor(Math.min(viewW / outW, viewH / outH)));
-      previewCanvas.style.width = `${outW * zoom + (borderWidth * 2)}px`;
-      previewCanvas.style.height = 'auto';
+      const canvasW = Math.round(outW * zoom);
+      const canvasH = Math.round(outH * zoom);
+      previewCanvas.style.width = `${canvasW}px`;
+      previewCanvas.style.height = `${canvasH}px`;
+      previewCanvas.style.marginTop = `${Math.floor((viewH - canvasH) / 2)}px`;
       previewCanvas.style.imageRendering = 'pixelated';
     }
   } catch (error) {
@@ -1247,4 +1305,8 @@ function generateCode(): void {
 
 document.addEventListener('DOMContentLoaded', async (e) => {
   await main();
+});
+
+window.addEventListener('resize', (e) => {
+  requestUpdateTrimCanvas();
 });

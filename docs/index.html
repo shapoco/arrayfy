@@ -133,12 +133,12 @@
 
     th,
     td {
-      border: solid 1px #68a;
+      border: solid 1px #888;
       padding: 0.2ex 0.5em;
     }
 
     th {
-      background: #def;
+      background: #ddd;
     }
 
     .nowrap {
@@ -155,7 +155,8 @@
       box-sizing: border-box;
       padding: 1ex 1em;
       background: #f8f8f8;
-      max-height: 80vh;
+      max-height: 50vh;
+      min-height: 100px;
       overflow: scroll;
       font-size: 80%;
     }
@@ -166,6 +167,29 @@
       padding: 0px 5px;
       color: #246;
       font-weight: bold;
+    }
+
+    .propertyContainer {
+      margin-right: 10px;
+      padding-right: 10px;
+      border-right: solid 1px #ccc;
+      white-space: nowrap;
+      display: inline-block;
+      line-height: 30px;
+    }
+
+    .presetButton {
+      height: 100px;
+      margin: 10px 5px 10px 0px;
+      padding: 5px 10px;
+      text-align: center;
+      vertical-align: middle;
+      cursor: pointer;
+    }
+
+    .presetButton img {
+      height: 50px;
+      width: auto
     }
   </style>
 
@@ -190,19 +214,26 @@
 
       <h2>概要</h2>
 
-      <p>画像データを LCD や OLED 用の C/C++ 配列コードに変換するツールです。Adafruit/Lovyan GFX 等で使用可能な RGB565
-        形式の画像のほか、SSD1306、SSD1309、Nokia PCD8544 といった縦 8 ピクセルを 1 バイトとする白黒ディスプレイに直接転送可能な形式のデータも作成できます。</p>
-      <p>処理はブラウザ上で行われます。どこかに送信されることはありません。</p>
-
-      <h2>はじめる</h2>
       <p>
-        UI がゴチャゴチャしてますが、最低限以下の 2 ステップで OK です。
+        画像データを LCD や OLED 用の C/C++ 配列コードに変換するツールです。
+      </p>
+      <p>
+        Adafruit/Lovyan GFX 等で使用可能な RGB565/RGB332 形式のほか、
+        SSD1306、SSD1309、Nokia PCD8544 といった縦 8 ピクセルを 1 バイトとする
+        白黒ディスプレイに直接転送可能な形式のデータも作成できます。
+      </p>
+      <p>
+        最低限、以下の 2 ステップで OK です。
       </p>
       <ol>
         <li>画像を読み込む</li>
         <li>プリセットを選ぶ</li>
       </ol>
-      
+      <p>
+        一連の処理はブラウザ上で行われます。勝手にどこかへ送信されることはありません。
+      </p>
+
+      <h2>はじめる</h2>
       <div id="arrayfyContainer"></div>
       <script src="./arrayfy.js?d262b386"></script>
 

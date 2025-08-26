@@ -134,20 +134,15 @@ function makeParagraph(children) {
     toElementArray(children).forEach(function (child) { return p.appendChild(child); });
     return p;
 }
-function makeNoWrapSpan(children) {
+function makePropertyContainer(children) {
     if (children === void 0) { children = []; }
     var span = document.createElement('span');
-    span.style.marginRight = '10px';
-    span.style.paddingRight = '10px';
-    span.style.borderRight = 'solid 1px #ccc';
-    span.style.whiteSpace = 'nowrap';
-    span.style.display = 'inline-block';
-    span.style.lineHeight = '30px';
+    span.classList.add('propertyContainer');
     toElementArray(children).forEach(function (child) { return span.appendChild(child); });
     return span;
 }
 function makeSectionLabel(text) {
-    var span = makeNoWrapSpan([text]);
+    var span = makePropertyContainer([text]);
     span.style.width = '100px';
     span.style.borderStyle = 'none';
     span.style.borderRadius = '5px';
@@ -209,16 +204,17 @@ function makeButton(text) {
     return button;
 }
 function makePresetButton(name, text, description) {
-    var button = makeButton(text);
+    var button = document.createElement('button');
     button.dataset.presetName = name;
-    button.style.height = '50px';
-    button.style.margin = '10px 5px 10px 0px';
-    button.style.padding = '5px 10px';
-    button.style.textAlign = 'center';
-    button.style.verticalAlign = 'middle';
+    button.classList.add('presetButton');
+    var img = document.createElement('img');
+    img.src = "img/preset/".concat(name, ".svg");
     var span = document.createElement('span');
     span.textContent = description;
-    span.style.fontSize = '12px';
+    span.style.fontSize = 'smaller';
+    button.appendChild(img);
+    button.appendChild(document.createElement('br'));
+    button.appendChild(document.createTextNode(text));
     button.appendChild(document.createElement('br'));
     button.appendChild(span);
     button.addEventListener('click', function () {
@@ -226,8 +222,9 @@ function makePresetButton(name, text, description) {
     });
     return button;
 }
-var hiddenFileBox = document.createElement('input');
 var dropTarget = document.createElement('div');
+var hiddenFileBox = document.createElement('input');
+var pasteTarget = document.createElement('input');
 var origCanvas = document.createElement('canvas');
 var bgColorBox = makeTextBox('#000');
 var resetTrimButton = makeButton('範囲をリセット');
@@ -306,6 +303,21 @@ function main() {
         return __generator(this, function (_a) {
             container = document.querySelector('#arrayfyContainer');
             {
+                dropTarget.style.display = 'none';
+                dropTarget.style.position = 'fixed';
+                dropTarget.style.left = '0px';
+                dropTarget.style.top = '0px';
+                dropTarget.style.width = '100%';
+                dropTarget.style.height = '100%';
+                dropTarget.style.background = '#000';
+                dropTarget.style.opacity = '0.5';
+                dropTarget.style.zIndex = '9999';
+                dropTarget.style.textAlign = 'center';
+                dropTarget.style.color = '#FFF';
+                dropTarget.style.paddingTop = 'calc(50vh - 2em)';
+                dropTarget.style.fontSize = '30px';
+                dropTarget.innerHTML = 'ドロップして読み込む';
+                document.body.appendChild(dropTarget);
                 // 「ファイルが選択されていません」の表示が邪魔なので button で wrap する
                 hiddenFileBox.type = 'file';
                 hiddenFileBox.accept = 'image/*';
@@ -314,23 +326,52 @@ function main() {
                 fileBrowseButton.addEventListener('click', function () {
                     hiddenFileBox.click();
                 });
-                dropTarget.style.width = '100%';
-                dropTarget.style.padding = '30px 0px 30px 0px';
-                dropTarget.style.boxSizing = 'border-box';
-                dropTarget.style.borderRadius = '5px';
-                dropTarget.style.backgroundColor = '#cde';
-                dropTarget.style.textAlign = 'center';
-                dropTarget.appendChild(document.createTextNode('ここに画像をドロップ、貼り付け、または '));
-                dropTarget.appendChild(fileBrowseButton);
-                p = makeParagraph([dropTarget]);
-                p.style.textAlign = 'center';
+                pasteTarget.type = 'text';
+                pasteTarget.style.textAlign = 'center';
+                pasteTarget.style.width = '8em';
+                pasteTarget.placeholder = 'ここに貼り付け';
+                container.appendChild(makeParagraph([
+                    makeSectionLabel('入力画像'),
+                    '画像をドロップ、または ',
+                    pasteTarget,
+                    ' または ',
+                    fileBrowseButton,
+                    ' してください',
+                ]));
+            }
+            {
+                p = makeParagraph([
+                    makeSectionLabel('プリセット'),
+                    '選んでください: ',
+                    document.createElement('br'),
+                    presetRgb565Be,
+                    presetRgb332,
+                    presetBwVpLf,
+                    presetBwHpMf,
+                ]);
                 container.appendChild(p);
             }
             {
                 p = makeParagraph([
                     makeSectionLabel('トリミング'),
-                    makeNoWrapSpan(['透明部分の背景色: ', bgColorBox]),
-                    makeNoWrapSpan([resetTrimButton]),
+                    makePropertyContainer([resetTrimButton]),
+                ]);
+                container.appendChild(p);
+            }
+            {
+                trimCanvas.style.width = '100%';
+                trimCanvas.style.height = '400px';
+                trimCanvas.style.boxSizing = 'border-box';
+                trimCanvas.style.border = 'solid 1px #444';
+                trimCanvas.style.backgroundImage = 'url(./img/checker.png)';
+                p = makeParagraph([trimCanvas]);
+                p.style.textAlign = 'center';
+                container.appendChild(p);
+            }
+            {
+                p = makeParagraph([
+                    makeSectionLabel('透過色'),
+                    makePropertyContainer(['塗りつぶす: ', bgColorBox]),
                 ]);
                 container.appendChild(p);
                 p.querySelectorAll('input, button').forEach(function (el) {
@@ -345,20 +386,12 @@ function main() {
                 });
             }
             {
-                trimCanvas.style.maxWidth = '100%';
-                trimCanvas.style.boxSizing = 'border-box';
-                trimCanvas.style.backgroundColor = '#444';
-                p = makeParagraph([trimCanvas]);
-                p.style.textAlign = 'center';
-                container.appendChild(p);
-            }
-            {
                 p = makeParagraph([
                     makeSectionLabel('色調補正'),
-                    makeNoWrapSpan(['ガンマ: ', gammaBox, '%']),
-                    makeNoWrapSpan(['明度: ', brightnessBox, '%']),
-                    makeNoWrapSpan(['コントラスト: ', contrastBox, '%']),
-                    makeNoWrapSpan([invertBox.parentNode]),
+                    makePropertyContainer(['ガンマ: ', gammaBox, '%']),
+                    makePropertyContainer(['明度: ', brightnessBox, '%']),
+                    makePropertyContainer(['コントラスト: ', contrastBox, '%']),
+                    makePropertyContainer([invertBox.parentNode]),
                 ]);
                 container.appendChild(p);
                 p.querySelectorAll('input, select').forEach(function (el) {
@@ -373,8 +406,8 @@ function main() {
             {
                 p = makeParagraph([
                     makeSectionLabel('出力サイズ'),
-                    makeNoWrapSpan([widthBox, ' x ', heightBox, ' px']),
-                    makeNoWrapSpan(['拡縮方法: ', scalingMethodBox]),
+                    makePropertyContainer([widthBox, ' x ', heightBox, ' px']),
+                    makePropertyContainer(['拡縮方法: ', scalingMethodBox]),
                 ]);
                 container.appendChild(p);
                 p.querySelectorAll('input, select').forEach(function (el) {
@@ -385,21 +418,12 @@ function main() {
                         requestQuantize();
                     });
                 });
-            }
-            {
-                p = makeParagraph([
-                    makeSectionLabel('プリセット'),
-                    '選んでください: ', document.createElement('br'), presetRgb565Be, ' ',
-                    presetRgb332, ' ', presetBwVpLf, ' ', presetBwHpMf,
-                    document.createElement('br'), '※選択すると以降の設定は上書きされます'
-                ]);
-                container.appendChild(p);
             }
             {
                 p = makeParagraph([
                     makeSectionLabel('量子化'),
-                    makeNoWrapSpan(['フォーマット: ', formatBox]),
-                    makeNoWrapSpan(['ディザリング: ', ditherBox]),
+                    makePropertyContainer(['フォーマット: ', formatBox]),
+                    makePropertyContainer(['ディザリング: ', ditherBox]),
                 ]);
                 container.appendChild(p);
                 p.querySelectorAll('input, select').forEach(function (el) {
@@ -412,24 +436,24 @@ function main() {
                 });
             }
             {
-                previewCanvas.style.maxWidth = '100%';
-                previewCanvas.style.boxSizing = 'border-box';
-                previewCanvas.style.border = '1px solid #444';
-                previewCanvas.style.backgroundColor = '#444';
+                previewCanvas.style.backgroundImage = 'url(./img/checker.png)';
                 quantizeErrorBox.style.color = 'red';
                 quantizeErrorBox.style.display = 'none';
                 p = makeParagraph([previewCanvas, quantizeErrorBox]);
+                p.style.height = '400px';
+                p.style.background = '#444';
+                p.style.border = 'solid 1px #444';
                 p.style.textAlign = 'center';
                 container.appendChild(p);
             }
             {
                 p = makeParagraph([
                     makeSectionLabel('エンコード'),
-                    makeNoWrapSpan(['チャネル順: ', channelOrderBox]),
-                    makeNoWrapSpan(['ピクセル順: ', pixelOrderBox]),
-                    makeNoWrapSpan(['バイト順: ', byteOrderBox]),
-                    makeNoWrapSpan(['パッキング方向: ', packingBox]),
-                    makeNoWrapSpan(['アドレス方向: ', addressingBox]),
+                    makePropertyContainer(['チャネル順: ', channelOrderBox]),
+                    makePropertyContainer(['ピクセル順: ', pixelOrderBox]),
+                    makePropertyContainer(['バイト順: ', byteOrderBox]),
+                    makePropertyContainer(['パッキング方向: ', packingBox]),
+                    makePropertyContainer(['アドレス方向: ', addressingBox]),
                 ]);
                 container.appendChild(p);
                 p.querySelectorAll('input, select').forEach(function (el) {
@@ -443,8 +467,9 @@ function main() {
             }
             {
                 p = makeParagraph([
-                    makeSectionLabel('コード生成'), makeNoWrapSpan(['列数: ', codeColsBox]),
-                    makeNoWrapSpan(['インデント: ', indentBox])
+                    makeSectionLabel('コード生成'),
+                    makePropertyContainer(['列数: ', codeColsBox]),
+                    makePropertyContainer(['インデント: ', indentBox])
                 ]);
                 container.appendChild(p);
                 p.querySelectorAll('input, select').forEach(function (el) {
@@ -480,21 +505,16 @@ function main() {
                 }
             });
             // ドラッグ & ドロップ
-            dropTarget.addEventListener('dragover', function (e) {
-                e.preventDefault();
-            });
-            dropTarget.addEventListener('dragleave', function (e) {
-                e.preventDefault();
-            });
-            dropTarget.addEventListener('drop', function (e) {
+            document.body.addEventListener('dragover', function (e) {
                 var e_2, _a;
                 e.preventDefault();
+                e.stopPropagation();
                 var items = e.dataTransfer.items;
                 try {
                     for (var items_1 = __values(items), items_1_1 = items_1.next(); !items_1_1.done; items_1_1 = items_1.next()) {
                         var item = items_1_1.value;
                         if (item.kind === 'file') {
-                            loadFile(item.getAsFile());
+                            dropTarget.style.display = 'block';
                             break;
                         }
                     }
@@ -507,10 +527,17 @@ function main() {
                     finally { if (e_2) throw e_2.error; }
                 }
             });
-            // 貼り付け
-            dropTarget.addEventListener('paste', function (e) {
+            dropTarget.addEventListener('dragleave', function (e) {
+                e.preventDefault();
+                e.stopPropagation();
+                dropTarget.style.display = 'none';
+            });
+            dropTarget.addEventListener('drop', function (e) {
                 var e_3, _a;
-                var items = e.clipboardData.items;
+                e.preventDefault();
+                e.stopPropagation();
+                dropTarget.style.display = 'none';
+                var items = e.dataTransfer.items;
                 try {
                     for (var items_2 = __values(items), items_2_1 = items_2.next(); !items_2_1.done; items_2_1 = items_2.next()) {
                         var item = items_2_1.value;
@@ -527,6 +554,33 @@ function main() {
                     }
                     finally { if (e_3) throw e_3.error; }
                 }
+            });
+            // 貼り付け
+            pasteTarget.addEventListener('paste', function (e) {
+                var e_4, _a;
+                var items = e.clipboardData.items;
+                try {
+                    for (var items_3 = __values(items), items_3_1 = items_3.next(); !items_3_1.done; items_3_1 = items_3.next()) {
+                        var item = items_3_1.value;
+                        if (item.kind === 'file') {
+                            loadFile(item.getAsFile());
+                            break;
+                        }
+                    }
+                }
+                catch (e_4_1) { e_4 = { error: e_4_1 }; }
+                finally {
+                    try {
+                        if (items_3_1 && !items_3_1.done && (_a = items_3.return)) _a.call(items_3);
+                    }
+                    finally { if (e_4) throw e_4.error; }
+                }
+            });
+            pasteTarget.addEventListener('input', function (e) {
+                pasteTarget.value = '';
+            });
+            pasteTarget.addEventListener('change', function (e) {
+                pasteTarget.value = '';
             });
             // トリミング操作
             trimCanvas.addEventListener('pointermove', function (e) {
@@ -584,6 +638,15 @@ function main() {
                 trimCanvas.style.cursor = 'default';
                 trimCanvas.releasePointerCapture(e.pointerId);
                 requestUpdateTrimCanvas();
+            });
+            trimCanvas.addEventListener('touchstart', function (e) {
+                e.preventDefault();
+            });
+            trimCanvas.addEventListener('touchmove', function (e) {
+                e.preventDefault();
+            });
+            trimCanvas.addEventListener('touchend', function (e) {
+                e.preventDefault();
             });
             resetTrimButton.addEventListener('click', function () {
                 resetTrim();
@@ -677,9 +740,11 @@ function updateTrimCanvas() {
         clearTimeout(updateTrimCanvasTimeoutId);
         updateTrimCanvasTimeoutId = -1;
     }
-    var rect = container.getBoundingClientRect();
-    trimCanvas.width = rect.width;
-    trimCanvas.height = Math.ceil(rect.width / 2);
+    // キャンバスの論理サイズを見かけ上のサイズに合わせる
+    // ただし枠線は含めない
+    var rect = trimCanvas.getBoundingClientRect();
+    trimCanvas.width = rect.width - 2;
+    trimCanvas.height = rect.height - 2;
     var canvasW = trimCanvas.width;
     var canvasH = trimCanvas.height;
     var origW = origCanvas.width;
@@ -734,7 +799,7 @@ function updateTrimCanvas() {
     }
 }
 function loadPreset(name) {
-    var e_4, _a;
+    var e_5, _a;
     var PRESETS = {
         rgb565_be: { fmt: 'rgb565', chOrder: 'msbRed', byteOrder: 'be', addrDir: 'hori' },
         rgb332: { fmt: 'rgb332', chOrder: 'msbRed', addrDir: 'hori' },
@@ -771,12 +836,12 @@ function loadPreset(name) {
             }
         }
     }
-    catch (e_4_1) { e_4 = { error: e_4_1 }; }
+    catch (e_5_1) { e_5 = { error: e_5_1 }; }
     finally {
         try {
             if (_c && !_c.done && (_a = _b.return)) _a.call(_b);
         }
-        finally { if (e_4) throw e_4.error; }
+        finally { if (e_5) throw e_5.error; }
     }
     requestQuantize();
 }
@@ -1052,12 +1117,15 @@ function quantize() {
         // 小さい画像はプレビューを大きく表示
         {
             var borderWidth = 1;
-            var rect = container.getBoundingClientRect();
+            var rect = previewCanvas.parentElement.getBoundingClientRect();
             var viewW = rect.width - (borderWidth * 2);
-            var viewH = Math.ceil(viewW / 2);
+            var viewH = rect.height - (borderWidth * 2);
             var zoom_1 = Math.max(1, Math.floor(Math.min(viewW / outW, viewH / outH)));
-            previewCanvas.style.width = "".concat(outW * zoom_1 + (borderWidth * 2), "px");
-            previewCanvas.style.height = 'auto';
+            var canvasW = Math.round(outW * zoom_1);
+            var canvasH = Math.round(outH * zoom_1);
+            previewCanvas.style.width = "".concat(canvasW, "px");
+            previewCanvas.style.height = "".concat(canvasH, "px");
+            previewCanvas.style.marginTop = "".concat(Math.floor((viewH - canvasH) / 2), "px");
             previewCanvas.style.imageRendering = 'pixelated';
         }
     }
@@ -1253,3 +1321,6 @@ document.addEventListener('DOMContentLoaded', function (e) { return __awaiter(_t
         }
     });
 }); });
+window.addEventListener('resize', function (e) {
+    requestUpdateTrimCanvas();
+});
