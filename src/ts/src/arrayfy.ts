@@ -960,7 +960,7 @@ function quantize(): void {
           val = Math.pow(val, 1 / gamma);
           val = ((val * brightness) - 0.5) * contrast + 0.5;
           if (invert) val = 1 - val;
-          normChannels[ch][i] = val;
+          normChannels[ch][i] = Math.max(0, Math.min(1, val));
         }
       }
 
