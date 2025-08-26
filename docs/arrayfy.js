@@ -437,6 +437,7 @@ function main() {
             }
             {
                 previewCanvas.style.backgroundImage = 'url(./img/checker.png)';
+                previewCanvas.style.display = 'none';
                 quantizeErrorBox.style.color = 'red';
                 quantizeErrorBox.style.display = 'none';
                 p = makeParagraph([previewCanvas, quantizeErrorBox]);

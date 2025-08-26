@@ -408,6 +408,7 @@ async function main() {
 
   {
     previewCanvas.style.backgroundImage = 'url(./img/checker.png)';
+    previewCanvas.style.display = 'none';
     quantizeErrorBox.style.color = 'red';
     quantizeErrorBox.style.display = 'none';
     const p = makeParagraph([previewCanvas, quantizeErrorBox]);
