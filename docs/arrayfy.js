@@ -75,29 +75,6 @@ var ColorSpace;
     ColorSpace[ColorSpace["GRAYSCALE"] = 0] = "GRAYSCALE";
     ColorSpace[ColorSpace["RGB"] = 1] = "RGB";
 })(ColorSpace || (ColorSpace = {}));
-var ImageFormat = /** @class */ (function () {
-    function ImageFormat() {
-        this.colorSpace = ColorSpace.GRAYSCALE;
-        this.channelDepth = [1];
-    }
-    ImageFormat.prototype.toString = function () {
-        var ret = '';
-        switch (this.colorSpace) {
-            case ColorSpace.GRAYSCALE:
-                if (this.channelDepth[0] == 1) {
-                    return 'B/W';
-                }
-                else {
-                    return 'Gray' + this.channelDepth[0];
-                }
-            case ColorSpace.RGB:
-                return 'RGB' + this.channelDepth.join('');
-            default:
-                throw new Error('Unknown color space');
-        }
-    };
-    return ImageFormat;
-}());
 var Point = /** @class */ (function () {
     function Point(x, y) {
         this.x = x;
@@ -113,6 +90,125 @@ var Rect = /** @class */ (function () {
         this.height = height;
     }
     return Rect;
+}());
+var PixelFormat = /** @class */ (function () {
+    function PixelFormat() {
+        this.colorSpace = ColorSpace.GRAYSCALE;
+        this.channelDepth = [1];
+    }
+    PixelFormat.prototype.toString = function () {
+        var ret = '';
+        switch (this.colorSpace) {
+            case ColorSpace.GRAYSCALE:
+                if (this.channelDepth[0] == 1) {
+                    return 'B/W';
+                }
+                else {
+                    return 'Gray' + this.channelDepth[0];
+                }
+            case ColorSpace.RGB:
+                return 'RGB' + this.channelDepth.join('');
+            default:
+                throw new Error('Unknown color space');
+        }
+    };
+    Object.defineProperty(PixelFormat.prototype, "numChannels", {
+        get: function () {
+            return this.channelDepth.length;
+        },
+        enumerable: false,
+        configurable: true
+    });
+    return PixelFormat;
+}());
+var Palette = /** @class */ (function () {
+    function Palette(format, equalDivision) {
+        this.format = format;
+        this.equalDivision = equalDivision;
+        this.inMin = new Float32Array(format.numChannels);
+        this.inMax = new Float32Array(format.numChannels);
+        this.outMax = new Uint8Array(format.numChannels);
+        for (var ch = 0; ch < format.numChannels; ch++) {
+            var numLevel = 1 << format.channelDepth[ch];
+            this.inMin[ch] = equalDivision ? (1 / (numLevel * 2)) : 0;
+            this.inMax[ch] =
+                equalDivision ? ((numLevel * 2 - 1) / (numLevel * 2)) : 1;
+            this.outMax[ch] = numLevel - 1;
+        }
+    }
+    Palette.prototype.nearest = function (src, srcOffset, dest, destOffset, error) {
+        for (var ch = 0; ch < this.format.numChannels; ch++) {
+            var inNorm = src[srcOffset + ch];
+            var inMod = clip(0, 1, (inNorm - this.inMin[ch]) / (this.inMax[ch] - this.inMin[ch]));
+            var out = Math.round(this.outMax[ch] * inMod);
+            dest[destOffset + ch] = out;
+            var outNorm = out / this.outMax[ch];
+            error[ch] = inNorm - outNorm;
+        }
+    };
+    return Palette;
+}());
+var NormalizedImage = /** @class */ (function () {
+    function NormalizedImage(format, palette, width, height, data) {
+        this.format = format;
+        this.palette = palette;
+        this.width = width;
+        this.height = height;
+        this.data = data;
+    }
+    NormalizedImage.prototype.getMinMax = function () {
+        var min = Infinity;
+        var max = -Infinity;
+        for (var i = 0; i < this.data.length; i++) {
+            var value = this.data[i];
+            if (value < min)
+                min = value;
+            if (value > max)
+                max = value;
+        }
+        return [min, max];
+    };
+    NormalizedImage.prototype.diffuseError = function (error, x, y, forward) {
+        var numCh = this.format.numChannels;
+        var w = this.width;
+        var h = this.height;
+        var stride = this.width * numCh;
+        for (var ch = 0; ch < numCh; ch++) {
+            var i = y * stride + x * numCh + ch;
+            var e = error[ch];
+            if (e == 0)
+                continue;
+            if (forward) {
+                if (x < w - 1) {
+                    this.data[i + numCh] += e * 7 / 16;
+                }
+                if (y < h - 1) {
+                    if (x > 0) {
+                        this.data[i + stride - numCh] += e * 3 / 16;
+                    }
+                    this.data[i + stride] += e * 5 / 16;
+                    if (x < w - 1) {
+                        this.data[i + stride + numCh] += e * 1 / 16;
+                    }
+                }
+            }
+            else {
+                if (x > 0) {
+                    this.data[i - numCh] += e * 7 / 16;
+                }
+                if (y < h - 1) {
+                    if (x < w - 1) {
+                        this.data[i + stride + numCh] += e * 3 / 16;
+                    }
+                    this.data[i + stride] += e * 5 / 16;
+                    if (x > 0) {
+                        this.data[i + stride - numCh] += e * 1 / 16;
+                    }
+                }
+            }
+        }
+    };
+    return NormalizedImage;
 }());
 function toElementArray(children) {
     if (children === void 0) { children = []; }
@@ -303,7 +399,7 @@ var generateCodeTimeoutId = -1;
 var worldX0 = 0, worldY0 = 0, zoom = 1;
 var trimL = 0, trimT = 0, trimR = 1, trimB = 1;
 var trimUiState = TrimState.IDLE;
-var imageCacheFormat = new ImageFormat();
+var imageCacheFormat = new PixelFormat();
 var imageCacheData = [null, null, null, null];
 function main() {
     return __awaiter(this, void 0, void 0, function () {
@@ -951,7 +1047,7 @@ function quantize() {
                 outCtx.drawImage(origCanvas, trimL, trimT, srcW, srcH, dx, dy, dw, dh);
             }
         }
-        var fmt = new ImageFormat();
+        var fmt = new PixelFormat();
         switch (formatBox.value) {
             case 'rgb565':
                 fmt.colorSpace = ColorSpace.RGB;
@@ -984,8 +1080,8 @@ function quantize() {
             default:
                 throw new Error('Unknown image format');
         }
-        // 均等割りはチャンネル深度が2以上でないと意味がないので無効化
         var maxChannelDepth = 0;
+        var equalDivision = false;
         try {
             for (var _b = __values(fmt.channelDepth), _c = _b.next(); !_c.done; _c = _b.next()) {
                 var depth = _c.value;
@@ -1001,7 +1097,17 @@ function quantize() {
             }
             finally { if (e_6) throw e_6.error; }
         }
-        roundMethodBox.disabled = (maxChannelDepth <= 1);
+        if (maxChannelDepth > 1) {
+            roundMethodBox.disabled = false;
+            equalDivision = roundMethodBox.value === 'equalDivision';
+        }
+        else {
+            // 均等割りはチャンネル深度が2以上でないと意味がないので無効化
+            roundMethodBox.disabled = true;
+        }
+        var palette = new Palette(fmt, equalDivision);
+        var normData = new Float32Array(outW * outH * fmt.numChannels);
+        var norm = new NormalizedImage(fmt, palette, outW, outH, normData);
         // 量子化の適用
         {
             var previewCtx = previewCanvas.getContext('2d', { willReadFrequently: true });
@@ -1009,11 +1115,9 @@ function quantize() {
             var srcRgbData = previewImageData.data;
             var previewData = new Uint8Array(srcRgbData.length);
             var numPixels = outW * outH;
-            var numChannels = fmt.colorSpace === ColorSpace.GRAYSCALE ? 1 : 3;
-            var normChannels = [];
+            var numCh = fmt.colorSpace === ColorSpace.GRAYSCALE ? 1 : 3;
             var outData = [];
-            for (var i = 0; i < numChannels; i++) {
-                normChannels.push(new Float32Array(numPixels));
+            for (var i = 0; i < numCh; i++) {
                 outData.push(new Uint8Array(numPixels));
             }
             // 正規化 + 自動ガンマ補正用の値収集
@@ -1027,175 +1131,124 @@ function quantize() {
                 histogram[Math.round(gray * (HISTOGRAM_SIZE - 1))]++;
                 switch (fmt.colorSpace) {
                     case ColorSpace.GRAYSCALE:
-                        normChannels[0][i] = gray;
+                        norm.data[i * numCh] = gray;
                         break;
                     case ColorSpace.RGB:
-                        normChannels[0][i] = r;
-                        normChannels[1][i] = g;
-                        normChannels[2][i] = b;
+                        norm.data[i * numCh + 0] = r;
+                        norm.data[i * numCh + 1] = g;
+                        norm.data[i * numCh + 2] = b;
                         break;
                     default:
                         throw new Error('Unknown color space');
                 }
             }
-            // 輝度自動補正用の値収集
-            var chMin = 1;
-            var chMax = 0;
-            for (var ch = 0; ch < numChannels; ch++) {
-                for (var i = 0; i < numPixels; i++) {
-                    var val = normChannels[ch][i];
-                    if (val < chMin)
-                        chMin = val;
-                    if (val > chMax)
-                        chMax = val;
-                }
-            }
             // ガンマ補正
-            var gamma = 1;
-            if (gammaBox.value) {
-                gamma = parseFloat(gammaBox.value) / 100;
-                gammaBox.placeholder = '';
-            }
-            else {
-                gamma = correctGamma(histogram);
-            }
-            gamma = clip(0.01, 5, gamma);
-            gammaBox.placeholder = '(' + Math.round(gamma * 100) + ')';
-            if (gamma != 1) {
-                chMin = 255;
-                chMax = 0;
-                for (var ch = 0; ch < numChannels; ch++) {
-                    for (var i = 0; i < numPixels; i++) {
-                        var val = Math.pow(normChannels[ch][i], 1 / gamma);
-                        normChannels[ch][i] = val;
-                        if (val < chMin)
-                            chMin = val;
-                        if (val > chMax)
-                            chMax = val;
+            {
+                var gamma = 1;
+                if (gammaBox.value) {
+                    gamma = parseFloat(gammaBox.value) / 100;
+                    gammaBox.placeholder = '';
+                }
+                else {
+                    gamma = correctGamma(histogram);
+                }
+                gamma = clip(0.01, 5, gamma);
+                gammaBox.placeholder = '(' + Math.round(gamma * 100) + ')';
+                if (gamma != 1) {
+                    for (var i = 0; i < norm.data.length; i++) {
+                        var val = Math.pow(norm.data[i], 1 / gamma);
+                        norm.data[i] = val;
                     }
                 }
             }
             // 輝度補正
-            var brightness = 0;
-            if (brightnessBox.value) {
-                brightness = parseFloat(brightnessBox.value) / 255;
-                brightnessBox.placeholder = '';
-            }
-            else {
-                brightness = 0.5 - (chMin + chMax) / 2;
-            }
-            brightness = clip(-1, 1, brightness);
-            brightnessBox.placeholder = '(' + Math.round(brightness * 255) + ')';
-            if (brightness != 0) {
-                chMin = 255;
-                chMax = 0;
-                for (var ch = 0; ch < numChannels; ch++) {
-                    for (var i = 0; i < numPixels; i++) {
-                        var val = clip(0, 1, normChannels[ch][i] + brightness);
-                        normChannels[ch][i] = val;
-                        if (val < chMin)
-                            chMin = val;
-                        if (val > chMax)
-                            chMax = val;
+            {
+                var brightness = 0;
+                if (brightnessBox.value) {
+                    brightness = parseFloat(brightnessBox.value) / 255;
+                    brightnessBox.placeholder = '';
+                }
+                else {
+                    var _d = __read(norm.getMinMax(), 2), chMin = _d[0], chMax = _d[1];
+                    brightness = 0.5 - (chMin + chMax) / 2;
+                }
+                brightness = clip(-1, 1, brightness);
+                brightnessBox.placeholder = '(' + Math.round(brightness * 255) + ')';
+                if (brightness != 0) {
+                    for (var i = 0; i < norm.data.length; i++) {
+                        norm.data[i] = clip(0, 1, norm.data[i] + brightness);
                     }
                 }
             }
             // コントラスト補正
-            var contrast = 1;
-            if (contrastBox.value) {
-                contrast = parseFloat(contrastBox.value) / 100;
-                contrastBox.placeholder = '';
-            }
-            else {
-                var middle = (chMin + chMax) / 2;
-                if (middle < 0.5 && chMin < middle) {
-                    contrast = 0.5 / (middle - chMin);
+            {
+                var contrast = 1;
+                if (contrastBox.value) {
+                    contrast = parseFloat(contrastBox.value) / 100;
+                    contrastBox.placeholder = '';
                 }
-                else if (middle > 0.5 && chMax > middle) {
-                    contrast = 0.5 / (chMax - middle);
+                else {
+                    var _e = __read(norm.getMinMax(), 2), chMin = _e[0], chMax = _e[1];
+                    var middle = (chMin + chMax) / 2;
+                    if (middle < 0.5 && chMin < middle) {
+                        contrast = 0.5 / (middle - chMin);
+                    }
+                    else if (middle > 0.5 && chMax > middle) {
+                        contrast = 0.5 / (chMax - middle);
+                    }
                 }
-            }
-            contrast = clip(0.01, 10, contrast);
-            contrastBox.placeholder = '(' + Math.round(contrast * 100) + ')';
-            if (contrast != 1) {
-                for (var ch = 0; ch < numChannels; ch++) {
-                    for (var i = 0; i < numPixels; i++) {
-                        var val = (normChannels[ch][i] - 0.5) * contrast + 0.5;
-                        normChannels[ch][i] = clip(0, 1, val);
+                contrast = clip(0.01, 10, contrast);
+                contrastBox.placeholder = '(' + Math.round(contrast * 100) + ')';
+                if (contrast != 1) {
+                    for (var i = 0; i < norm.data.length; i++) {
+                        norm.data[i] = clip(0, 1, (norm.data[i] - 0.5) * contrast + 0.5);
                     }
                 }
             }
             // 階調反転
             if (invertBox.checked) {
-                for (var ch = 0; ch < numChannels; ch++) {
-                    for (var i = 0; i < numPixels; i++) {
-                        normChannels[ch][i] = 1 - normChannels[ch][i];
-                    }
+                for (var i = 0; i < norm.data.length; i++) {
+                    norm.data[i] = 1 - norm.data[i];
                 }
             }
             // 量子化
             var diffusion = ditherBox.value === 'diffusion';
-            var equalDivision = !roundMethodBox.disabled && roundMethodBox.value === 'equalDivision';
-            for (var ch = 0; ch < numChannels; ch++) {
-                var norm = normChannels[ch];
-                var numLevel = 1 << fmt.channelDepth[ch];
-                var inMin = equalDivision ? (1 / (numLevel * 2)) : 0;
-                var inMax = equalDivision ? ((numLevel * 2 - 1) / (numLevel * 2)) : 1;
-                var outMax = numLevel - 1;
-                for (var y = 0; y < outH; y++) {
-                    for (var ix = 0; ix < outW; ix++) {
-                        var fwd = y % 2 == 0;
-                        var x = fwd ? ix : (outW - 1 - ix);
-                        var i = (y * outW + x);
-                        var normIn = norm[i];
-                        // 量子化
-                        var normMod = clip(0, 1, (normIn - inMin) / (inMax - inMin));
-                        var out = Math.round(outMax * normMod);
-                        var normOut = out / outMax;
-                        outData[ch][i] = out;
-                        // プレビューの色生成
-                        if (fmt.colorSpace === ColorSpace.GRAYSCALE) {
-                            previewData[i * 4] = previewData[i * 4 + 1] =
-                                previewData[i * 4 + 2] = Math.round(out * 255 / outMax);
+            var palette_1 = new Palette(fmt, equalDivision);
+            var out = new Uint8Array(numCh);
+            var error = new Float32Array(numCh);
+            for (var y = 0; y < outH; y++) {
+                for (var ix = 0; ix < outW; ix++) {
+                    // 誤差拡散をジグザグに行うため
+                    // ライン毎にスキャン方向を変える
+                    var fwd = y % 2 == 0;
+                    var x = fwd ? ix : (outW - 1 - ix);
+                    // パレットから最も近い色を選択
+                    var iPix = (y * outW + x);
+                    palette_1.nearest(norm.data, iPix * numCh, out, 0, error);
+                    // 出力
+                    for (var ch = 0; ch < numCh; ch++) {
+                        outData[ch][iPix] = out[ch];
+                    }
+                    // プレビュー用の色生成
+                    if (fmt.colorSpace === ColorSpace.GRAYSCALE) {
+                        var gray = Math.round(out[0] * 255 / palette_1.outMax[0]);
+                        for (var ch = 0; ch < 3; ch++) {
+                            previewData[iPix * 4 + ch] = gray;
                         }
-                        else {
-                            previewData[i * 4 + ch] = Math.round(out * 255 / outMax);
+                    }
+                    else {
+                        for (var ch = 0; ch < 3; ch++) {
+                            var outMax = palette_1.outMax[ch];
+                            previewData[iPix * 4 + ch] = Math.round(out[ch] * 255 / outMax);
                         }
-                        var error = normIn - normOut;
-                        if (diffusion && error != 0) {
-                            if (fwd) {
-                                if (x < outW - 1) {
-                                    norm[i + 1] += error * 7 / 16;
-                                }
-                                if (y < outH - 1) {
-                                    if (x > 0) {
-                                        norm[i + outW - 1] += error * 3 / 16;
-                                    }
-                                    norm[i + outW] += error * 5 / 16;
-                                    if (x < outW - 1) {
-                                        norm[i + outW + 1] += error * 1 / 16;
-                                    }
-                                }
-                            }
-                            else {
-                                if (x > 0) {
-                                    norm[i - 1] += error * 7 / 16;
-                                }
-                                if (y < outH - 1) {
-                                    if (x < outW - 1) {
-                                        norm[i + outW + 1] += error * 3 / 16;
-                                    }
-                                    norm[i + outW] += error * 5 / 16;
-                                    if (x > 0) {
-                                        norm[i + outW - 1] += error * 1 / 16;
-                                    }
-                                }
-                            }
-                        } // if diffusion
-                    } // for x
-                } // for y
-            } // for ch
-            // アルファチャンネル
+                    }
+                    if (diffusion) {
+                        // 誤差拡散
+                        norm.diffuseError(error, x, y, fwd);
+                    }
+                } // for ix
+            } // for y
+            // プレビューを不透明化
             for (var i = 0; i < numPixels; i++) {
                 previewData[i * 4 + 3] = 255;
             }

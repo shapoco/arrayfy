@@ -12,7 +12,17 @@ enum ColorSpace {
   RGB = 1,
 }
 
-class ImageFormat {
+class Point {
+  constructor(public x: number, public y: number) {}
+}
+
+class Rect {
+  constructor(
+      public x: number, public y: number, public width: number,
+      public height: number) {}
+}
+
+class PixelFormat {
   public colorSpace: ColorSpace;
   public channelDepth: number[];
 
@@ -36,18 +46,99 @@ class ImageFormat {
         throw new Error('Unknown color space');
     }
   }
+
+  get numChannels(): number {
+    return this.channelDepth.length;
+  }
 }
 
-class Point {
-  constructor(public x: number, public y: number) {}
+class Palette {
+  public inMin: Float32Array;
+  public inMax: Float32Array;
+  public outMax: Uint8Array;
+  constructor(public format: PixelFormat, public equalDivision: boolean) {
+    this.inMin = new Float32Array(format.numChannels);
+    this.inMax = new Float32Array(format.numChannels);
+    this.outMax = new Uint8Array(format.numChannels);
+    for (let ch = 0; ch < format.numChannels; ch++) {
+      const numLevel = 1 << format.channelDepth[ch];
+      this.inMin[ch] = equalDivision ? (1 / (numLevel * 2)) : 0;
+      this.inMax[ch] =
+          equalDivision ? ((numLevel * 2 - 1) / (numLevel * 2)) : 1;
+      this.outMax[ch] = numLevel - 1;
+    }
+  }
+
+  nearest(
+      src: Float32Array, srcOffset: number, dest: Uint8Array,
+      destOffset: number, error: Float32Array): void {
+    for (let ch = 0; ch < this.format.numChannels; ch++) {
+      const inNorm = src[srcOffset + ch];
+      const inMod = clip(
+          0, 1, (inNorm - this.inMin[ch]) / (this.inMax[ch] - this.inMin[ch]));
+      const out = Math.round(this.outMax[ch] * inMod);
+      dest[destOffset + ch] = out;
+      const outNorm = out / this.outMax[ch];
+      error[ch] = inNorm - outNorm;
+    }
+  }
 }
 
-class Rect {
+class NormalizedImage {
   constructor(
-      public x: number, public y: number, public width: number,
-      public height: number) {}
-}
+      public format: PixelFormat, public palette: Palette, public width: number,
+      public height: number, public data: Float32Array) {}
 
+  getMinMax(): [number, number] {
+    let min = Infinity;
+    let max = -Infinity;
+    for (let i = 0; i < this.data.length; i++) {
+      const value = this.data[i];
+      if (value < min) min = value;
+      if (value > max) max = value;
+    }
+    return [min, max];
+  }
+
+  diffuseError(error: Float32Array, x: number, y: number, forward: boolean) {
+    const numCh = this.format.numChannels;
+    const w = this.width;
+    const h = this.height;
+    const stride = this.width * numCh;
+    for (let ch = 0; ch < numCh; ch++) {
+      const i = y * stride + x * numCh + ch;
+      const e = error[ch];
+      if (e == 0) continue;
+      if (forward) {
+        if (x < w - 1) {
+          this.data[i + numCh] += e * 7 / 16;
+        }
+        if (y < h - 1) {
+          if (x > 0) {
+            this.data[i + stride - numCh] += e * 3 / 16;
+          }
+          this.data[i + stride] += e * 5 / 16;
+          if (x < w - 1) {
+            this.data[i + stride + numCh] += e * 1 / 16;
+          }
+        }
+      } else {
+        if (x > 0) {
+          this.data[i - numCh] += e * 7 / 16;
+        }
+        if (y < h - 1) {
+          if (x < w - 1) {
+            this.data[i + stride + numCh] += e * 3 / 16;
+          }
+          this.data[i + stride] += e * 5 / 16;
+          if (x > 0) {
+            this.data[i + stride - numCh] += e * 1 / 16;
+          }
+        }
+      }
+    }
+  }
+}
 
 function toElementArray(children = []): HTMLElement[] {
   for (let i = 0; i < children.length; i++) {
@@ -264,7 +355,7 @@ let trimL = 0, trimT = 0, trimR = 1, trimB = 1;
 
 let trimUiState = TrimState.IDLE;
 
-let imageCacheFormat = new ImageFormat();
+let imageCacheFormat = new PixelFormat();
 let imageCacheData: Uint8Array[] = [null, null, null, null];
 
 async function main() {
@@ -908,7 +999,7 @@ function quantize(): void {
       }
     }
 
-    const fmt = new ImageFormat();
+    const fmt = new PixelFormat();
     switch (formatBox.value) {
       case 'rgb565':
         fmt.colorSpace = ColorSpace.RGB;
@@ -942,14 +1033,24 @@ function quantize(): void {
         throw new Error('Unknown image format');
     }
 
-    // 均等割りはチャンネル深度が2以上でないと意味がないので無効化
     let maxChannelDepth = 0;
+    let equalDivision = false;
     for (const depth of fmt.channelDepth) {
       if (depth > maxChannelDepth) {
         maxChannelDepth = depth;
       }
     }
-    roundMethodBox.disabled = (maxChannelDepth <= 1);
+    if (maxChannelDepth > 1) {
+      roundMethodBox.disabled = false;
+      equalDivision = roundMethodBox.value === 'equalDivision';
+    } else {
+      // 均等割りはチャンネル深度が2以上でないと意味がないので無効化
+      roundMethodBox.disabled = true;
+    }
+
+    const palette = new Palette(fmt, equalDivision);
+    const normData = new Float32Array(outW * outH * fmt.numChannels);
+    const norm = new NormalizedImage(fmt, palette, outW, outH, normData);
 
     // 量子化の適用
     {
@@ -960,12 +1061,10 @@ function quantize(): void {
       const previewData = new Uint8Array(srcRgbData.length);
 
       const numPixels = outW * outH;
-      const numChannels = fmt.colorSpace === ColorSpace.GRAYSCALE ? 1 : 3;
+      const numCh = fmt.colorSpace === ColorSpace.GRAYSCALE ? 1 : 3;
 
-      let normChannels = [];
       let outData = [];
-      for (let i = 0; i < numChannels; i++) {
-        normChannels.push(new Float32Array(numPixels));
+      for (let i = 0; i < numCh; i++) {
         outData.push(new Uint8Array(numPixels));
       }
 
@@ -980,178 +1079,129 @@ function quantize(): void {
         histogram[Math.round(gray * (HISTOGRAM_SIZE - 1))]++;
         switch (fmt.colorSpace) {
           case ColorSpace.GRAYSCALE:
-            normChannels[0][i] = gray;
+            norm.data[i * numCh] = gray;
             break;
           case ColorSpace.RGB:
-            normChannels[0][i] = r;
-            normChannels[1][i] = g;
-            normChannels[2][i] = b;
+            norm.data[i * numCh + 0] = r;
+            norm.data[i * numCh + 1] = g;
+            norm.data[i * numCh + 2] = b;
             break;
           default:
             throw new Error('Unknown color space');
         }
       }
 
-      // 輝度自動補正用の値収集
-      let chMin = 1;
-      let chMax = 0;
-      for (let ch = 0; ch < numChannels; ch++) {
-        for (let i = 0; i < numPixels; i++) {
-          const val = normChannels[ch][i];
-          if (val < chMin) chMin = val;
-          if (val > chMax) chMax = val;
-        }
-      }
-
       // ガンマ補正
-      let gamma = 1;
-      if (gammaBox.value) {
-        gamma = parseFloat(gammaBox.value) / 100;
-        gammaBox.placeholder = '';
-      } else {
-        gamma = correctGamma(histogram);
-      }
-      gamma = clip(0.01, 5, gamma);
-      gammaBox.placeholder = '(' + Math.round(gamma * 100) + ')';
-      if (gamma != 1) {
-        chMin = 255;
-        chMax = 0;
-        for (let ch = 0; ch < numChannels; ch++) {
-          for (let i = 0; i < numPixels; i++) {
-            const val = Math.pow(normChannels[ch][i], 1 / gamma);
-            normChannels[ch][i] = val;
-            if (val < chMin) chMin = val;
-            if (val > chMax) chMax = val;
+      {
+        let gamma = 1;
+        if (gammaBox.value) {
+          gamma = parseFloat(gammaBox.value) / 100;
+          gammaBox.placeholder = '';
+        } else {
+          gamma = correctGamma(histogram);
+        }
+        gamma = clip(0.01, 5, gamma);
+        gammaBox.placeholder = '(' + Math.round(gamma * 100) + ')';
+        if (gamma != 1) {
+          for (let i = 0; i < norm.data.length; i++) {
+            const val = Math.pow(norm.data[i], 1 / gamma);
+            norm.data[i] = val;
           }
         }
       }
 
       // 輝度補正
-      let brightness = 0;
-      if (brightnessBox.value) {
-        brightness = parseFloat(brightnessBox.value) / 255;
-        brightnessBox.placeholder = '';
-      } else {
-        brightness = 0.5 - (chMin + chMax) / 2;
-      }
-      brightness = clip(-1, 1, brightness);
-      brightnessBox.placeholder = '(' + Math.round(brightness * 255) + ')';
-      if (brightness != 0) {
-        chMin = 255;
-        chMax = 0;
-        for (let ch = 0; ch < numChannels; ch++) {
-          for (let i = 0; i < numPixels; i++) {
-            const val = clip(0, 1, normChannels[ch][i] + brightness);
-            normChannels[ch][i] = val;
-            if (val < chMin) chMin = val;
-            if (val > chMax) chMax = val;
+      {
+        let brightness = 0;
+        if (brightnessBox.value) {
+          brightness = parseFloat(brightnessBox.value) / 255;
+          brightnessBox.placeholder = '';
+        } else {
+          const [chMin, chMax] = norm.getMinMax();
+          brightness = 0.5 - (chMin + chMax) / 2;
+        }
+        brightness = clip(-1, 1, brightness);
+        brightnessBox.placeholder = '(' + Math.round(brightness * 255) + ')';
+        if (brightness != 0) {
+          for (let i = 0; i < norm.data.length; i++) {
+            norm.data[i] = clip(0, 1, norm.data[i] + brightness);
           }
         }
       }
 
       // コントラスト補正
-      let contrast = 1;
-      if (contrastBox.value) {
-        contrast = parseFloat(contrastBox.value) / 100;
-        contrastBox.placeholder = '';
-      } else {
-        const middle = (chMin + chMax) / 2;
-        if (middle < 0.5 && chMin < middle) {
-          contrast = 0.5 / (middle - chMin);
-        } else if (middle > 0.5 && chMax > middle) {
-          contrast = 0.5 / (chMax - middle);
+      {
+        let contrast = 1;
+        if (contrastBox.value) {
+          contrast = parseFloat(contrastBox.value) / 100;
+          contrastBox.placeholder = '';
+        } else {
+          const [chMin, chMax] = norm.getMinMax();
+          const middle = (chMin + chMax) / 2;
+          if (middle < 0.5 && chMin < middle) {
+            contrast = 0.5 / (middle - chMin);
+          } else if (middle > 0.5 && chMax > middle) {
+            contrast = 0.5 / (chMax - middle);
+          }
         }
-      }
-      contrast = clip(0.01, 10, contrast);
-      contrastBox.placeholder = '(' + Math.round(contrast * 100) + ')';
-      if (contrast != 1) {
-        for (let ch = 0; ch < numChannels; ch++) {
-          for (let i = 0; i < numPixels; i++) {
-            const val = (normChannels[ch][i] - 0.5) * contrast + 0.5;
-            normChannels[ch][i] = clip(0, 1, val);
+        contrast = clip(0.01, 10, contrast);
+        contrastBox.placeholder = '(' + Math.round(contrast * 100) + ')';
+        if (contrast != 1) {
+          for (let i = 0; i < norm.data.length; i++) {
+            norm.data[i] = clip(0, 1, (norm.data[i] - 0.5) * contrast + 0.5);
           }
         }
       }
 
       // 階調反転
       if (invertBox.checked) {
-        for (let ch = 0; ch < numChannels; ch++) {
-          for (let i = 0; i < numPixels; i++) {
-            normChannels[ch][i] = 1 - normChannels[ch][i];
-          }
+        for (let i = 0; i < norm.data.length; i++) {
+          norm.data[i] = 1 - norm.data[i];
         }
       }
 
       // 量子化
       const diffusion = ditherBox.value === 'diffusion';
-      const equalDivision =
-          !roundMethodBox.disabled && roundMethodBox.value === 'equalDivision';
-      for (let ch = 0; ch < numChannels; ch++) {
-        let norm = normChannels[ch];
-        const numLevel = 1 << fmt.channelDepth[ch];
-        const inMin = equalDivision ? (1 / (numLevel * 2)) : 0;
-        const inMax = equalDivision ? ((numLevel * 2 - 1) / (numLevel * 2)) : 1;
-        const outMax = numLevel - 1;
-        for (let y = 0; y < outH; y++) {
-          for (let ix = 0; ix < outW; ix++) {
-            const fwd = y % 2 == 0;
-            const x = fwd ? ix : (outW - 1 - ix);
+      const palette = new Palette(fmt, equalDivision);
+      const out = new Uint8Array(numCh);
+      const error = new Float32Array(numCh);
+      for (let y = 0; y < outH; y++) {
+        for (let ix = 0; ix < outW; ix++) {
+          // 誤差拡散をジグザグに行うため
+          // ライン毎にスキャン方向を変える
+          const fwd = y % 2 == 0;
+          const x = fwd ? ix : (outW - 1 - ix);
 
-            const i = (y * outW + x);
+          // パレットから最も近い色を選択
+          const iPix = (y * outW + x);
+          palette.nearest(norm.data, iPix * numCh, out, 0, error);
 
-            const normIn = norm[i];
+          // 出力
+          for (let ch = 0; ch < numCh; ch++) {
+            outData[ch][iPix] = out[ch];
+          }
 
-            // 量子化
-            const normMod = clip(0, 1, (normIn - inMin) / (inMax - inMin));
-            const out = Math.round(outMax * normMod);
-            const normOut = out / outMax;
-
-            outData[ch][i] = out;
-
-            // プレビューの色生成
-            if (fmt.colorSpace === ColorSpace.GRAYSCALE) {
-              previewData[i * 4] = previewData[i * 4 + 1] =
-                  previewData[i * 4 + 2] = Math.round(out * 255 / outMax);
-            } else {
-              previewData[i * 4 + ch] = Math.round(out * 255 / outMax);
+          // プレビュー用の色生成
+          if (fmt.colorSpace === ColorSpace.GRAYSCALE) {
+            const gray = Math.round(out[0] * 255 / palette.outMax[0]);
+            for (let ch = 0; ch < 3; ch++) {
+              previewData[iPix * 4 + ch] = gray;
             }
+          } else {
+            for (let ch = 0; ch < 3; ch++) {
+              const outMax = palette.outMax[ch];
+              previewData[iPix * 4 + ch] = Math.round(out[ch] * 255 / outMax);
+            }
+          }
 
-            let error = normIn - normOut;
+          if (diffusion) {
+            // 誤差拡散
+            norm.diffuseError(error, x, y, fwd);
+          }
+        }  // for ix
+      }  // for y
 
-            if (diffusion && error != 0) {
-              if (fwd) {
-                if (x < outW - 1) {
-                  norm[i + 1] += error * 7 / 16;
-                }
-                if (y < outH - 1) {
-                  if (x > 0) {
-                    norm[i + outW - 1] += error * 3 / 16;
-                  }
-                  norm[i + outW] += error * 5 / 16;
-                  if (x < outW - 1) {
-                    norm[i + outW + 1] += error * 1 / 16;
-                  }
-                }
-              } else {
-                if (x > 0) {
-                  norm[i - 1] += error * 7 / 16;
-                }
-                if (y < outH - 1) {
-                  if (x < outW - 1) {
-                    norm[i + outW + 1] += error * 3 / 16;
-                  }
-                  norm[i + outW] += error * 5 / 16;
-                  if (x > 0) {
-                    norm[i + outW - 1] += error * 1 / 16;
-                  }
-                }
-              }
-            }  // if diffusion
-          }  // for x
-        }  // for y
-      }  // for ch
-
-      // アルファチャンネル
+      // プレビューを不透明化
       for (let i = 0; i < numPixels; i++) {
         previewData[i * 4 + 3] = 255;
       }
@@ -1216,6 +1266,7 @@ function correctGamma(histogram: Uint32Array): number {
   }
   return gamma;
 }
+
 
 function requestGenerateCode(): void {
   if (generateCodeTimeoutId !== -1) {
