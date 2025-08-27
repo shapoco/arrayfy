@@ -62,51 +62,22 @@ var __read = (this && this.__read) || function (o, n) {
     return ar;
 };
 var _this = this;
-var TrimState;
-(function (TrimState) {
-    TrimState[TrimState["IDLE"] = 0] = "IDLE";
-    TrimState[TrimState["DRAG_TOP"] = 1] = "DRAG_TOP";
-    TrimState[TrimState["DRAG_RIGHT"] = 2] = "DRAG_RIGHT";
-    TrimState[TrimState["DRAG_BOTTOM"] = 3] = "DRAG_BOTTOM";
-    TrimState[TrimState["DRAG_LEFT"] = 4] = "DRAG_LEFT";
-})(TrimState || (TrimState = {}));
-var ColorSpace;
-(function (ColorSpace) {
-    ColorSpace[ColorSpace["GRAYSCALE"] = 0] = "GRAYSCALE";
-    ColorSpace[ColorSpace["RGB"] = 1] = "RGB";
-})(ColorSpace || (ColorSpace = {}));
-var Point = /** @class */ (function () {
-    function Point(x, y) {
-        this.x = x;
-        this.y = y;
-    }
-    return Point;
-}());
-var Rect = /** @class */ (function () {
-    function Rect(x, y, width, height) {
-        this.x = x;
-        this.y = y;
-        this.width = width;
-        this.height = height;
-    }
-    return Rect;
-}());
 var PixelFormat = /** @class */ (function () {
     function PixelFormat() {
-        this.colorSpace = ColorSpace.GRAYSCALE;
+        this.colorSpace = 0 /* ColorSpace.GRAYSCALE */;
         this.channelDepth = [1];
     }
     PixelFormat.prototype.toString = function () {
         var ret = '';
         switch (this.colorSpace) {
-            case ColorSpace.GRAYSCALE:
+            case 0 /* ColorSpace.GRAYSCALE */:
                 if (this.channelDepth[0] == 1) {
                     return 'B/W';
                 }
                 else {
                     return 'Gray' + this.channelDepth[0];
                 }
-            case ColorSpace.RGB:
+            case 1 /* ColorSpace.RGB */:
                 return 'RGB' + this.channelDepth.join('');
             default:
                 throw new Error('Unknown color space');
@@ -230,15 +201,28 @@ function makeParagraph(children) {
     toElementArray(children).forEach(function (child) { return p.appendChild(child); });
     return p;
 }
-function makePropertyContainer(children) {
+function makeNoWrapSpan(children) {
     if (children === void 0) { children = []; }
     var span = document.createElement('span');
-    span.classList.add('propertyContainer');
+    span.classList.add('nowrap');
     toElementArray(children).forEach(function (child) { return span.appendChild(child); });
     return span;
 }
+function makePropertyContainer(children, description) {
+    if (children === void 0) { children = []; }
+    var span = document.createElement('span');
+    span.classList.add('propertyContainer');
+    toElementArray(children).forEach(function (child) {
+        span.appendChild(child);
+        if (description)
+            child.title = description;
+    });
+    if (description)
+        span.title = description;
+    return span;
+}
 function makeSectionLabel(text) {
-    var span = makePropertyContainer([text]);
+    var span = makePropertyContainer([text], '');
     span.style.width = '100px';
     span.style.borderStyle = 'none';
     span.style.borderRadius = '5px';
@@ -299,6 +283,15 @@ function makeButton(text) {
     button.textContent = text;
     return button;
 }
+function makeSampleImageButton(url) {
+    var button = document.createElement('button');
+    button.classList.add('sampleImageButton');
+    button.style.backgroundImage = "url(".concat(url, ")");
+    button.addEventListener('click', function () {
+        loadFromString(url);
+    });
+    return button;
+}
 function makePresetButton(name, text, description) {
     var button = document.createElement('button');
     button.dataset.presetName = name;
@@ -325,14 +318,14 @@ var origCanvas = document.createElement('canvas');
 var bgColorBox = makeTextBox('#000');
 var resetTrimButton = makeButton('範囲をリセット');
 var trimCanvas = document.createElement('canvas');
-var gammaBox = makeTextBox('100', '(auto)', 5);
+var gammaBox = makeTextBox('1', '(auto)', 4);
 var brightnessBox = makeTextBox('0', '(auto)', 5);
 var contrastBox = makeTextBox('100', '(auto)', 5);
 var invertBox = makeCheckBox('階調反転');
 var presetRgb565Be = makePresetButton('rgb565_be', 'RGB565-BE', '各種 16bit カラー液晶');
 var presetRgb332 = makePresetButton('rgb332', 'RGB332', '各種 GFX ライブラリ');
+var presetBwHpMf = makePresetButton('bw_hp_mf', '白黒 横パッキング', '各種 GFX ライブラリ');
 var presetBwVpLf = makePresetButton('bw_vp_lf', '白黒 縦パッキング', 'SSD1306/1309, 他...');
-var presetBwHpMf = makePresetButton('bw_hp_mf', '白黒 横パッキング', 'SHARPメモリ液晶, 他...');
 var formatBox = makeSelectBox({
     rgb565: 'RGB565',
     rgb555: 'RGB555',
@@ -398,396 +391,495 @@ var quantizeTimeoutId = -1;
 var generateCodeTimeoutId = -1;
 var worldX0 = 0, worldY0 = 0, zoom = 1;
 var trimL = 0, trimT = 0, trimR = 1, trimB = 1;
-var trimUiState = TrimState.IDLE;
+var trimUiState = 0 /* TrimState.IDLE */;
 var imageCacheFormat = new PixelFormat();
 var imageCacheData = [null, null, null, null];
 function main() {
     return __awaiter(this, void 0, void 0, function () {
-        var fileBrowseButton, p, p, p, p, p, p, p, p, p, p, p, div;
+        var fileBrowseButton, p, p, p, p, p, p, p, p, p, p, p, p, div;
+        var _this = this;
         return __generator(this, function (_a) {
-            container = document.querySelector('#arrayfyContainer');
-            {
-                dropTarget.style.display = 'none';
-                dropTarget.style.position = 'fixed';
-                dropTarget.style.left = '0px';
-                dropTarget.style.top = '0px';
-                dropTarget.style.width = '100%';
-                dropTarget.style.height = '100%';
-                dropTarget.style.background = '#000';
-                dropTarget.style.opacity = '0.5';
-                dropTarget.style.zIndex = '9999';
-                dropTarget.style.textAlign = 'center';
-                dropTarget.style.color = '#FFF';
-                dropTarget.style.paddingTop = 'calc(50vh - 2em)';
-                dropTarget.style.fontSize = '30px';
-                dropTarget.innerHTML = 'ドロップして読み込む';
-                document.body.appendChild(dropTarget);
-                // 「ファイルが選択されていません」の表示が邪魔なので button で wrap する
-                hiddenFileBox.type = 'file';
-                hiddenFileBox.accept = 'image/*';
-                hiddenFileBox.style.display = 'none';
-                fileBrowseButton = makeButton('選択');
-                fileBrowseButton.addEventListener('click', function () {
-                    hiddenFileBox.click();
-                });
-                pasteTarget.type = 'text';
-                pasteTarget.style.textAlign = 'center';
-                pasteTarget.style.width = '8em';
-                pasteTarget.placeholder = 'ここに貼り付け';
-                container.appendChild(makeParagraph([
-                    makeSectionLabel('入力画像'),
-                    '画像をドロップ、または ',
-                    pasteTarget,
-                    ' または ',
-                    fileBrowseButton,
-                ]));
-            }
-            {
-                p = makeParagraph([
-                    makeSectionLabel('プリセット'),
-                    '選んでください: ',
-                    document.createElement('br'),
-                    presetRgb565Be,
-                    presetRgb332,
-                    presetBwVpLf,
-                    presetBwHpMf,
-                ]);
-                container.appendChild(p);
-            }
-            {
-                p = makeParagraph([
-                    makeSectionLabel('トリミング'),
-                    makePropertyContainer([resetTrimButton]),
-                ]);
-                container.appendChild(p);
-            }
-            {
-                trimCanvas.style.width = '100%';
-                trimCanvas.style.height = '400px';
-                trimCanvas.style.boxSizing = 'border-box';
-                trimCanvas.style.border = 'solid 1px #444';
-                trimCanvas.style.backgroundImage = 'url(./img/checker.png)';
-                p = makeParagraph([trimCanvas]);
-                p.style.textAlign = 'center';
-                container.appendChild(p);
-            }
-            {
-                p = makeParagraph([
-                    makeSectionLabel('透過色'),
-                    makePropertyContainer(['塗りつぶす: ', bgColorBox]),
-                ]);
-                container.appendChild(p);
-                p.querySelectorAll('input, button').forEach(function (el) {
-                    el.addEventListener('change', function () {
+            switch (_a.label) {
+                case 0:
+                    container = document.querySelector('#arrayfyContainer');
+                    {
+                        dropTarget.style.display = 'none';
+                        dropTarget.style.position = 'fixed';
+                        dropTarget.style.left = '0px';
+                        dropTarget.style.top = '0px';
+                        dropTarget.style.width = '100%';
+                        dropTarget.style.height = '100%';
+                        dropTarget.style.background = '#000';
+                        dropTarget.style.opacity = '0.5';
+                        dropTarget.style.zIndex = '9999';
+                        dropTarget.style.textAlign = 'center';
+                        dropTarget.style.color = '#FFF';
+                        dropTarget.style.paddingTop = 'calc(50vh - 2em)';
+                        dropTarget.style.fontSize = '30px';
+                        dropTarget.innerHTML = 'ドロップして読み込む';
+                        document.body.appendChild(dropTarget);
+                        // 「ファイルが選択されていません」の表示が邪魔なので button で wrap する
+                        hiddenFileBox.type = 'file';
+                        hiddenFileBox.accept = 'image/*';
+                        hiddenFileBox.style.display = 'none';
+                        fileBrowseButton = makeButton('選択');
+                        fileBrowseButton.addEventListener('click', function () {
+                            hiddenFileBox.click();
+                        });
+                        pasteTarget.type = 'text';
+                        pasteTarget.style.textAlign = 'center';
+                        pasteTarget.style.width = '8em';
+                        pasteTarget.placeholder = 'ここに貼り付け';
+                        container.appendChild(makeParagraph([
+                            makeSectionLabel('入力画像'), makeNoWrapSpan(['画像をドロップ、']),
+                            makeNoWrapSpan(['または ', pasteTarget, '、']),
+                            makeNoWrapSpan([' または ', fileBrowseButton, '、']), makeNoWrapSpan([
+                                'またはサンプル: ',
+                                makeSampleImageButton('./img/sample/gradient.png'),
+                                makeSampleImageButton('./img/sample/forest-path.jpg'),
+                                makeSampleImageButton('./img/sample/anime-girl.png'),
+                            ])
+                        ]));
+                    }
+                    {
+                        p = makeParagraph([
+                            makeSectionLabel('プリセット'),
+                            '選んでください: ',
+                            document.createElement('br'),
+                            presetRgb565Be,
+                            presetRgb332,
+                            presetBwHpMf,
+                            presetBwVpLf,
+                        ]);
+                        container.appendChild(p);
+                    }
+                    {
+                        p = makeParagraph([
+                            '白黒ディスプレイについては、各種 GFX ライブラリを使用して描画する場合は横パッキングを選択してください。',
+                            'I2C や SPI ドライバを用いて直接転送する場合はディスプレイの仕様に従ってください。',
+                            'SSD1306/1309 など一部のディスプレイでは縦パッキングされたデータが必要です。',
+                        ]);
+                        p.style.fontSize = 'smaller';
+                        container.appendChild(p);
+                    }
+                    {
+                        p = makeParagraph([
+                            makeSectionLabel('トリミング'),
+                            makePropertyContainer([resetTrimButton], 'トリミングしていない状態に戻します。'),
+                        ]);
+                        container.appendChild(p);
+                    }
+                    {
+                        trimCanvas.style.width = '100%';
+                        trimCanvas.style.height = '400px';
+                        trimCanvas.style.boxSizing = 'border-box';
+                        trimCanvas.style.border = 'solid 1px #444';
+                        trimCanvas.style.backgroundImage = 'url(./img/checker.png)';
+                        p = makeParagraph([trimCanvas]);
+                        p.style.textAlign = 'center';
+                        container.appendChild(p);
+                    }
+                    {
+                        p = makeParagraph([
+                            makeSectionLabel('透過色'),
+                            makePropertyContainer(['塗りつぶす: ', bgColorBox], '画像の透明部分をこの色で塗り潰して不透明化します。'),
+                        ]);
+                        container.appendChild(p);
+                        p.querySelectorAll('input, button').forEach(function (el) {
+                            el.addEventListener('change', function () {
+                                requestUpdateTrimCanvas();
+                                requestQuantize();
+                            });
+                            el.addEventListener('input', function () {
+                                requestUpdateTrimCanvas();
+                                requestQuantize();
+                            });
+                        });
+                    }
+                    {
+                        p = makeParagraph([
+                            makeSectionLabel('色調補正'),
+                            makePropertyContainer(['ガンマ: ', gammaBox], 'デフォルトは 1.0 です。\n空欄にすると、輝度 50% を中心にバランスが取れるように自動調整します。'),
+                            makePropertyContainer(['輝度オフセット: ', brightnessBox], 'デフォルトは 0 です。\n空欄にすると、輝度 50% を中心にバランスが取れるように自動調整します。'),
+                            makePropertyContainer(['コントラスト: ', contrastBox, '%'], 'デフォルトは 100% です。\n空欄にすると、階調が失われない範囲でダイナミックレンジが最大となるように自動調整します。'),
+                            makePropertyContainer([invertBox.parentNode], '各チャネルの値を大小反転します。'),
+                        ]);
+                        container.appendChild(p);
+                        p.querySelectorAll('input, select').forEach(function (el) {
+                            el.addEventListener('change', function () {
+                                requestQuantize();
+                            });
+                            el.addEventListener('input', function () {
+                                requestQuantize();
+                            });
+                        });
+                    }
+                    {
+                        p = makeParagraph([
+                            makeSectionLabel('出力サイズ'),
+                            makePropertyContainer([widthBox, ' x ', heightBox, ' px'], '片方を空欄にすると他方はアスペクト比に基づいて自動的に決定されます。'),
+                            makePropertyContainer(['拡縮方法: ', scalingMethodBox], 'トリミングサイズと出力サイズが異なる場合の拡縮方法を指定します。'),
+                        ]);
+                        container.appendChild(p);
+                        p.querySelectorAll('input, select').forEach(function (el) {
+                            el.addEventListener('change', function () {
+                                requestQuantize();
+                            });
+                            el.addEventListener('input', function () {
+                                requestQuantize();
+                            });
+                        });
+                    }
+                    {
+                        p = makeParagraph([
+                            makeSectionLabel('量子化'),
+                            makePropertyContainer(['フォーマット: ', formatBox], 'ピクセルフォーマットを指定します。'),
+                            makePropertyContainer(['丸め方法: ', roundMethodBox], 'パレットから色を選択する際の戦略を指定します。\nディザリングを行う場合はあまり関係ありません。'),
+                            makePropertyContainer(['ディザリング: ', ditherBox], 'あえてノイズを加えることでできるだけ元画像の輝度を再現します。'),
+                        ]);
+                        container.appendChild(p);
+                        p.querySelectorAll('input, select').forEach(function (el) {
+                            el.addEventListener('change', function () {
+                                requestQuantize();
+                            });
+                            el.addEventListener('input', function () {
+                                requestQuantize();
+                            });
+                        });
+                    }
+                    {
+                        previewCanvas.style.backgroundImage = 'url(./img/checker.png)';
+                        previewCanvas.style.display = 'none';
+                        quantizeErrorBox.style.color = 'red';
+                        quantizeErrorBox.style.display = 'none';
+                        p = makeParagraph([previewCanvas, quantizeErrorBox]);
+                        p.style.height = '400px';
+                        p.style.background = '#444';
+                        p.style.border = 'solid 1px #444';
+                        p.style.textAlign = 'center';
+                        container.appendChild(p);
+                    }
+                    {
+                        p = makeParagraph([
+                            makeSectionLabel('エンコード'),
+                            makePropertyContainer(['チャネル順: ', channelOrderBox], 'RGB のチャネルを並べる順序を指定します。\n上位からであることが多いです。'),
+                            makePropertyContainer(['ピクセル順: ', pixelOrderBox], 'バイト内のピクセルの順序を指定します。\n横パッキングでは上位から、縦パッキングでは下位からであることが多いです。'),
+                            makePropertyContainer(['バイト順: ', byteOrderBox], 'ピクセル内のバイトの順序を指定します。\nGFX ライブラリなどでは BigEndian であることが多いです。'),
+                            makePropertyContainer(['パッキング方向: ', packingBox], 'ピクセルをどの方向にパッキングするかを指定します。\n' +
+                                '多くの場合横ですが、SSD1306/1309 などの一部の白黒ディスプレイに\n' +
+                                '直接転送可能なデータを生成する場合は縦を指定してください。'),
+                            makePropertyContainer(['アドレス方向: ', addressingBox], 'アドレスのインクリメント方向を指定します。\n通常は水平です。'),
+                        ]);
+                        container.appendChild(p);
+                        p.querySelectorAll('input, select').forEach(function (el) {
+                            el.addEventListener('change', function () {
+                                requestGenerateCode();
+                            });
+                            el.addEventListener('input', function () {
+                                requestGenerateCode();
+                            });
+                        });
+                    }
+                    {
+                        p = makeParagraph([
+                            makeSectionLabel('コード生成'),
+                            makePropertyContainer(['列数: ', codeColsBox], '1 行に詰め込む要素数を指定します。'),
+                            makePropertyContainer(['インデント: ', indentBox], 'インデントの形式とサイズを指定します。')
+                        ]);
+                        container.appendChild(p);
+                        p.querySelectorAll('input, select').forEach(function (el) {
+                            el.addEventListener('change', function () {
+                                requestGenerateCode();
+                            });
+                            el.addEventListener('input', function () {
+                                requestGenerateCode();
+                            });
+                        });
+                    }
+                    {
+                        p = makeParagraph([copyButton]);
+                        p.style.textAlign = 'right';
+                        container.appendChild(p);
+                    }
+                    {
+                        div = document.createElement('div');
+                        arrayCode.id = 'arrayCode';
+                        arrayCode.classList.add('lang_cpp');
+                        div.appendChild(arrayCode);
+                        codeGenErrorBox.style.textAlign = 'center';
+                        codeGenErrorBox.style.color = 'red';
+                        codeGenErrorBox.style.display = 'none';
+                        div.appendChild(codeGenErrorBox);
+                        container.appendChild(div);
+                    }
+                    // ファイル選択
+                    hiddenFileBox.addEventListener('change', function (e) { return __awaiter(_this, void 0, void 0, function () {
+                        var input;
+                        return __generator(this, function (_a) {
+                            switch (_a.label) {
+                                case 0:
+                                    input = e.target;
+                                    if (!(input.files && input.files[0])) return [3 /*break*/, 2];
+                                    return [4 /*yield*/, loadFromFile(input.files[0])];
+                                case 1:
+                                    _a.sent();
+                                    _a.label = 2;
+                                case 2: return [2 /*return*/];
+                            }
+                        });
+                    }); });
+                    // ドラッグ & ドロップ
+                    document.body.addEventListener('dragover', function (e) {
+                        var e_2, _a;
+                        e.preventDefault();
+                        e.stopPropagation();
+                        var items = e.dataTransfer.items;
+                        try {
+                            for (var items_1 = __values(items), items_1_1 = items_1.next(); !items_1_1.done; items_1_1 = items_1.next()) {
+                                var item = items_1_1.value;
+                                if (item.kind === 'file') {
+                                    dropTarget.style.display = 'block';
+                                    break;
+                                }
+                            }
+                        }
+                        catch (e_2_1) { e_2 = { error: e_2_1 }; }
+                        finally {
+                            try {
+                                if (items_1_1 && !items_1_1.done && (_a = items_1.return)) _a.call(items_1);
+                            }
+                            finally { if (e_2) throw e_2.error; }
+                        }
+                    });
+                    dropTarget.addEventListener('dragleave', function (e) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        dropTarget.style.display = 'none';
+                    });
+                    dropTarget.addEventListener('drop', function (e) { return __awaiter(_this, void 0, void 0, function () {
+                        var items, items_2, items_2_1, item, e_3_1;
+                        var e_3, _a;
+                        return __generator(this, function (_b) {
+                            switch (_b.label) {
+                                case 0:
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    dropTarget.style.display = 'none';
+                                    items = e.dataTransfer.items;
+                                    _b.label = 1;
+                                case 1:
+                                    _b.trys.push([1, 6, 7, 8]);
+                                    items_2 = __values(items), items_2_1 = items_2.next();
+                                    _b.label = 2;
+                                case 2:
+                                    if (!!items_2_1.done) return [3 /*break*/, 5];
+                                    item = items_2_1.value;
+                                    if (!(item.kind === 'file')) return [3 /*break*/, 4];
+                                    return [4 /*yield*/, loadFromFile(item.getAsFile())];
+                                case 3:
+                                    _b.sent();
+                                    return [3 /*break*/, 5];
+                                case 4:
+                                    items_2_1 = items_2.next();
+                                    return [3 /*break*/, 2];
+                                case 5: return [3 /*break*/, 8];
+                                case 6:
+                                    e_3_1 = _b.sent();
+                                    e_3 = { error: e_3_1 };
+                                    return [3 /*break*/, 8];
+                                case 7:
+                                    try {
+                                        if (items_2_1 && !items_2_1.done && (_a = items_2.return)) _a.call(items_2);
+                                    }
+                                    finally { if (e_3) throw e_3.error; }
+                                    return [7 /*endfinally*/];
+                                case 8: return [2 /*return*/];
+                            }
+                        });
+                    }); });
+                    // 貼り付け
+                    pasteTarget.addEventListener('paste', function (e) { return __awaiter(_this, void 0, void 0, function () {
+                        var items, items_3, items_3_1, item, e_4_1;
+                        var e_4, _a;
+                        return __generator(this, function (_b) {
+                            switch (_b.label) {
+                                case 0:
+                                    items = e.clipboardData.items;
+                                    _b.label = 1;
+                                case 1:
+                                    _b.trys.push([1, 6, 7, 8]);
+                                    items_3 = __values(items), items_3_1 = items_3.next();
+                                    _b.label = 2;
+                                case 2:
+                                    if (!!items_3_1.done) return [3 /*break*/, 5];
+                                    item = items_3_1.value;
+                                    if (!(item.kind === 'file')) return [3 /*break*/, 4];
+                                    return [4 /*yield*/, loadFromFile(item.getAsFile())];
+                                case 3:
+                                    _b.sent();
+                                    return [3 /*break*/, 5];
+                                case 4:
+                                    items_3_1 = items_3.next();
+                                    return [3 /*break*/, 2];
+                                case 5: return [3 /*break*/, 8];
+                                case 6:
+                                    e_4_1 = _b.sent();
+                                    e_4 = { error: e_4_1 };
+                                    return [3 /*break*/, 8];
+                                case 7:
+                                    try {
+                                        if (items_3_1 && !items_3_1.done && (_a = items_3.return)) _a.call(items_3);
+                                    }
+                                    finally { if (e_4) throw e_4.error; }
+                                    return [7 /*endfinally*/];
+                                case 8: return [2 /*return*/];
+                            }
+                        });
+                    }); });
+                    pasteTarget.addEventListener('input', function (e) {
+                        pasteTarget.value = '';
+                    });
+                    pasteTarget.addEventListener('change', function (e) {
+                        pasteTarget.value = '';
+                    });
+                    // トリミング操作
+                    trimCanvas.addEventListener('pointermove', function (e) {
+                        e.preventDefault();
+                        if (trimUiState == 0 /* TrimState.IDLE */) {
+                            switch (trimViewToNextState(e.offsetX, e.offsetY)) {
+                                case 4 /* TrimState.DRAG_LEFT */:
+                                    trimCanvas.style.cursor = 'w-resize';
+                                    break;
+                                case 1 /* TrimState.DRAG_TOP */:
+                                    trimCanvas.style.cursor = 'n-resize';
+                                    break;
+                                case 2 /* TrimState.DRAG_RIGHT */:
+                                    trimCanvas.style.cursor = 'e-resize';
+                                    break;
+                                case 3 /* TrimState.DRAG_BOTTOM */:
+                                    trimCanvas.style.cursor = 's-resize';
+                                    break;
+                                default:
+                                    trimCanvas.style.cursor = 'default';
+                                    break;
+                            }
+                        }
+                        else {
+                            var _a = trimViewToWorld(e.offsetX, e.offsetY), x = _a.x, y = _a.y;
+                            switch (trimUiState) {
+                                case 4 /* TrimState.DRAG_LEFT */:
+                                    trimL = Math.min(x, trimR - 1);
+                                    break;
+                                case 1 /* TrimState.DRAG_TOP */:
+                                    trimT = Math.min(y, trimB - 1);
+                                    break;
+                                case 2 /* TrimState.DRAG_RIGHT */:
+                                    trimR = Math.max(x, trimL + 1);
+                                    break;
+                                case 3 /* TrimState.DRAG_BOTTOM */:
+                                    trimB = Math.max(y, trimT + 1);
+                                    break;
+                            }
+                            requestUpdateTrimCanvas();
+                            requestQuantize();
+                        }
+                    });
+                    trimCanvas.addEventListener('pointerdown', function (e) {
+                        e.preventDefault();
+                        if (trimViewToNextState(e.offsetX, e.offsetY) != 0 /* TrimState.IDLE */) {
+                            trimUiState = trimViewToNextState(e.offsetX, e.offsetY);
+                            trimCanvas.style.cursor = 'grabbing';
+                            trimCanvas.setPointerCapture(e.pointerId);
+                        }
+                    });
+                    trimCanvas.addEventListener('pointerup', function (e) {
+                        e.preventDefault();
+                        trimUiState = 0 /* TrimState.IDLE */;
+                        trimCanvas.style.cursor = 'default';
+                        trimCanvas.releasePointerCapture(e.pointerId);
                         requestUpdateTrimCanvas();
-                        requestQuantize();
                     });
-                    el.addEventListener('input', function () {
-                        requestUpdateTrimCanvas();
-                        requestQuantize();
+                    trimCanvas.addEventListener('touchstart', function (e) {
+                        e.preventDefault();
                     });
-                });
+                    trimCanvas.addEventListener('touchmove', function (e) {
+                        e.preventDefault();
+                    });
+                    trimCanvas.addEventListener('touchend', function (e) {
+                        e.preventDefault();
+                    });
+                    resetTrimButton.addEventListener('click', function () {
+                        resetTrim();
+                    });
+                    // コードのコピー
+                    copyButton.addEventListener('click', function () {
+                        if (!arrayCode.textContent)
+                            return;
+                        navigator.clipboard.writeText(arrayCode.textContent);
+                    });
+                    // サンプルのロード
+                    return [4 /*yield*/, loadFromString('./img/sample/gradient.png')];
+                case 1:
+                    // サンプルのロード
+                    _a.sent();
+                    return [2 /*return*/];
             }
-            {
-                p = makeParagraph([
-                    makeSectionLabel('色調補正'),
-                    makePropertyContainer(['ガンマ: ', gammaBox, '%']),
-                    makePropertyContainer(['輝度オフセット: ', brightnessBox]),
-                    makePropertyContainer(['コントラスト: ', contrastBox, '%']),
-                    makePropertyContainer([invertBox.parentNode]),
-                ]);
-                container.appendChild(p);
-                p.querySelectorAll('input, select').forEach(function (el) {
-                    el.addEventListener('change', function () {
-                        requestQuantize();
-                    });
-                    el.addEventListener('input', function () {
-                        requestQuantize();
-                    });
-                });
-            }
-            {
-                p = makeParagraph([
-                    makeSectionLabel('出力サイズ'),
-                    makePropertyContainer([widthBox, ' x ', heightBox, ' px']),
-                    makePropertyContainer(['拡縮方法: ', scalingMethodBox]),
-                ]);
-                container.appendChild(p);
-                p.querySelectorAll('input, select').forEach(function (el) {
-                    el.addEventListener('change', function () {
-                        requestQuantize();
-                    });
-                    el.addEventListener('input', function () {
-                        requestQuantize();
-                    });
-                });
-            }
-            {
-                p = makeParagraph([
-                    makeSectionLabel('量子化'),
-                    makePropertyContainer(['フォーマット: ', formatBox]),
-                    makePropertyContainer(['丸め方法: ', roundMethodBox]),
-                    makePropertyContainer(['ディザリング: ', ditherBox]),
-                ]);
-                container.appendChild(p);
-                p.querySelectorAll('input, select').forEach(function (el) {
-                    el.addEventListener('change', function () {
-                        requestQuantize();
-                    });
-                    el.addEventListener('input', function () {
-                        requestQuantize();
-                    });
-                });
-            }
-            {
-                previewCanvas.style.backgroundImage = 'url(./img/checker.png)';
-                previewCanvas.style.display = 'none';
-                quantizeErrorBox.style.color = 'red';
-                quantizeErrorBox.style.display = 'none';
-                p = makeParagraph([previewCanvas, quantizeErrorBox]);
-                p.style.height = '400px';
-                p.style.background = '#444';
-                p.style.border = 'solid 1px #444';
-                p.style.textAlign = 'center';
-                container.appendChild(p);
-            }
-            {
-                p = makeParagraph([
-                    makeSectionLabel('エンコード'),
-                    makePropertyContainer(['チャネル順: ', channelOrderBox]),
-                    makePropertyContainer(['ピクセル順: ', pixelOrderBox]),
-                    makePropertyContainer(['バイト順: ', byteOrderBox]),
-                    makePropertyContainer(['パッキング方向: ', packingBox]),
-                    makePropertyContainer(['アドレス方向: ', addressingBox]),
-                ]);
-                container.appendChild(p);
-                p.querySelectorAll('input, select').forEach(function (el) {
-                    el.addEventListener('change', function () {
-                        requestGenerateCode();
-                    });
-                    el.addEventListener('input', function () {
-                        requestGenerateCode();
-                    });
-                });
-            }
-            {
-                p = makeParagraph([
-                    makeSectionLabel('コード生成'),
-                    makePropertyContainer(['列数: ', codeColsBox]),
-                    makePropertyContainer(['インデント: ', indentBox])
-                ]);
-                container.appendChild(p);
-                p.querySelectorAll('input, select').forEach(function (el) {
-                    el.addEventListener('change', function () {
-                        requestGenerateCode();
-                    });
-                    el.addEventListener('input', function () {
-                        requestGenerateCode();
-                    });
-                });
-            }
-            {
-                p = makeParagraph([copyButton]);
-                p.style.textAlign = 'right';
-                container.appendChild(p);
-            }
-            {
-                div = document.createElement('div');
-                arrayCode.id = 'arrayCode';
-                arrayCode.classList.add('lang_cpp');
-                div.appendChild(arrayCode);
-                codeGenErrorBox.style.textAlign = 'center';
-                codeGenErrorBox.style.color = 'red';
-                codeGenErrorBox.style.display = 'none';
-                div.appendChild(codeGenErrorBox);
-                container.appendChild(div);
-            }
-            // ファイル選択
-            hiddenFileBox.addEventListener('change', function (e) {
-                var input = e.target;
-                if (input.files && input.files[0]) {
-                    loadFile(input.files[0]);
-                }
-            });
-            // ドラッグ & ドロップ
-            document.body.addEventListener('dragover', function (e) {
-                var e_2, _a;
-                e.preventDefault();
-                e.stopPropagation();
-                var items = e.dataTransfer.items;
-                try {
-                    for (var items_1 = __values(items), items_1_1 = items_1.next(); !items_1_1.done; items_1_1 = items_1.next()) {
-                        var item = items_1_1.value;
-                        if (item.kind === 'file') {
-                            dropTarget.style.display = 'block';
-                            break;
-                        }
-                    }
-                }
-                catch (e_2_1) { e_2 = { error: e_2_1 }; }
-                finally {
-                    try {
-                        if (items_1_1 && !items_1_1.done && (_a = items_1.return)) _a.call(items_1);
-                    }
-                    finally { if (e_2) throw e_2.error; }
-                }
-            });
-            dropTarget.addEventListener('dragleave', function (e) {
-                e.preventDefault();
-                e.stopPropagation();
-                dropTarget.style.display = 'none';
-            });
-            dropTarget.addEventListener('drop', function (e) {
-                var e_3, _a;
-                e.preventDefault();
-                e.stopPropagation();
-                dropTarget.style.display = 'none';
-                var items = e.dataTransfer.items;
-                try {
-                    for (var items_2 = __values(items), items_2_1 = items_2.next(); !items_2_1.done; items_2_1 = items_2.next()) {
-                        var item = items_2_1.value;
-                        if (item.kind === 'file') {
-                            loadFile(item.getAsFile());
-                            break;
-                        }
-                    }
-                }
-                catch (e_3_1) { e_3 = { error: e_3_1 }; }
-                finally {
-                    try {
-                        if (items_2_1 && !items_2_1.done && (_a = items_2.return)) _a.call(items_2);
-                    }
-                    finally { if (e_3) throw e_3.error; }
-                }
-            });
-            // 貼り付け
-            pasteTarget.addEventListener('paste', function (e) {
-                var e_4, _a;
-                var items = e.clipboardData.items;
-                try {
-                    for (var items_3 = __values(items), items_3_1 = items_3.next(); !items_3_1.done; items_3_1 = items_3.next()) {
-                        var item = items_3_1.value;
-                        if (item.kind === 'file') {
-                            loadFile(item.getAsFile());
-                            break;
-                        }
-                    }
-                }
-                catch (e_4_1) { e_4 = { error: e_4_1 }; }
-                finally {
-                    try {
-                        if (items_3_1 && !items_3_1.done && (_a = items_3.return)) _a.call(items_3);
-                    }
-                    finally { if (e_4) throw e_4.error; }
-                }
-            });
-            pasteTarget.addEventListener('input', function (e) {
-                pasteTarget.value = '';
-            });
-            pasteTarget.addEventListener('change', function (e) {
-                pasteTarget.value = '';
-            });
-            // トリミング操作
-            trimCanvas.addEventListener('pointermove', function (e) {
-                e.preventDefault();
-                if (trimUiState == TrimState.IDLE) {
-                    switch (trimViewToNextState(e.offsetX, e.offsetY)) {
-                        case TrimState.DRAG_LEFT:
-                            trimCanvas.style.cursor = 'w-resize';
-                            break;
-                        case TrimState.DRAG_TOP:
-                            trimCanvas.style.cursor = 'n-resize';
-                            break;
-                        case TrimState.DRAG_RIGHT:
-                            trimCanvas.style.cursor = 'e-resize';
-                            break;
-                        case TrimState.DRAG_BOTTOM:
-                            trimCanvas.style.cursor = 's-resize';
-                            break;
-                        default:
-                            trimCanvas.style.cursor = 'default';
-                            break;
-                    }
-                }
-                else {
-                    var _a = trimViewToWorld(e.offsetX, e.offsetY), x = _a.x, y = _a.y;
-                    switch (trimUiState) {
-                        case TrimState.DRAG_LEFT:
-                            trimL = Math.min(x, trimR - 1);
-                            break;
-                        case TrimState.DRAG_TOP:
-                            trimT = Math.min(y, trimB - 1);
-                            break;
-                        case TrimState.DRAG_RIGHT:
-                            trimR = Math.max(x, trimL + 1);
-                            break;
-                        case TrimState.DRAG_BOTTOM:
-                            trimB = Math.max(y, trimT + 1);
-                            break;
-                    }
-                    requestUpdateTrimCanvas();
-                    requestQuantize();
-                }
-            });
-            trimCanvas.addEventListener('pointerdown', function (e) {
-                e.preventDefault();
-                if (trimViewToNextState(e.offsetX, e.offsetY) != TrimState.IDLE) {
-                    trimUiState = trimViewToNextState(e.offsetX, e.offsetY);
-                    trimCanvas.style.cursor = 'grabbing';
-                    trimCanvas.setPointerCapture(e.pointerId);
-                }
-            });
-            trimCanvas.addEventListener('pointerup', function (e) {
-                e.preventDefault();
-                trimUiState = TrimState.IDLE;
-                trimCanvas.style.cursor = 'default';
-                trimCanvas.releasePointerCapture(e.pointerId);
-                requestUpdateTrimCanvas();
-            });
-            trimCanvas.addEventListener('touchstart', function (e) {
-                e.preventDefault();
-            });
-            trimCanvas.addEventListener('touchmove', function (e) {
-                e.preventDefault();
-            });
-            trimCanvas.addEventListener('touchend', function (e) {
-                e.preventDefault();
-            });
-            resetTrimButton.addEventListener('click', function () {
-                resetTrim();
-            });
-            // コードのコピー
-            copyButton.addEventListener('click', function () {
-                if (!arrayCode.textContent)
-                    return;
-                navigator.clipboard.writeText(arrayCode.textContent);
-            });
-            return [2 /*return*/];
         });
     });
 } // main
-function loadFile(file) {
-    var reader = new FileReader();
-    reader.onload = function (event) {
-        var img = new Image();
-        img.onload = function () {
-            origCanvas.width = img.width;
-            origCanvas.height = img.height;
-            var ctx = origCanvas.getContext('2d', { willReadFrequently: true });
-            ctx.clearRect(0, 0, img.width, img.height);
-            ctx.drawImage(img, 0, 0);
-            resetTrim();
-            quantize();
-            requestUpdateTrimCanvas();
-        };
-        if (typeof event.target.result === 'string') {
-            img.src = event.target.result;
-        }
-        else {
-            throw new Error('Invalid image data');
-        }
-    };
-    reader.readAsDataURL(file);
+function loadFromFile(file) {
+    return __awaiter(this, void 0, void 0, function () {
+        var _this = this;
+        return __generator(this, function (_a) {
+            return [2 /*return*/, new Promise(function (resolve, reject) {
+                    var reader = new FileReader();
+                    reader.onload = function (e) { return __awaiter(_this, void 0, void 0, function () {
+                        return __generator(this, function (_a) {
+                            switch (_a.label) {
+                                case 0:
+                                    if (!(typeof e.target.result === 'string')) return [3 /*break*/, 2];
+                                    return [4 /*yield*/, loadFromString(e.target.result)];
+                                case 1:
+                                    _a.sent();
+                                    return [3 /*break*/, 3];
+                                case 2: throw new Error('Invalid image data');
+                                case 3:
+                                    resolve();
+                                    return [2 /*return*/];
+                            }
+                        });
+                    }); };
+                    reader.onerror = function (e) {
+                        reject(new Error('Failed to read file'));
+                    };
+                    reader.readAsDataURL(file);
+                })];
+        });
+    });
+}
+function loadFromString(s) {
+    return __awaiter(this, void 0, void 0, function () {
+        return __generator(this, function (_a) {
+            return [2 /*return*/, new Promise(function (resolve, reject) {
+                    var img = new Image();
+                    img.onload = function () {
+                        origCanvas.width = img.width;
+                        origCanvas.height = img.height;
+                        var ctx = origCanvas.getContext('2d', { willReadFrequently: true });
+                        ctx.clearRect(0, 0, img.width, img.height);
+                        ctx.drawImage(img, 0, 0);
+                        resetTrim();
+                        quantize();
+                        requestUpdateTrimCanvas();
+                        resolve();
+                    };
+                    img.onerror = function () {
+                        reject(new Error('Failed to load image'));
+                    };
+                    img.src = s;
+                })];
+        });
+    });
 }
 // トリミングのリセット
 function resetTrim() {
@@ -807,31 +899,37 @@ function getTrimViewArea() {
     var viewY0 = canvasH / 2;
     var viewW = canvasW - margin * 2;
     var viewH = canvasH - margin * 2;
-    return new Rect(viewX0, viewY0, viewW, viewH);
+    return { x: viewX0, y: viewY0, width: viewW, height: viewH };
 }
 // トリミングUIのワールド座標をビュー座標に変換
 function trimWorldToView(x, y) {
     var view = getTrimViewArea();
-    return new Point(view.x + (x - worldX0) * zoom, view.y + (y - worldY0) * zoom);
+    return {
+        x: view.x + (x - worldX0) * zoom,
+        y: view.y + (y - worldY0) * zoom,
+    };
 }
 // トリミングUIのビュー座標をワールド座標に変換
 function trimViewToWorld(x, y) {
     var view = getTrimViewArea();
-    return new Point((x - view.x) / zoom + worldX0, (y - view.y) / zoom + worldY0);
+    return {
+        x: (x - view.x) / zoom + worldX0,
+        y: (y - view.y) / zoom + worldY0,
+    };
 }
 // ポイントされているビュー座標からトリミングUIの次の状態を取得
 function trimViewToNextState(x, y) {
     var _a = trimWorldToView(trimL, trimT), trimViewL = _a.x, trimViewT = _a.y;
     var _b = trimWorldToView(trimR, trimB), trimViewR = _b.x, trimViewB = _b.y;
     if (Math.abs(x - trimViewL) < 10)
-        return TrimState.DRAG_LEFT;
+        return 4 /* TrimState.DRAG_LEFT */;
     if (Math.abs(x - trimViewR) < 10)
-        return TrimState.DRAG_RIGHT;
+        return 2 /* TrimState.DRAG_RIGHT */;
     if (Math.abs(y - trimViewT) < 10)
-        return TrimState.DRAG_TOP;
+        return 1 /* TrimState.DRAG_TOP */;
     if (Math.abs(y - trimViewB) < 10)
-        return TrimState.DRAG_BOTTOM;
-    return TrimState.IDLE;
+        return 3 /* TrimState.DRAG_BOTTOM */;
+    return 0 /* TrimState.IDLE */;
 }
 function requestUpdateTrimCanvas() {
     if (updateTrimCanvasTimeoutId >= 0)
@@ -855,7 +953,7 @@ function updateTrimCanvas() {
     var origW = origCanvas.width;
     var origH = origCanvas.height;
     var view = getTrimViewArea();
-    if (trimUiState == TrimState.IDLE) {
+    if (trimUiState == 0 /* TrimState.IDLE */) {
         // ビューに触れていない間に座標系を調整
         var worldL = Math.min(trimL, 0);
         var worldR = Math.max(trimR, origW);
@@ -973,22 +1071,16 @@ function quantize() {
         if (widthBox.value && heightBox.value) {
             outW = parseInt(widthBox.value);
             outH = parseInt(heightBox.value);
-            widthBox.placeholder = '';
-            heightBox.placeholder = '';
             scalingMethodBox.disabled = false;
         }
         else if (widthBox.value) {
             outW = parseInt(widthBox.value);
             outH = Math.ceil(srcH * (outW / srcW));
-            widthBox.placeholder = '';
-            heightBox.placeholder = '(' + outH + ')';
             scalingMethodBox.disabled = true;
         }
         else if (heightBox.value) {
             outH = parseInt(heightBox.value);
             outW = Math.ceil(srcW * (outH / srcH));
-            widthBox.placeholder = '(' + outW + ')';
-            heightBox.placeholder = '';
             scalingMethodBox.disabled = true;
         }
         else {
@@ -997,10 +1089,13 @@ function quantize() {
                 outW = Math.floor(outW * scale);
                 outH = Math.floor(outH * scale);
             }
-            widthBox.placeholder = '(' + outW + ')';
-            heightBox.placeholder = '(' + outH + ')';
             scalingMethodBox.disabled = true;
         }
+        if (outW * outH > 1024 * 1024) {
+            throw new Error('Too large image.');
+        }
+        widthBox.placeholder = '(' + outW + ')';
+        heightBox.placeholder = '(' + outH + ')';
         // トリミング + リサイズの適用
         {
             var outCtx = previewCanvas.getContext('2d', { willReadFrequently: true });
@@ -1050,31 +1145,31 @@ function quantize() {
         var fmt = new PixelFormat();
         switch (formatBox.value) {
             case 'rgb565':
-                fmt.colorSpace = ColorSpace.RGB;
+                fmt.colorSpace = 1 /* ColorSpace.RGB */;
                 fmt.channelDepth = [5, 6, 5];
                 break;
             case 'rgb555':
-                fmt.colorSpace = ColorSpace.RGB;
+                fmt.colorSpace = 1 /* ColorSpace.RGB */;
                 fmt.channelDepth = [5, 5, 5];
                 break;
             case 'rgb332':
-                fmt.colorSpace = ColorSpace.RGB;
+                fmt.colorSpace = 1 /* ColorSpace.RGB */;
                 fmt.channelDepth = [3, 3, 2];
                 break;
             case 'rgb111':
-                fmt.colorSpace = ColorSpace.RGB;
+                fmt.colorSpace = 1 /* ColorSpace.RGB */;
                 fmt.channelDepth = [1, 1, 1];
                 break;
             case 'gray4':
-                fmt.colorSpace = ColorSpace.GRAYSCALE;
+                fmt.colorSpace = 0 /* ColorSpace.GRAYSCALE */;
                 fmt.channelDepth = [4];
                 break;
             case 'gray2':
-                fmt.colorSpace = ColorSpace.GRAYSCALE;
+                fmt.colorSpace = 0 /* ColorSpace.GRAYSCALE */;
                 fmt.channelDepth = [2];
                 break;
             case 'bw':
-                fmt.colorSpace = ColorSpace.GRAYSCALE;
+                fmt.colorSpace = 0 /* ColorSpace.GRAYSCALE */;
                 fmt.channelDepth = [1];
                 break;
             default:
@@ -1115,7 +1210,7 @@ function quantize() {
             var srcRgbData = previewImageData.data;
             var previewData = new Uint8Array(srcRgbData.length);
             var numPixels = outW * outH;
-            var numCh = fmt.colorSpace === ColorSpace.GRAYSCALE ? 1 : 3;
+            var numCh = fmt.colorSpace === 0 /* ColorSpace.GRAYSCALE */ ? 1 : 3;
             var outData = [];
             for (var i = 0; i < numCh; i++) {
                 outData.push(new Uint8Array(numPixels));
@@ -1130,10 +1225,10 @@ function quantize() {
                 var gray = 0.299 * r + 0.587 * g + 0.114 * b;
                 histogram[Math.round(gray * (HISTOGRAM_SIZE - 1))]++;
                 switch (fmt.colorSpace) {
-                    case ColorSpace.GRAYSCALE:
+                    case 0 /* ColorSpace.GRAYSCALE */:
                         norm.data[i * numCh] = gray;
                         break;
-                    case ColorSpace.RGB:
+                    case 1 /* ColorSpace.RGB */:
                         norm.data[i * numCh + 0] = r;
                         norm.data[i * numCh + 1] = g;
                         norm.data[i * numCh + 2] = b;
@@ -1146,14 +1241,14 @@ function quantize() {
             {
                 var gamma = 1;
                 if (gammaBox.value) {
-                    gamma = parseFloat(gammaBox.value) / 100;
+                    gamma = parseFloat(gammaBox.value);
                     gammaBox.placeholder = '';
                 }
                 else {
                     gamma = correctGamma(histogram);
                 }
                 gamma = clip(0.01, 5, gamma);
-                gammaBox.placeholder = '(' + Math.round(gamma * 100) + ')';
+                gammaBox.placeholder = '(' + Math.round(gamma * 100) / 100 + ')';
                 if (gamma != 1) {
                     for (var i = 0; i < norm.data.length; i++) {
                         var val = Math.pow(norm.data[i], 1 / gamma);
@@ -1230,7 +1325,7 @@ function quantize() {
                         outData[ch][iPix] = out[ch];
                     }
                     // プレビュー用の色生成
-                    if (fmt.colorSpace === ColorSpace.GRAYSCALE) {
+                    if (fmt.colorSpace === 0 /* ColorSpace.GRAYSCALE */) {
                         var gray = Math.round(out[0] * 255 / palette_1.outMax[0]);
                         for (var ch = 0; ch < 3; ch++) {
                             previewData[iPix * 4 + ch] = gray;
@@ -1266,7 +1361,10 @@ function quantize() {
             var rect = previewCanvas.parentElement.getBoundingClientRect();
             var viewW = rect.width - (borderWidth * 2);
             var viewH = rect.height - (borderWidth * 2);
-            var zoom_1 = Math.max(1, Math.floor(Math.min(viewW / outW, viewH / outH)));
+            var zoom_1 = Math.min(viewW / outW, viewH / outH);
+            if (zoom_1 >= 1) {
+                zoom_1 = Math.max(1, Math.floor(zoom_1));
+            }
             var canvasW = Math.round(outW * zoom_1);
             var canvasH = Math.round(outH * zoom_1);
             previewCanvas.style.width = "".concat(canvasW, "px");

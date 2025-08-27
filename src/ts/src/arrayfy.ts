@@ -1,5 +1,5 @@
 
-enum TrimState {
+const enum TrimState {
   IDLE = 0,
   DRAG_TOP = 1,
   DRAG_RIGHT = 2,
@@ -7,20 +7,22 @@ enum TrimState {
   DRAG_LEFT = 4,
 }
 
-enum ColorSpace {
+const enum ColorSpace {
   GRAYSCALE = 0,
   RGB = 1,
 }
 
-class Point {
-  constructor(public x: number, public y: number) {}
-}
+type Point = {
+  x: number,
+  y: number
+};
 
-class Rect {
-  constructor(
-      public x: number, public y: number, public width: number,
-      public height: number) {}
-}
+type Rect = {
+  x: number,
+  y: number,
+  width: number,
+  height: number
+};
 
 class PixelFormat {
   public colorSpace: ColorSpace;
@@ -161,15 +163,27 @@ function makeParagraph(children = []): HTMLParagraphElement {
   return p;
 }
 
-function makePropertyContainer(children = []): HTMLSpanElement {
+function makeNoWrapSpan(children = []): HTMLSpanElement {
   const span = document.createElement('span');
-  span.classList.add('propertyContainer');
+  span.classList.add('nowrap');
   toElementArray(children).forEach(child => span.appendChild(child));
   return span;
 }
 
+function makePropertyContainer(
+    children = [], description: string): HTMLSpanElement {
+  const span = document.createElement('span');
+  span.classList.add('propertyContainer');
+  toElementArray(children).forEach(child => {
+    span.appendChild(child);
+    if (description) child.title = description;
+  });
+  if (description) span.title = description;
+  return span;
+}
+
 function makeSectionLabel(text: string): HTMLSpanElement {
-  const span = makePropertyContainer([text]);
+  const span = makePropertyContainer([text], '');
   span.style.width = '100px';
   span.style.borderStyle = 'none';
   span.style.borderRadius = '5px';
@@ -220,6 +234,18 @@ function makeButton(text = ''): HTMLButtonElement {
   return button;
 }
 
+function makeSampleImageButton(url: string) {
+  const button = document.createElement('button');
+  button.classList.add('sampleImageButton');
+  button.style.backgroundImage = `url(${url})`;
+
+  button.addEventListener('click', () => {
+    loadFromString(url);
+  });
+
+  return button;
+}
+
 function makePresetButton(
     name: string, text: string, description: string): HTMLButtonElement {
   const button = document.createElement('button');
@@ -250,7 +276,7 @@ const origCanvas = document.createElement('canvas');
 const bgColorBox = makeTextBox('#000');
 const resetTrimButton = makeButton('範囲をリセット');
 const trimCanvas = document.createElement('canvas');
-const gammaBox = makeTextBox('100', '(auto)', 5);
+const gammaBox = makeTextBox('1', '(auto)', 4);
 const brightnessBox = makeTextBox('0', '(auto)', 5);
 const contrastBox = makeTextBox('100', '(auto)', 5);
 const invertBox = makeCheckBox('階調反転');
@@ -258,10 +284,10 @@ const presetRgb565Be =
     makePresetButton('rgb565_be', 'RGB565-BE', '各種 16bit カラー液晶');
 const presetRgb332 =
     makePresetButton('rgb332', 'RGB332', '各種 GFX ライブラリ');
+const presetBwHpMf =
+    makePresetButton('bw_hp_mf', '白黒 横パッキング', '各種 GFX ライブラリ');
 const presetBwVpLf =
     makePresetButton('bw_vp_lf', '白黒 縦パッキング', 'SSD1306/1309, 他...');
-const presetBwHpMf =
-    makePresetButton('bw_hp_mf', '白黒 横パッキング', 'SHARPメモリ液晶, 他...');
 const formatBox = makeSelectBox(
     {
       rgb565: 'RGB565',
@@ -393,11 +419,14 @@ async function main() {
     pasteTarget.placeholder = 'ここに貼り付け';
 
     container.appendChild(makeParagraph([
-      makeSectionLabel('入力画像'),
-      '画像をドロップ、または ',
-      pasteTarget,
-      ' または ',
-      fileBrowseButton,
+      makeSectionLabel('入力画像'), makeNoWrapSpan(['画像をドロップ、']),
+      makeNoWrapSpan(['または ', pasteTarget, '、']),
+      makeNoWrapSpan([' または ', fileBrowseButton, '、']), makeNoWrapSpan([
+        'またはサンプル: ',
+        makeSampleImageButton('./img/sample/gradient.png'),
+        makeSampleImageButton('./img/sample/forest-path.jpg'),
+        makeSampleImageButton('./img/sample/anime-girl.png'),
+      ])
     ]));
   }
 
@@ -408,16 +437,27 @@ async function main() {
       document.createElement('br'),
       presetRgb565Be,
       presetRgb332,
-      presetBwVpLf,
       presetBwHpMf,
+      presetBwVpLf,
     ]);
     container.appendChild(p);
   }
 
   {
     const p = makeParagraph([
+      '白黒ディスプレイについては、各種 GFX ライブラリを使用して描画する場合は横パッキングを選択してください。',
+      'I2C や SPI ドライバを用いて直接転送する場合はディスプレイの仕様に従ってください。',
+      'SSD1306/1309 など一部のディスプレイでは縦パッキングされたデータが必要です。',
+    ]);
+    p.style.fontSize = 'smaller';
+    container.appendChild(p);
+  }
+
+  {
+    const p = makeParagraph([
       makeSectionLabel('トリミング'),
-      makePropertyContainer([resetTrimButton]),
+      makePropertyContainer(
+          [resetTrimButton], 'トリミングしていない状態に戻します。'),
     ]);
     container.appendChild(p);
   }
@@ -436,7 +476,9 @@ async function main() {
   {
     const p = makeParagraph([
       makeSectionLabel('透過色'),
-      makePropertyContainer(['塗りつぶす: ', bgColorBox]),
+      makePropertyContainer(
+          ['塗りつぶす: ', bgColorBox],
+          '画像の透明部分をこの色で塗り潰して不透明化します。'),
     ]);
     container.appendChild(p);
 
@@ -455,10 +497,17 @@ async function main() {
   {
     const p = makeParagraph([
       makeSectionLabel('色調補正'),
-      makePropertyContainer(['ガンマ: ', gammaBox, '%']),
-      makePropertyContainer(['輝度オフセット: ', brightnessBox]),
-      makePropertyContainer(['コントラスト: ', contrastBox, '%']),
-      makePropertyContainer([invertBox.parentNode]),
+      makePropertyContainer(
+          ['ガンマ: ', gammaBox],
+          'デフォルトは 1.0 です。\n空欄にすると、輝度 50% を中心にバランスが取れるように自動調整します。'),
+      makePropertyContainer(
+          ['輝度オフセット: ', brightnessBox],
+          'デフォルトは 0 です。\n空欄にすると、輝度 50% を中心にバランスが取れるように自動調整します。'),
+      makePropertyContainer(
+          ['コントラスト: ', contrastBox, '%'],
+          'デフォルトは 100% です。\n空欄にすると、階調が失われない範囲でダイナミックレンジが最大となるように自動調整します。'),
+      makePropertyContainer(
+          [invertBox.parentNode], '各チャネルの値を大小反転します。'),
     ]);
     container.appendChild(p);
 
@@ -475,8 +524,12 @@ async function main() {
   {
     const p = makeParagraph([
       makeSectionLabel('出力サイズ'),
-      makePropertyContainer([widthBox, ' x ', heightBox, ' px']),
-      makePropertyContainer(['拡縮方法: ', scalingMethodBox]),
+      makePropertyContainer(
+          [widthBox, ' x ', heightBox, ' px'],
+          '片方を空欄にすると他方はアスペクト比に基づいて自動的に決定されます。'),
+      makePropertyContainer(
+          ['拡縮方法: ', scalingMethodBox],
+          'トリミングサイズと出力サイズが異なる場合の拡縮方法を指定します。'),
     ]);
     container.appendChild(p);
 
@@ -493,9 +546,14 @@ async function main() {
   {
     const p = makeParagraph([
       makeSectionLabel('量子化'),
-      makePropertyContainer(['フォーマット: ', formatBox]),
-      makePropertyContainer(['丸め方法: ', roundMethodBox]),
-      makePropertyContainer(['ディザリング: ', ditherBox]),
+      makePropertyContainer(
+          ['フォーマット: ', formatBox], 'ピクセルフォーマットを指定します。'),
+      makePropertyContainer(
+          ['丸め方法: ', roundMethodBox],
+          'パレットから色を選択する際の戦略を指定します。\nディザリングを行う場合はあまり関係ありません。'),
+      makePropertyContainer(
+          ['ディザリング: ', ditherBox],
+          'あえてノイズを加えることでできるだけ元画像の輝度を再現します。'),
     ]);
     container.appendChild(p);
 
@@ -525,11 +583,23 @@ async function main() {
   {
     const p = makeParagraph([
       makeSectionLabel('エンコード'),
-      makePropertyContainer(['チャネル順: ', channelOrderBox]),
-      makePropertyContainer(['ピクセル順: ', pixelOrderBox]),
-      makePropertyContainer(['バイト順: ', byteOrderBox]),
-      makePropertyContainer(['パッキング方向: ', packingBox]),
-      makePropertyContainer(['アドレス方向: ', addressingBox]),
+      makePropertyContainer(
+          ['チャネル順: ', channelOrderBox],
+          'RGB のチャネルを並べる順序を指定します。\n上位からであることが多いです。'),
+      makePropertyContainer(
+          ['ピクセル順: ', pixelOrderBox],
+          'バイト内のピクセルの順序を指定します。\n横パッキングでは上位から、縦パッキングでは下位からであることが多いです。'),
+      makePropertyContainer(
+          ['バイト順: ', byteOrderBox],
+          'ピクセル内のバイトの順序を指定します。\nGFX ライブラリなどでは BigEndian であることが多いです。'),
+      makePropertyContainer(
+          ['パッキング方向: ', packingBox],
+          'ピクセルをどの方向にパッキングするかを指定します。\n' +
+              '多くの場合横ですが、SSD1306/1309 などの一部の白黒ディスプレイに\n' +
+              '直接転送可能なデータを生成する場合は縦を指定してください。'),
+      makePropertyContainer(
+          ['アドレス方向: ', addressingBox],
+          'アドレスのインクリメント方向を指定します。\n通常は水平です。'),
     ]);
 
     container.appendChild(p);
@@ -547,8 +617,10 @@ async function main() {
   {
     const p = makeParagraph([
       makeSectionLabel('コード生成'),
-      makePropertyContainer(['列数: ', codeColsBox]),
-      makePropertyContainer(['インデント: ', indentBox])
+      makePropertyContainer(
+          ['列数: ', codeColsBox], '1 行に詰め込む要素数を指定します。'),
+      makePropertyContainer(
+          ['インデント: ', indentBox], 'インデントの形式とサイズを指定します。')
     ]);
 
     container.appendChild(p);
@@ -582,10 +654,10 @@ async function main() {
   }
 
   // ファイル選択
-  hiddenFileBox.addEventListener('change', (e) => {
+  hiddenFileBox.addEventListener('change', async (e) => {
     const input = e.target as HTMLInputElement;
     if (input.files && input.files[0]) {
-      loadFile(input.files[0]);
+      await loadFromFile(input.files[0]);
     }
   });
 
@@ -606,25 +678,25 @@ async function main() {
     e.stopPropagation();
     dropTarget.style.display = 'none';
   });
-  dropTarget.addEventListener('drop', (e) => {
+  dropTarget.addEventListener('drop', async (e) => {
     e.preventDefault();
     e.stopPropagation();
     dropTarget.style.display = 'none';
     const items = e.dataTransfer.items;
     for (const item of items) {
       if (item.kind === 'file') {
-        loadFile(item.getAsFile());
+        await loadFromFile(item.getAsFile());
         break;
       }
     }
   });
 
   // 貼り付け
-  pasteTarget.addEventListener('paste', (e) => {
+  pasteTarget.addEventListener('paste', async (e) => {
     const items = e.clipboardData.items;
     for (const item of items) {
       if (item.kind === 'file') {
-        loadFile(item.getAsFile());
+        await loadFromFile(item.getAsFile());
         break;
       }
     }
@@ -710,11 +782,31 @@ async function main() {
     if (!arrayCode.textContent) return;
     navigator.clipboard.writeText(arrayCode.textContent);
   });
+
+  // サンプルのロード
+  await loadFromString('./img/sample/gradient.png');
 }  // main
 
-function loadFile(file: File): void {
-  const reader = new FileReader();
-  reader.onload = (event) => {
+async function loadFromFile(file: File): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      if (typeof e.target.result === 'string') {
+        await loadFromString(e.target.result);
+      } else {
+        throw new Error('Invalid image data');
+      }
+      resolve();
+    };
+    reader.onerror = (e) => {
+      reject(new Error('Failed to read file'));
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+async function loadFromString(s: string): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
     const img = new Image();
     img.onload = () => {
       origCanvas.width = img.width;
@@ -725,14 +817,13 @@ function loadFile(file: File): void {
       resetTrim();
       quantize();
       requestUpdateTrimCanvas();
+      resolve();
     };
-    if (typeof event.target.result === 'string') {
-      img.src = event.target.result;
-    } else {
-      throw new Error('Invalid image data');
-    }
-  };
-  reader.readAsDataURL(file);
+    img.onerror = () => {
+      reject(new Error('Failed to load image'));
+    };
+    img.src = s;
+  });
 }
 
 // トリミングのリセット
@@ -754,21 +845,25 @@ function getTrimViewArea(): Rect {
   const viewY0 = canvasH / 2;
   const viewW = canvasW - margin * 2;
   const viewH = canvasH - margin * 2;
-  return new Rect(viewX0, viewY0, viewW, viewH);
+  return {x: viewX0, y: viewY0, width: viewW, height: viewH};
 }
 
 // トリミングUIのワールド座標をビュー座標に変換
 function trimWorldToView(x: number, y: number): Point {
   const view = getTrimViewArea();
-  return new Point(
-      view.x + (x - worldX0) * zoom, view.y + (y - worldY0) * zoom);
+  return {
+    x: view.x + (x - worldX0) * zoom,
+    y: view.y + (y - worldY0) * zoom,
+  };
 }
 
 // トリミングUIのビュー座標をワールド座標に変換
 function trimViewToWorld(x: number, y: number): Point {
   const view = getTrimViewArea();
-  return new Point(
-      (x - view.x) / zoom + worldX0, (y - view.y) / zoom + worldY0);
+  return {
+    x: (x - view.x) / zoom + worldX0,
+    y: (y - view.y) / zoom + worldY0,
+  };
 }
 
 // ポイントされているビュー座標からトリミングUIの次の状態を取得
@@ -926,20 +1021,14 @@ function quantize(): void {
     if (widthBox.value && heightBox.value) {
       outW = parseInt(widthBox.value);
       outH = parseInt(heightBox.value);
-      widthBox.placeholder = '';
-      heightBox.placeholder = '';
       scalingMethodBox.disabled = false;
     } else if (widthBox.value) {
       outW = parseInt(widthBox.value);
       outH = Math.ceil(srcH * (outW / srcW));
-      widthBox.placeholder = '';
-      heightBox.placeholder = '(' + outH + ')';
       scalingMethodBox.disabled = true;
     } else if (heightBox.value) {
       outH = parseInt(heightBox.value);
       outW = Math.ceil(srcW * (outH / srcH));
-      widthBox.placeholder = '(' + outW + ')';
-      heightBox.placeholder = '';
       scalingMethodBox.disabled = true;
     } else {
       if (outW > 256 || outH > 256) {
@@ -947,10 +1036,15 @@ function quantize(): void {
         outW = Math.floor(outW * scale);
         outH = Math.floor(outH * scale);
       }
-      widthBox.placeholder = '(' + outW + ')';
-      heightBox.placeholder = '(' + outH + ')';
       scalingMethodBox.disabled = true;
     }
+
+    if (outW * outH > 1024 * 1024) {
+      throw new Error('Too large image.');
+    }
+
+    widthBox.placeholder = '(' + outW + ')';
+    heightBox.placeholder = '(' + outH + ')';
 
     // トリミング + リサイズの適用
     {
@@ -1095,13 +1189,13 @@ function quantize(): void {
       {
         let gamma = 1;
         if (gammaBox.value) {
-          gamma = parseFloat(gammaBox.value) / 100;
+          gamma = parseFloat(gammaBox.value);
           gammaBox.placeholder = '';
         } else {
           gamma = correctGamma(histogram);
         }
         gamma = clip(0.01, 5, gamma);
-        gammaBox.placeholder = '(' + Math.round(gamma * 100) + ')';
+        gammaBox.placeholder = '(' + Math.round(gamma * 100) / 100 + ')';
         if (gamma != 1) {
           for (let i = 0; i < norm.data.length; i++) {
             const val = Math.pow(norm.data[i], 1 / gamma);
@@ -1224,8 +1318,10 @@ function quantize(): void {
       const rect = previewCanvas.parentElement.getBoundingClientRect();
       const viewW = rect.width - (borderWidth * 2);
       const viewH = rect.height - (borderWidth * 2);
-      const zoom =
-          Math.max(1, Math.floor(Math.min(viewW / outW, viewH / outH)));
+      let zoom = Math.min(viewW / outW, viewH / outH);
+      if (zoom >= 1) {
+        zoom = Math.max(1, Math.floor(zoom));
+      }
       const canvasW = Math.round(outW * zoom);
       const canvasH = Math.round(outH * zoom);
       previewCanvas.style.width = `${canvasW}px`;
