@@ -230,7 +230,7 @@ var bgColorBox = makeTextBox('#000');
 var resetTrimButton = makeButton('範囲をリセット');
 var trimCanvas = document.createElement('canvas');
 var gammaBox = makeTextBox('100', '(auto)', 5);
-var brightnessBox = makeTextBox('100', '(auto)', 5);
+var brightnessBox = makeTextBox('0', '(auto)', 5);
 var contrastBox = makeTextBox('100', '(auto)', 5);
 var invertBox = makeCheckBox('階調反転');
 var presetRgb565Be = makePresetButton('rgb565_be', 'RGB565-BE', '各種 16bit カラー液晶');
@@ -257,6 +257,10 @@ var ditherBox = makeSelectBox({
     none: 'なし',
     diffusion: '誤差拡散',
 }, 'diffusion');
+var roundMethodBox = makeSelectBox({
+    nearest: '最も近い輝度',
+    equalDivision: '均等割り',
+}, 'nearest');
 var previewCanvas = document.createElement('canvas');
 var quantizeErrorBox = document.createElement('span');
 var channelOrderBox = makeSelectBox({
@@ -279,7 +283,11 @@ var addressingBox = makeSelectBox({
     hori: '水平',
     vert: '垂直',
 }, 'hori');
-var codeColsBox = makeTextBox('16', '', 3);
+var codeColsBox = makeSelectBox({
+    '8': '8',
+    '16': '16',
+    '32': '32',
+}, '16');
 var indentBox = makeSelectBox({
     sp2: 'スペース x2',
     sp4: 'スペース x4',
@@ -336,7 +344,6 @@ function main() {
                     pasteTarget,
                     ' または ',
                     fileBrowseButton,
-                    ' してください',
                 ]));
             }
             {
@@ -389,7 +396,7 @@ function main() {
                 p = makeParagraph([
                     makeSectionLabel('色調補正'),
                     makePropertyContainer(['ガンマ: ', gammaBox, '%']),
-                    makePropertyContainer(['明度: ', brightnessBox, '%']),
+                    makePropertyContainer(['輝度オフセット: ', brightnessBox]),
                     makePropertyContainer(['コントラスト: ', contrastBox, '%']),
                     makePropertyContainer([invertBox.parentNode]),
                 ]);
@@ -423,6 +430,7 @@ function main() {
                 p = makeParagraph([
                     makeSectionLabel('量子化'),
                     makePropertyContainer(['フォーマット: ', formatBox]),
+                    makePropertyContainer(['丸め方法: ', roundMethodBox]),
                     makePropertyContainer(['ディザリング: ', ditherBox]),
                 ]);
                 container.appendChild(p);
@@ -854,6 +862,7 @@ function requestQuantize() {
     }, 300);
 }
 function quantize() {
+    var e_6, _a;
     if (quantizeTimeoutId >= 0) {
         clearTimeout(quantizeTimeoutId);
         quantizeTimeoutId = -1;
@@ -975,6 +984,24 @@ function quantize() {
             default:
                 throw new Error('Unknown image format');
         }
+        // 均等割りはチャンネル深度が2以上でないと意味がないので無効化
+        var maxChannelDepth = 0;
+        try {
+            for (var _b = __values(fmt.channelDepth), _c = _b.next(); !_c.done; _c = _b.next()) {
+                var depth = _c.value;
+                if (depth > maxChannelDepth) {
+                    maxChannelDepth = depth;
+                }
+            }
+        }
+        catch (e_6_1) { e_6 = { error: e_6_1 }; }
+        finally {
+            try {
+                if (_c && !_c.done && (_a = _b.return)) _a.call(_b);
+            }
+            finally { if (e_6) throw e_6.error; }
+        }
+        roundMethodBox.disabled = (maxChannelDepth <= 1);
         // 量子化の適用
         {
             var previewCtx = previewCanvas.getContext('2d', { willReadFrequently: true });
@@ -989,15 +1016,15 @@ function quantize() {
                 normChannels.push(new Float32Array(numPixels));
                 outData.push(new Uint8Array(numPixels));
             }
-            // 正規化
-            var grayMin = 255;
-            var grayMax = 0;
-            var grayAvg = 0;
+            // 正規化 + 自動ガンマ補正用の値収集
+            var HISTOGRAM_SIZE = 16;
+            var histogram = new Uint32Array(HISTOGRAM_SIZE);
             for (var i = 0; i < numPixels; i++) {
                 var r = srcRgbData[i * 4] / 255;
                 var g = srcRgbData[i * 4 + 1] / 255;
                 var b = srcRgbData[i * 4 + 2] / 255;
                 var gray = 0.299 * r + 0.587 * g + 0.114 * b;
+                histogram[Math.round(gray * (HISTOGRAM_SIZE - 1))]++;
                 switch (fmt.colorSpace) {
                     case ColorSpace.GRAYSCALE:
                         normChannels[0][i] = gray;
@@ -1010,93 +1037,158 @@ function quantize() {
                     default:
                         throw new Error('Unknown color space');
                 }
-                grayAvg += gray;
-                grayMin = Math.min(grayMin, gray);
-                grayMax = Math.max(grayMax, gray);
             }
-            grayAvg /= numPixels;
-            // ガンマ決定
+            // 輝度自動補正用の値収集
+            var chMin = 1;
+            var chMax = 0;
+            for (var ch = 0; ch < numChannels; ch++) {
+                for (var i = 0; i < numPixels; i++) {
+                    var val = normChannels[ch][i];
+                    if (val < chMin)
+                        chMin = val;
+                    if (val > chMax)
+                        chMax = val;
+                }
+            }
+            // ガンマ補正
             var gamma = 1;
             if (gammaBox.value) {
                 gamma = parseFloat(gammaBox.value) / 100;
                 gammaBox.placeholder = '';
             }
-            gamma = Math.max(0.01, Math.min(5, gamma));
+            else {
+                gamma = correctGamma(histogram);
+            }
+            gamma = clip(0.01, 5, gamma);
             gammaBox.placeholder = '(' + Math.round(gamma * 100) + ')';
-            // 明度決定
-            var brightness = 1;
+            if (gamma != 1) {
+                chMin = 255;
+                chMax = 0;
+                for (var ch = 0; ch < numChannels; ch++) {
+                    for (var i = 0; i < numPixels; i++) {
+                        var val = Math.pow(normChannels[ch][i], 1 / gamma);
+                        normChannels[ch][i] = val;
+                        if (val < chMin)
+                            chMin = val;
+                        if (val > chMax)
+                            chMax = val;
+                    }
+                }
+            }
+            // 輝度補正
+            var brightness = 0;
             if (brightnessBox.value) {
-                brightness = parseFloat(brightnessBox.value) / 100;
+                brightness = parseFloat(brightnessBox.value) / 255;
                 brightnessBox.placeholder = '';
             }
             else {
-                if (grayAvg > 0)
-                    brightness = 0.5 / grayAvg;
+                brightness = 0.5 - (chMin + chMax) / 2;
             }
-            brightness = Math.max(0.01, Math.min(10, brightness));
-            brightnessBox.placeholder = '(' + Math.round(brightness * 100) + ')';
-            // コントラスト決定
+            brightness = clip(-1, 1, brightness);
+            brightnessBox.placeholder = '(' + Math.round(brightness * 255) + ')';
+            if (brightness != 0) {
+                chMin = 255;
+                chMax = 0;
+                for (var ch = 0; ch < numChannels; ch++) {
+                    for (var i = 0; i < numPixels; i++) {
+                        var val = clip(0, 1, normChannels[ch][i] + brightness);
+                        normChannels[ch][i] = val;
+                        if (val < chMin)
+                            chMin = val;
+                        if (val > chMax)
+                            chMax = val;
+                    }
+                }
+            }
+            // コントラスト補正
             var contrast = 1;
             if (contrastBox.value) {
                 contrast = parseFloat(contrastBox.value) / 100;
                 contrastBox.placeholder = '';
             }
             else {
-                if (grayMax > grayMin)
-                    contrast = 1 / (grayMax - grayMin);
+                var middle = (chMin + chMax) / 2;
+                if (middle < 0.5 && chMin < middle) {
+                    contrast = 0.5 / (middle - chMin);
+                }
+                else if (middle > 0.5 && chMax > middle) {
+                    contrast = 0.5 / (chMax - middle);
+                }
             }
-            contrast = Math.max(0.01, Math.min(10, contrast));
+            contrast = clip(0.01, 10, contrast);
             contrastBox.placeholder = '(' + Math.round(contrast * 100) + ')';
-            var invert = invertBox.checked;
-            var diffusion = ditherBox.value === 'diffusion';
-            // 明度・コントラスト・階調反転適用
-            for (var ch = 0; ch < numChannels; ch++) {
-                for (var i = 0; i < numPixels; i++) {
-                    var val = normChannels[ch][i];
-                    val = Math.pow(val, 1 / gamma);
-                    val = ((val * brightness) - 0.5) * contrast + 0.5;
-                    if (invert)
-                        val = 1 - val;
-                    normChannels[ch][i] = Math.max(0, Math.min(1, val));
+            if (contrast != 1) {
+                for (var ch = 0; ch < numChannels; ch++) {
+                    for (var i = 0; i < numPixels; i++) {
+                        var val = (normChannels[ch][i] - 0.5) * contrast + 0.5;
+                        normChannels[ch][i] = clip(0, 1, val);
+                    }
+                }
+            }
+            // 階調反転
+            if (invertBox.checked) {
+                for (var ch = 0; ch < numChannels; ch++) {
+                    for (var i = 0; i < numPixels; i++) {
+                        normChannels[ch][i] = 1 - normChannels[ch][i];
+                    }
                 }
             }
             // 量子化
+            var diffusion = ditherBox.value === 'diffusion';
+            var equalDivision = !roundMethodBox.disabled && roundMethodBox.value === 'equalDivision';
             for (var ch = 0; ch < numChannels; ch++) {
                 var norm = normChannels[ch];
-                var range = (1 << fmt.channelDepth[ch]) - 1;
+                var numLevel = 1 << fmt.channelDepth[ch];
+                var inMin = equalDivision ? (1 / (numLevel * 2)) : 0;
+                var inMax = equalDivision ? ((numLevel * 2 - 1) / (numLevel * 2)) : 1;
+                var outMax = numLevel - 1;
                 for (var y = 0; y < outH; y++) {
-                    for (var x = 0; x < outW; x++) {
+                    for (var ix = 0; ix < outW; ix++) {
+                        var fwd = y % 2 == 0;
+                        var x = fwd ? ix : (outW - 1 - ix);
                         var i = (y * outW + x);
                         var normIn = norm[i];
                         // 量子化
-                        var out = Math.round(range * Math.max(0, Math.min(1, normIn)));
-                        var normOut = out / range;
+                        var normMod = clip(0, 1, (normIn - inMin) / (inMax - inMin));
+                        var out = Math.round(outMax * normMod);
+                        var normOut = out / outMax;
                         outData[ch][i] = out;
                         // プレビューの色生成
                         if (fmt.colorSpace === ColorSpace.GRAYSCALE) {
                             previewData[i * 4] = previewData[i * 4 + 1] =
-                                previewData[i * 4 + 2] = Math.round(out * 255 / range);
+                                previewData[i * 4 + 2] = Math.round(out * 255 / outMax);
                         }
                         else {
-                            previewData[i * 4 + ch] = Math.round(out * 255 / range);
+                            previewData[i * 4 + ch] = Math.round(out * 255 / outMax);
                         }
                         var error = normIn - normOut;
-                        error *= 0.99; // 減衰
-                        if (-0.01 < error && error < 0.01) {
-                            // 小さな誤差は無視する
-                            error = 0;
-                        }
                         if (diffusion && error != 0) {
-                            if (x < outW - 1) {
-                                norm[i + 1] += error * 7 / 16;
-                            }
-                            if (y < outH - 1) {
-                                if (x > 0) {
-                                    norm[i + outW - 1] += error * 3 / 16;
-                                }
-                                norm[i + outW] += error * 5 / 16;
+                            if (fwd) {
                                 if (x < outW - 1) {
-                                    norm[i + outW + 1] += error * 1 / 16;
+                                    norm[i + 1] += error * 7 / 16;
+                                }
+                                if (y < outH - 1) {
+                                    if (x > 0) {
+                                        norm[i + outW - 1] += error * 3 / 16;
+                                    }
+                                    norm[i + outW] += error * 5 / 16;
+                                    if (x < outW - 1) {
+                                        norm[i + outW + 1] += error * 1 / 16;
+                                    }
+                                }
+                            }
+                            else {
+                                if (x > 0) {
+                                    norm[i - 1] += error * 7 / 16;
+                                }
+                                if (y < outH - 1) {
+                                    if (x < outW - 1) {
+                                        norm[i + outW + 1] += error * 3 / 16;
+                                    }
+                                    norm[i + outW] += error * 5 / 16;
+                                    if (x > 0) {
+                                        norm[i + outW - 1] += error * 1 / 16;
+                                    }
                                 }
                             }
                         } // if diffusion
@@ -1136,6 +1228,32 @@ function quantize() {
         quantizeErrorBox.style.display = 'inline';
         quantizeErrorBox.textContent = error.message;
     }
+}
+function correctGamma(histogram) {
+    var N = histogram.length;
+    var min = 0.5;
+    var max = 2;
+    var gamma;
+    while (max - min > 0.01) {
+        gamma = (min + max) / 2;
+        var lo = 0, hi = 0;
+        for (var i = 0; i < N; i++) {
+            var val = Math.pow(i / (N - 1), 1 / gamma);
+            if (val < 0.5) {
+                lo += histogram[i];
+            }
+            else {
+                hi += histogram[i];
+            }
+        }
+        if (lo > hi) {
+            min = gamma;
+        }
+        else {
+            max = gamma;
+        }
+    }
+    return gamma;
 }
 function requestGenerateCode() {
     if (generateCodeTimeoutId !== -1) {
@@ -1183,14 +1301,7 @@ function generateCode() {
         pixelOrderBox.disabled = (pixelsPerPack <= 1);
         packingBox.disabled = (pixelsPerPack <= 1);
         // 列数決定
-        var arrayCols = 16;
-        if (codeColsBox.value) {
-            arrayCols = parseInt(codeColsBox.value);
-            codeColsBox.placeholder = '';
-        }
-        else {
-            codeColsBox.placeholder = '(' + arrayCols + ')';
-        }
+        var arrayCols = parseInt(codeColsBox.value);
         // インデント決定
         var indent = '  ';
         switch (indentBox.value) {
@@ -1311,6 +1422,13 @@ function generateCode() {
         codeGenErrorBox.textContent = error.message;
         codeGenErrorBox.style.display = 'block';
     }
+}
+function clip(min, max, val) {
+    if (val < min)
+        return min;
+    if (val > max)
+        return max;
+    return val;
 }
 document.addEventListener('DOMContentLoaded', function (e) { return __awaiter(_this, void 0, void 0, function () {
     return __generator(this, function (_a) {
