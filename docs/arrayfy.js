@@ -287,7 +287,7 @@ function toElementArray(children) {
         if (typeof children[i] === 'string') {
             children[i] = document.createTextNode(children[i]);
         }
-        else if (children[i] instanceof HTMLElement) {
+        else if (children[i] instanceof Node) {
             // Do nothing
         }
         else {
@@ -308,6 +308,9 @@ function makeFloatList(children, sep) {
     if (sep === void 0) { sep = true; }
     var ul = document.createElement('ul');
     toElementArray(children).forEach(function (child) {
+        if (!child.classList) {
+            child = makeSpan(child);
+        }
         var li = document.createElement('li');
         li.appendChild(child);
         if (sep && child.classList && !child.classList.contains('sectionHeader')) {
@@ -548,7 +551,7 @@ function main() {
                         hiddenFileBox.type = 'file';
                         hiddenFileBox.accept = 'image/*';
                         hiddenFileBox.style.display = 'none';
-                        fileBrowseButton = makeButton('選択');
+                        fileBrowseButton = makeButton('ファイルを選択');
                         fileBrowseButton.addEventListener('click', function () {
                             hiddenFileBox.click();
                         });
@@ -560,13 +563,13 @@ function main() {
                             makeHeader('入力画像'),
                             '画像をドロップ、',
                             makeSpan([pasteTarget, '、']),
-                            makeSpan([' または ', fileBrowseButton]),
+                            makeSpan(['または ', fileBrowseButton]),
                             makeSpan([
-                                ' (サンプル: ',
+                                '（サンプル: ',
                                 makeSampleImageButton('./img/sample/gradient.png'),
                                 makeSampleImageButton('./img/sample/forest-path.jpg'),
                                 makeSampleImageButton('./img/sample/anime-girl.png'),
-                                ' )',
+                                '）',
                             ]),
                         ], false)));
                     }

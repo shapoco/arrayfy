@@ -13,7 +13,7 @@ const enum ColorSpace {
 }
 
 const enum PixelFormat {
-  //ARGB8888,
+  // ARGB8888,
   RGB888,
   RGB666,
   RGB565,
@@ -328,7 +328,7 @@ function toElementArray(children: any): HTMLElement[] {
   for (let i = 0; i < children.length; i++) {
     if (typeof children[i] === 'string') {
       children[i] = document.createTextNode(children[i]);
-    } else if (children[i] instanceof HTMLElement) {
+    } else if (children[i] instanceof Node) {
       // Do nothing
     } else {
       throw new Error('Invalid child element');
@@ -348,6 +348,10 @@ function makeFloatList(
     children: any = [], sep: boolean = true): HTMLUListElement {
   const ul = document.createElement('ul');
   toElementArray(children).forEach(child => {
+    if (!child.classList) {
+      child = makeSpan(child);
+    }
+
     const li = document.createElement('li');
     li.appendChild(child);
     if (sep && child.classList && !child.classList.contains('sectionHeader')) {
@@ -613,7 +617,7 @@ async function main() {
     hiddenFileBox.type = 'file';
     hiddenFileBox.accept = 'image/*';
     hiddenFileBox.style.display = 'none';
-    const fileBrowseButton = makeButton('選択');
+    const fileBrowseButton = makeButton('ファイルを選択');
     fileBrowseButton.addEventListener('click', () => {
       hiddenFileBox.click();
     });
@@ -628,13 +632,13 @@ async function main() {
           makeHeader('入力画像'),
           '画像をドロップ、',
           makeSpan([pasteTarget, '、']),
-          makeSpan([' または ', fileBrowseButton]),
+          makeSpan(['または ', fileBrowseButton]),
           makeSpan([
-            ' (サンプル: ',
+            '（サンプル: ',
             makeSampleImageButton('./img/sample/gradient.png'),
             makeSampleImageButton('./img/sample/forest-path.jpg'),
             makeSampleImageButton('./img/sample/anime-girl.png'),
-            ' )',
+            '）',
           ]),
         ],
         false)));
