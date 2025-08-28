@@ -13,7 +13,7 @@ const enum ColorSpace {
 }
 
 const enum PixelFormat {
-  ARGB8888,
+  //ARGB8888,
   RGB888,
   RGB666,
   RGB565,
@@ -111,9 +111,10 @@ class Preset {
 }
 
 let presets: Record<string, Preset> = {
-  //argb8888_be: new Preset(
+  // argb8888_be: new Preset(
   //    'ARGB8888',
-  //    '透明度付きフルカラー。\n各種 GFX ライブラリで透明ピクセルを含む画像を扱う場合に。',
+  //    '透明度付きフルカラー。\n各種 GFX
+  //    ライブラリで透明ピクセルを含む画像を扱う場合に。',
   //    PixelFormat.ARGB8888,
   //    {packUnit: PackUnit.UNPACKED},
   //    ),
@@ -317,55 +318,80 @@ class NormalizedImage {
   }
 }
 
-function toElementArray(children = []): HTMLElement[] {
+function toElementArray(children: any): HTMLElement[] {
+  if (children == null) {
+    return [];
+  }
+  if (!Array.isArray(children)) {
+    children = [children];
+  }
   for (let i = 0; i < children.length; i++) {
     if (typeof children[i] === 'string') {
       children[i] = document.createTextNode(children[i]);
+    } else if (children[i] instanceof HTMLElement) {
+      // Do nothing
+    } else {
+      throw new Error('Invalid child element');
     }
   }
   return children;
 }
 
-function makeHeader(text: string): HTMLHeadingElement {
-  const h = document.createElement('h3');
-  h.textContent = text;
-  return h;
+function makeSection(children: any = []): HTMLDivElement {
+  const div = document.createElement('div');
+  div.classList.add('propertySection');
+  toElementArray(children).forEach(child => div.appendChild(child));
+  return div;
 }
 
-function makeParagraph(children = []): HTMLParagraphElement {
+function makeFloatList(
+    children: any = [], sep: boolean = true): HTMLUListElement {
+  const ul = document.createElement('ul');
+  toElementArray(children).forEach(child => {
+    const li = document.createElement('li');
+    li.appendChild(child);
+    if (sep && child.classList && !child.classList.contains('sectionHeader')) {
+      li.style.marginRight = '20px';
+    }
+    ul.appendChild(li);
+  });
+  return ul;
+}
+
+function makeParagraph(children: any = []): HTMLParagraphElement {
   const p = document.createElement('p');
   toElementArray(children).forEach(child => p.appendChild(child));
   return p;
 }
 
-function makeNoWrapSpan(children = []): HTMLSpanElement {
+function makeSpan(children: any = []): HTMLSpanElement {
+  const span = document.createElement('span');
+  toElementArray(children).forEach(child => span.appendChild(child));
+  return span;
+}
+
+function makeNowrap(children: any = []): HTMLSpanElement {
   const span = document.createElement('span');
   span.classList.add('nowrap');
   toElementArray(children).forEach(child => span.appendChild(child));
   return span;
 }
 
-function makePropertyContainer(
-    children = [], description: string): HTMLSpanElement {
-  const span = document.createElement('span');
-  span.classList.add('propertyContainer');
-  toElementArray(children).forEach(child => {
-    span.appendChild(child);
-    if (description) child.title = description;
-  });
-  if (description) span.title = description;
-  return span;
+function tip(children: any, text: string): HTMLElement {
+  let target: HTMLElement;
+  if (children instanceof HTMLElement) {
+    target = children;
+  } else {
+    target = makeSpan(children);
+  }
+  if (text) target.title = text;
+  return target;
 }
 
-function makeSectionLabel(text: string): HTMLSpanElement {
-  const span = makePropertyContainer([text], '');
-  span.style.width = '100px';
-  span.style.borderStyle = 'none';
-  span.style.borderRadius = '5px';
-  span.style.padding = '0px';
-  span.style.background = '#eee';
-  span.style.textAlign = 'center';
-  span.style.fontWeight = 'bold';
+function makeHeader(text: string): HTMLSpanElement {
+  const span = document.createElement('span');
+  span.classList.add('sectionHeader');
+  span.textContent = text;
   return span;
 }
 
@@ -414,11 +440,10 @@ function makeSampleImageButton(url: string) {
   const button = document.createElement('button');
   button.classList.add('sampleImageButton');
   button.style.backgroundImage = `url(${url})`;
-
   button.addEventListener('click', () => {
     loadFromString(url);
   });
-
+  button.textContent = '';
   return button;
 }
 
@@ -449,7 +474,7 @@ const contrastBox = makeTextBox('100', '(auto)', 5);
 const invertBox = makeCheckBox('階調反転');
 const pixelFormatBox = makeSelectBox(
     [
-      {value: PixelFormat.ARGB8888, label: 'ARGB8888'},
+      //{value: PixelFormat.ARGB8888, label: 'ARGB8888'},
       {value: PixelFormat.RGB888, label: 'RGB888'},
       {value: PixelFormat.RGB666, label: 'RGB666'},
       {value: PixelFormat.RGB565, label: 'RGB565'},
@@ -546,7 +571,7 @@ const indentBox = makeSelectBox(
       {value: Indent.TAB, label: 'タブ'},
     ],
     Indent.SPACE_X2);
-const arrayCode = document.createElement('pre');
+const codeBox = document.createElement('pre');
 const codeGenErrorBox = document.createElement('p');
 const copyButton = makeButton('コードをコピー');
 
@@ -598,48 +623,42 @@ async function main() {
     pasteTarget.style.width = '8em';
     pasteTarget.placeholder = 'ここに貼り付け';
 
-    container.appendChild(makeParagraph([
-      makeSectionLabel('入力画像'), makeNoWrapSpan(['画像をドロップ、']),
-      makeNoWrapSpan([pasteTarget, '、']),
-      makeNoWrapSpan([' または ', fileBrowseButton]), makeNoWrapSpan([
-        ' (サンプル: ',
-        makeSampleImageButton('./img/sample/gradient.png'),
-        makeSampleImageButton('./img/sample/forest-path.jpg'),
-        makeSampleImageButton('./img/sample/anime-girl.png'),
-        ' )',
-      ])
-    ]));
+    container.appendChild(makeSection(makeFloatList(
+        [
+          makeHeader('入力画像'),
+          '画像をドロップ、',
+          makeSpan([pasteTarget, '、']),
+          makeSpan([' または ', fileBrowseButton]),
+          makeSpan([
+            ' (サンプル: ',
+            makeSampleImageButton('./img/sample/gradient.png'),
+            makeSampleImageButton('./img/sample/forest-path.jpg'),
+            makeSampleImageButton('./img/sample/anime-girl.png'),
+            ' )',
+          ]),
+        ],
+        false)));
   }
 
   {
-    const p = makeParagraph([
-      makeSectionLabel('プリセット'),
-      '選んでください: ',
-      document.createElement('br'),
-    ]);
+    const pPresetButtons = makeParagraph();
     for (const id in presets) {
-      p.appendChild(makePresetButton(id, presets[id]));
+      pPresetButtons.appendChild(makePresetButton(id, presets[id]));
     }
-    container.appendChild(p);
-  }
-
-  {
-    const p = makeParagraph([
+    const pNote = makeParagraph([
       '白黒ディスプレイについては、各種 GFX ライブラリを使用して描画する場合は横パッキングを選択してください。',
       'I2C や SPI ドライバを用いて直接転送する場合はディスプレイの仕様に従ってください。',
       'SSD1306/1309 など一部のディスプレイでは縦パッキングされたデータが必要です。',
-    ]);
-    p.style.fontSize = 'smaller';
-    container.appendChild(p);
-  }
-
-  {
-    const p = makeParagraph([
-      makeSectionLabel('トリミング'),
-      makePropertyContainer(
-          [resetTrimButton], 'トリミングしていない状態に戻します。'),
-    ]);
-    container.appendChild(p);
+    ])
+    pNote.style.fontSize = 'smaller';
+    container.appendChild(makeSection([
+      makeFloatList([
+        makeHeader('プリセット'),
+        makeNowrap('選んでください: '),
+      ]),
+      pPresetButtons,
+      pNote,
+    ]));
   }
 
   {
@@ -648,21 +667,28 @@ async function main() {
     trimCanvas.style.boxSizing = 'border-box';
     trimCanvas.style.border = 'solid 1px #444';
     trimCanvas.style.backgroundImage = 'url(./img/checker.png)';
-    const p = makeParagraph([trimCanvas]);
-    p.style.textAlign = 'center';
-    container.appendChild(p);
+
+    const pCanvas = makeParagraph(trimCanvas);
+    pCanvas.style.textAlign = 'center';
+
+    container.appendChild(makeSection([
+      makeFloatList([
+        makeHeader('トリミング'),
+        tip(resetTrimButton, 'トリミングしていない状態に戻します。'),
+      ]),
+      pCanvas,
+    ]));
   }
 
   {
-    const p = makeParagraph([
-      makeSectionLabel('透過色'),
-      makePropertyContainer(
-          ['塗りつぶす: ', bgColorBox],
+    const section = makeSection(makeFloatList(([
+      makeHeader('透過色'),
+      tip(['塗りつぶす: ', bgColorBox],
           '画像の透明部分をこの色で塗り潰して不透明化します。'),
-    ]);
-    container.appendChild(p);
+    ])));
+    container.appendChild(section);
 
-    p.querySelectorAll('input, button').forEach((el) => {
+    section.querySelectorAll('input, button').forEach((el) => {
       el.addEventListener('change', () => {
         requestUpdateTrimCanvas();
         requestQuantize();
@@ -675,20 +701,16 @@ async function main() {
   }
 
   {
-    const p = makeParagraph([
-      makeSectionLabel('色調補正'),
-      makePropertyContainer(
-          ['ガンマ: ', gammaBox],
+    const p = makeSection(makeFloatList([
+      makeHeader('色調補正'),
+      tip(['ガンマ: ', gammaBox],
           'デフォルトは 1.0 です。\n空欄にすると、輝度 50% を中心にバランスが取れるように自動調整します。'),
-      makePropertyContainer(
-          ['輝度オフセット: ', brightnessBox],
+      tip(['輝度オフセット: ', brightnessBox],
           'デフォルトは 0 です。\n空欄にすると、輝度 50% を中心にバランスが取れるように自動調整します。'),
-      makePropertyContainer(
-          ['コントラスト: ', contrastBox, '%'],
+      tip(['コントラスト: ', contrastBox, '%'],
           'デフォルトは 100% です。\n空欄にすると、階調が失われない範囲でダイナミックレンジが最大となるように自動調整します。'),
-      makePropertyContainer(
-          [invertBox.parentNode], '各チャネルの値を大小反転します。'),
-    ]);
+      tip([invertBox.parentNode], '各チャネルの値を大小反転します。'),
+    ]));
     container.appendChild(p);
 
     p.querySelectorAll('input, select').forEach((el) => {
@@ -702,43 +724,16 @@ async function main() {
   }
 
   {
-    const p = makeParagraph([
-      makeSectionLabel('出力サイズ'),
-      makePropertyContainer(
-          [widthBox, ' x ', heightBox, ' px'],
+    const section = makeSection(makeFloatList([
+      makeHeader('出力サイズ'),
+      tip([widthBox, ' x ', heightBox, ' px'],
           '片方を空欄にすると他方はアスペクト比に基づいて自動的に決定されます。'),
-      makePropertyContainer(
-          ['拡縮方法: ', scalingMethodBox],
+      tip(['拡縮方法: ', scalingMethodBox],
           'トリミングサイズと出力サイズが異なる場合の拡縮方法を指定します。'),
-    ]);
-    container.appendChild(p);
+    ]));
+    container.appendChild(section);
 
-    p.querySelectorAll('input, select').forEach((el) => {
-      el.addEventListener('change', () => {
-        requestQuantize();
-      });
-      el.addEventListener('input', () => {
-        requestQuantize();
-      });
-    });
-  }
-
-  {
-    const p = makeParagraph([
-      makeSectionLabel('量子化'),
-      makePropertyContainer(
-          ['フォーマット: ', pixelFormatBox],
-          'ピクセルフォーマットを指定します。'),
-      makePropertyContainer(
-          ['丸め方法: ', roundMethodBox],
-          'パレットから色を選択する際の戦略を指定します。\nディザリングを行う場合はあまり関係ありません。'),
-      makePropertyContainer(
-          ['ディザリング: ', ditherBox],
-          'あえてノイズを加えることでできるだけ元画像の輝度を再現します。'),
-    ]);
-    container.appendChild(p);
-
-    p.querySelectorAll('input, select').forEach((el) => {
+    section.querySelectorAll('input, select').forEach((el) => {
       el.addEventListener('change', () => {
         requestQuantize();
       });
@@ -753,48 +748,66 @@ async function main() {
     previewCanvas.style.display = 'none';
     quantizeErrorBox.style.color = 'red';
     quantizeErrorBox.style.display = 'none';
-    const p = makeParagraph([previewCanvas, quantizeErrorBox]);
-    p.style.height = '400px';
-    p.style.background = '#444';
-    p.style.border = 'solid 1px #444';
-    p.style.textAlign = 'center';
-    container.appendChild(p);
+
+    const pCanvas = makeParagraph([previewCanvas, quantizeErrorBox]);
+    pCanvas.style.height = '400px';
+    pCanvas.style.background = '#444';
+    pCanvas.style.border = 'solid 1px #444';
+    pCanvas.style.textAlign = 'center';
+    container.appendChild(pCanvas);
+
+    const section = makeSection([
+      makeFloatList([
+        makeHeader('量子化'),
+        tip(['フォーマット: ', pixelFormatBox],
+            'ピクセルフォーマットを指定します。'),
+        tip(['丸め方法: ', roundMethodBox],
+            'パレットから色を選択する際の戦略を指定します。\nディザリングを行う場合はあまり関係ありません。'),
+        tip(['ディザリング: ', ditherBox],
+            'あえてノイズを加えることでできるだけ元画像の輝度を再現します。'),
+      ]),
+      pCanvas,
+    ]);
+    container.appendChild(section);
+
+    section.querySelectorAll('input, select').forEach((el) => {
+      el.addEventListener('change', () => {
+        requestQuantize();
+      });
+      el.addEventListener('input', () => {
+        requestQuantize();
+      });
+    });
   }
 
+  {}
+
   {
-    const p = makeParagraph([
-      makeSectionLabel('エンコード'),
-      makePropertyContainer(
-          ['チャネル順: ', channelOrderBox],
+    const section = makeSection(makeFloatList([
+      makeHeader('エンコード'),
+      tip(['チャネル順: ', channelOrderBox],
           'RGB のチャネルを並べる順序を指定します。\n上位からであることが多いです。'),
-      makePropertyContainer(
-          ['ピクセル順: ', pixelOrderBox],
+      tip(['ピクセル順: ', pixelOrderBox],
           'バイト内のピクセルの順序を指定します。\n横パッキングでは上位から、縦パッキングでは下位からであることが多いです。'),
-      makePropertyContainer(
-          ['バイト順: ', byteOrderBox],
+      tip(['バイト順: ', byteOrderBox],
           'ピクセル内のバイトの順序を指定します。\nGFX ライブラリなどでは BigEndian であることが多いです。'),
-      makePropertyContainer(
-          ['パッキング単位: ', packUnitBox],
+      tip(['パッキング単位: ', packUnitBox],
           'パッキングの単位を指定します。\n1 チャネルが 8 bit の倍数の場合は出力に影響しません。'),
-      makePropertyContainer(
-          ['パッキング方向: ', packDirBox],
+      tip(['パッキング方向: ', packDirBox],
           'ピクセルをどの方向にパッキングするかを指定します。\n' +
               '多くの場合横ですが、SSD1306/1309 などの一部の白黒ディスプレイに\n' +
               '直接転送可能なデータを生成する場合は縦を指定してください。'),
-      makePropertyContainer(
-          ['アライメント境界: ', alignBoundaryBox],
+      tip(['アライメント境界: ', alignBoundaryBox],
           'アライメントの境界を指定します。\nパッキングの単位が 8 bit の倍数の場合は出力に影響しません。'),
-      makePropertyContainer(
-          ['アライメント方向: ', alignDirBox],
+      tip(['アライメント方向: ', alignDirBox],
           'アライメントの方向を指定します。\nパッキングの単位が 8 bit の倍数の場合は出力に影響しません。'),
-      makePropertyContainer(
-          ['アドレス方向: ', addressingBox],
+      tip(['アドレス方向: ', addressingBox],
           'アドレスのインクリメント方向を指定します。\n通常は水平です。'),
-    ]);
+    ]));
 
-    container.appendChild(p);
+    container.appendChild(section);
 
-    p.querySelectorAll('input, select').forEach((el) => {
+    section.querySelectorAll('input, select').forEach((el) => {
       el.addEventListener('change', () => {
         requestGenerateCode();
       });
@@ -805,42 +818,38 @@ async function main() {
   }
 
   {
-    const p = makeParagraph([
-      makeSectionLabel('コード生成'),
-      makePropertyContainer(
-          ['列数: ', codeColsBox], '1 行に詰め込む要素数を指定します。'),
-      makePropertyContainer(
-          ['インデント: ', indentBox], 'インデントの形式とサイズを指定します。')
-    ]);
-
-    container.appendChild(p);
-
-    p.querySelectorAll('input, select').forEach((el) => {
-      el.addEventListener('change', () => {
-        requestGenerateCode();
-      });
-      el.addEventListener('input', () => {
-        requestGenerateCode();
-      });
-    });
-  }
-
-  {
-    const p = makeParagraph([copyButton]);
-    p.style.textAlign = 'right';
-    container.appendChild(p);
-  }
-
-  {
-    const div = document.createElement('div');
-    arrayCode.id = 'arrayCode';
-    arrayCode.classList.add('lang_cpp');
-    div.appendChild(arrayCode);
+    codeBox.id = 'arrayCode';
+    codeBox.classList.add('lang_cpp');
     codeGenErrorBox.style.textAlign = 'center';
     codeGenErrorBox.style.color = 'red';
     codeGenErrorBox.style.display = 'none';
-    div.appendChild(codeGenErrorBox);
-    container.appendChild(div);
+
+    const section = makeSection([
+      makeFloatList([
+        makeHeader('コード生成'),
+        tip(['列数: ', codeColsBox], '1 行に詰め込む要素数を指定します。'),
+        tip(['インデント: ', indentBox],
+            'インデントの形式とサイズを指定します。'),
+        copyButton,
+      ]),
+      codeBox,
+      codeGenErrorBox,
+    ]);
+
+    container.appendChild(section);
+    copyButton.parentElement.style.float = 'right';
+    copyButton.parentElement.style.marginRight = '0';
+    copyButton.parentElement.style.paddingRight = '0';
+    copyButton.parentElement.style.borderRight = 'none';
+
+    section.querySelectorAll('input, select').forEach((el) => {
+      el.addEventListener('change', () => {
+        requestGenerateCode();
+      });
+      el.addEventListener('input', () => {
+        requestGenerateCode();
+      });
+    });
   }
 
   // ファイル選択
@@ -969,8 +978,8 @@ async function main() {
 
   // コードのコピー
   copyButton.addEventListener('click', () => {
-    if (!arrayCode.textContent) return;
-    navigator.clipboard.writeText(arrayCode.textContent);
+    if (!codeBox.textContent) return;
+    navigator.clipboard.writeText(codeBox.textContent);
   });
 
   // サンプルのロード
@@ -1464,7 +1473,7 @@ function quantize(): void {
     }
   } catch (error) {
     previewCanvas.style.display = 'none';
-    arrayCode.style.display = 'none';
+    codeBox.style.display = 'none';
     quantizeErrorBox.style.display = 'inline';
     quantizeErrorBox.textContent = error.message;
   }
@@ -1519,8 +1528,8 @@ function align(
 
 function generateCode(): void {
   if (!imageCacheData) {
-    arrayCode.textContent = '';
-    arrayCode.style.display = 'block';
+    codeBox.textContent = '';
+    codeBox.style.display = 'block';
     codeGenErrorBox.style.display = 'none';
     return;
   }
@@ -1704,11 +1713,11 @@ function generateCode(): void {
     }
     code += '};';
 
-    arrayCode.textContent = code;
-    arrayCode.style.display = 'block';
+    codeBox.textContent = code;
+    codeBox.style.display = 'block';
     codeGenErrorBox.style.display = 'none';
   } catch (error) {
-    arrayCode.style.display = 'none';
+    codeBox.style.display = 'none';
     codeGenErrorBox.textContent = error.message;
     codeGenErrorBox.style.display = 'block';
   }

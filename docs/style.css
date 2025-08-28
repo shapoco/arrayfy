@@ -2,6 +2,12 @@ body {
   background: #e8f0f8;
   margin: 0px;
   padding: 0px;
+}
+
+body,
+input,
+button,
+select {
   font-family: "Noto Color Emoji", sans-serif;
   font-size: 16px;
 }
@@ -59,9 +65,13 @@ h1 {
 
 h2 {
   font-size: 18px;
-  background: #e8e8e8;
+  background: #cde;
   border-radius: 5px;
-  padding: 0 0.5em;
+  padding: 5px 10px;
+}
+
+h3 {
+  font-size: 16px;
 }
 
 ul,
@@ -132,13 +142,84 @@ code {
   font-weight: bold;
 }
 
-.propertyContainer {
-  margin-right: 10px;
-  padding-right: 10px;
-  border-right: solid 1px #ccc;
-  white-space: nowrap;
+input,
+select,
+button {
   display: inline-block;
-  line-height: 30px;
+  height: 30px;
+  box-sizing: border-box;
+  line-height: 100%;
+  padding: 0px 5px;
+  margin: 0;
+}
+
+.propertySection {
+  border: solid 1px #ccc;
+  border-radius: 5px;
+  margin: 10px 0px;
+  padding: 0px;
+  overflow: hidden;
+}
+
+.propertySection>span,
+.propertySection>h3 {
+  display: inline;
+  height: 40px;
+  line-height: 40px;
+  margin: 0;
+  padding: 0;
+  border: solid 1px red;
+  box-sizing: border-box;
+  white-space: nowrap;
+  vertical-align: 50%;
+}
+
+.propertySection ul {
+  margin: 0;
+  padding: 0 5px 0 5px;
+  list-style: none;
+}
+
+.propertySection ul::after {
+  content: "";
+  display: block;
+  clear: both;
+}
+
+.propertySection li {
+  float: left;
+  white-space: nowrap;
+  margin: 0;
+  padding: 0;
+  line-height: 40px;
+}
+
+.sectionHeader {
+  display: inline-block;
+  width: 100px;
+  margin: 0 10px 0 -5px;
+  padding: 0px;
+  background: #def;
+  text-align: center;
+  font-weight: bold;
+}
+
+.propertySection input,
+.propertySection select,
+.propertySection button {
+  vertical-align: top;
+  position: relative;
+  top: 5px;
+}
+
+.propertySection p,
+.propertySection pre {
+  margin: 5px;
+}
+
+.propertyContainer {
+  margin: 0 10px 0 0;
+  padding: 0 10px;
 }
 
 .sampleImageButton {
@@ -152,16 +233,17 @@ code {
   border: solid 1px #888;
   border-radius: 3px;
   margin-right: 3px;
-  vertical-align: middle;
+  top: calc((40px - 24px)/2) !important;
   cursor: pointer;
 }
 
 .presetButton {
-  height: 100px;
-  margin: 10px 5px 10px 0px;
+  display: inline-block;
+  height: 80px;
+  line-height: 100%;
+  margin: 5px;
   padding: 5px 10px;
   text-align: center;
-  vertical-align: middle;
   font-weight: bold;
   cursor: pointer;
 }

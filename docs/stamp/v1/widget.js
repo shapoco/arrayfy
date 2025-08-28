@@ -367,8 +367,8 @@
       const emoji = this.ownerButton.dataset.emoji;
 
       this.sendButton.innerHTML = sent ?
-        `<span class="shpcstamp_emoji">${replaceCustomEmoji(emoji)}</span>スタンプを解除` :
-        `<span class="shpcstamp_emoji">${replaceCustomEmoji(emoji)}</span>スタンプを送信`;
+        `スタンプ<span class="shpcstamp_emoji">${replaceCustomEmoji(emoji)}</span>を解除` :
+        `スタンプ<span class="shpcstamp_emoji">${replaceCustomEmoji(emoji)}</span>を送る`;
       this.commentBoxCtrl.clear();
 
       let numComments = 0;
@@ -638,7 +638,7 @@
       // コメント入力欄
       this.textarea = document.createElement('textarea');
       this.textarea.style.width = '100%';
-      this.textarea.placeholder = '(コメントなし)';
+      this.textarea.placeholder = 'ここにコメントも書けます。\n空欄 OK。書くと公開されます。';
       this.textarea.rows = 3;
       this.container.appendChild(this.textarea);
 
@@ -807,7 +807,15 @@
 
   function getStampSendDescription() {
     const numStampSent = Object.values(stamps).filter(item => item.sent).length;
-    return `あと ${maxStampCount - numStampSent} 個送信できます。コメントは任意で、他の人からも見えます。`;
+    if (numStampSent == 0) {
+      return `スタンプは ${maxStampCount} 個まで送れます。`;
+    }
+    else if (numStampSent < maxStampCount) {
+      return `スタンプはあと ${maxStampCount - numStampSent} 個送れます。`;
+    }
+    else {
+      return `スタンプはもう送れません。`;
+    }
   }
 
   /**
