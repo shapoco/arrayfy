@@ -1,56 +1,231 @@
 
 const enum TrimState {
-  IDLE = 0,
-  DRAG_TOP = 1,
-  DRAG_RIGHT = 2,
-  DRAG_BOTTOM = 3,
-  DRAG_LEFT = 4,
+  IDLE,
+  DRAG_TOP,
+  DRAG_RIGHT,
+  DRAG_BOTTOM,
+  DRAG_LEFT,
 }
 
 const enum ColorSpace {
-  GRAYSCALE = 0,
-  RGB = 1,
+  GRAYSCALE,
+  RGB,
+}
+
+const enum PixelFormat {
+  ARGB8888,
+  RGB888,
+  RGB666,
+  RGB565,
+  RGB555,
+  RGB332,
+  RGB111,
+  GRAY4,
+  GRAY2,
+  BW,
+}
+
+const enum PackUnit {
+  FRAGMENT,
+  PIXEL,
+  UNPACKED,
+}
+
+const enum AlignBoundary {
+  BYTE = 8,
+}
+
+const enum AlignDir {
+  HIGHER,
+  LOWER,
+}
+
+const enum ScalingMethod {
+  ZOOM,
+  FIT,
+  STRETCH,
+}
+
+const enum DitherMethod {
+  NONE,
+  DIFFUSION,
+}
+
+const enum RoundMethod {
+  NEAREST,
+  EQUAL_DIVISION,
+}
+
+const enum BitOrder {
+  LSB_FIRST,
+  MSB_FIRST,
+}
+
+const enum ByteOrder {
+  LITTLE_ENDIAN,
+  BIG_ENDIAN,
+}
+
+const enum ScanDir {
+  HORIZONTAL,
+  VERTICAL,
+}
+
+const enum Indent {
+  TAB,
+  SPACE_X2,
+  SPACE_X4,
 }
 
 type Point = {
   x: number,
-  y: number
+  y: number,
 };
 
 type Rect = {
   x: number,
   y: number,
   width: number,
-  height: number
+  height: number,
 };
 
-class PixelFormat {
-  public colorSpace: ColorSpace;
-  public channelDepth: number[];
+class Preset {
+  public channelOrder: BitOrder = BitOrder.MSB_FIRST;
+  public pixelOrder: BitOrder = BitOrder.MSB_FIRST;
+  public byteOrder: ByteOrder = ByteOrder.BIG_ENDIAN;
+  public packUnit: PackUnit = PackUnit.PIXEL;
+  public packDir: ScanDir = ScanDir.HORIZONTAL;
+  public alignUnit: AlignBoundary = AlignBoundary.BYTE;
+  public alignDir: AlignDir = AlignDir.LOWER;
+  public addrDir: ScanDir = ScanDir.HORIZONTAL;
+  constructor(
+      public label: string, public description, public format: PixelFormat,
+      ops = {}) {
+    for (const k of Object.keys(ops)) {
+      if (!(k in this)) {
+        throw new Error(`Unknown property '${k}'`);
+      }
+      (this as any)[k] = (ops as any)[k];
+    }
+  }
+}
 
-  constructor() {
-    this.colorSpace = ColorSpace.GRAYSCALE;
-    this.channelDepth = [1];
+let presets: Record<string, Preset> = {
+  //argb8888_be: new Preset(
+  //    'ARGB8888',
+  //    '透明度付きフルカラー。\n各種 GFX ライブラリで透明ピクセルを含む画像を扱う場合に。',
+  //    PixelFormat.ARGB8888,
+  //    {packUnit: PackUnit.UNPACKED},
+  //    ),
+  rgb888_be: new Preset(
+      'RGB888',
+      'フルカラー。24bit 液晶用。',
+      PixelFormat.RGB888,
+      {packUnit: PackUnit.UNPACKED},
+      ),
+  rgb666_be: new Preset(
+      'RGB666',
+      '18bit 液晶用。',
+      PixelFormat.RGB666,
+      {packUnit: PackUnit.UNPACKED},
+      ),
+  rgb565_be: new Preset(
+      'RGB565',
+      'ハイカラー。\n各種 GFX ライブラリでの使用を含め、\n組み込み用途で一般的な形式。',
+      PixelFormat.RGB565,
+      ),
+  rgb332: new Preset(
+      'RGB332',
+      '各種 GFX ライブラリ用。',
+      PixelFormat.RGB332,
+      ),
+  bw_hp_mf: new Preset(
+      '白黒 横パッキング',
+      '各種 GFX ライブラリ用。',
+      PixelFormat.BW,
+      {
+        packUnit: PackUnit.FRAGMENT,
+        pixelOrder: BitOrder.MSB_FIRST,
+        packDir: ScanDir.HORIZONTAL,
+      },
+      ),
+  bw_vp_lf: new Preset(
+      '白黒 縦パッキング',
+      'SPI/I2C ドライバを使用して\nSSD1306/1309 等の白黒ディスプレイに直接転送可能。',
+      PixelFormat.BW,
+      {
+        packUnit: PackUnit.FRAGMENT,
+        pixelOrder: BitOrder.LSB_FIRST,
+        packDir: ScanDir.VERTICAL,
+      },
+      ),
+};
+
+class PixelFormatInfo {
+  public colorSpace: ColorSpace;
+  public channelBits: number[];
+
+  constructor(fmt: PixelFormat) {
+    switch (fmt) {
+      case PixelFormat.RGB888:
+        this.colorSpace = ColorSpace.RGB;
+        this.channelBits = [8, 8, 8];
+        break;
+      case PixelFormat.RGB666:
+        this.colorSpace = ColorSpace.RGB;
+        this.channelBits = [6, 6, 6];
+        break;
+      case PixelFormat.RGB565:
+        this.colorSpace = ColorSpace.RGB;
+        this.channelBits = [5, 6, 5];
+        break;
+      case PixelFormat.RGB555:
+        this.colorSpace = ColorSpace.RGB;
+        this.channelBits = [5, 5, 5];
+        break;
+      case PixelFormat.RGB332:
+        this.colorSpace = ColorSpace.RGB;
+        this.channelBits = [3, 3, 2];
+        break;
+      case PixelFormat.RGB111:
+        this.colorSpace = ColorSpace.RGB;
+        this.channelBits = [1, 1, 1];
+        break;
+      case PixelFormat.GRAY4:
+        this.colorSpace = ColorSpace.GRAYSCALE;
+        this.channelBits = [4];
+        break;
+      case PixelFormat.GRAY2:
+        this.colorSpace = ColorSpace.GRAYSCALE;
+        this.channelBits = [2];
+        break;
+      case PixelFormat.BW:
+        this.colorSpace = ColorSpace.GRAYSCALE;
+        this.channelBits = [1];
+        break;
+      default:
+        throw new Error('Unknown image format');
+    }
   }
 
   toString(): string {
     let ret = '';
     switch (this.colorSpace) {
       case ColorSpace.GRAYSCALE:
-        if (this.channelDepth[0] == 1) {
+        if (this.channelBits[0] == 1) {
           return 'B/W';
         } else {
-          return 'Gray' + this.channelDepth[0];
+          return 'Gray' + this.channelBits[0];
         }
       case ColorSpace.RGB:
-        return 'RGB' + this.channelDepth.join('');
+        return 'RGB' + this.channelBits.join('');
       default:
         throw new Error('Unknown color space');
     }
   }
 
   get numChannels(): number {
-    return this.channelDepth.length;
+    return this.channelBits.length;
   }
 }
 
@@ -58,15 +233,15 @@ class Palette {
   public inMin: Float32Array;
   public inMax: Float32Array;
   public outMax: Uint8Array;
-  constructor(public format: PixelFormat, public equalDivision: boolean) {
+  constructor(public format: PixelFormatInfo, public roundMethod: RoundMethod) {
     this.inMin = new Float32Array(format.numChannels);
     this.inMax = new Float32Array(format.numChannels);
     this.outMax = new Uint8Array(format.numChannels);
+    const equDiv = roundMethod == RoundMethod.EQUAL_DIVISION;
     for (let ch = 0; ch < format.numChannels; ch++) {
-      const numLevel = 1 << format.channelDepth[ch];
-      this.inMin[ch] = equalDivision ? (1 / (numLevel * 2)) : 0;
-      this.inMax[ch] =
-          equalDivision ? ((numLevel * 2 - 1) / (numLevel * 2)) : 1;
+      const numLevel = 1 << format.channelBits[ch];
+      this.inMin[ch] = equDiv ? (1 / (numLevel * 2)) : 0;
+      this.inMax[ch] = equDiv ? ((numLevel * 2 - 1) / (numLevel * 2)) : 1;
       this.outMax[ch] = numLevel - 1;
     }
   }
@@ -88,8 +263,8 @@ class Palette {
 
 class NormalizedImage {
   constructor(
-      public format: PixelFormat, public palette: Palette, public width: number,
-      public height: number, public data: Float32Array) {}
+      public format: PixelFormatInfo, public palette: Palette,
+      public width: number, public height: number, public data: Float32Array) {}
 
   getMinMax(): [number, number] {
     let min = Infinity;
@@ -207,15 +382,16 @@ function makeTextBox(
 }
 
 function makeSelectBox(
-    dict: Record<string, string> = {}, defaultValue = ''): HTMLSelectElement {
+    items: {value: number, label: string}[],
+    defaultValue: number): HTMLSelectElement {
   const select = document.createElement('select');
-  for (const [value, label] of Object.entries(dict)) {
+  for (const {value, label} of items) {
     const option = document.createElement('option');
-    option.value = value;
+    option.value = value.toString();
     option.textContent = label;
     select.appendChild(option);
   }
-  select.value = defaultValue;
+  select.value = defaultValue.toString();
   return select;
 }
 
@@ -246,26 +422,17 @@ function makeSampleImageButton(url: string) {
   return button;
 }
 
-function makePresetButton(
-    name: string, text: string, description: string): HTMLButtonElement {
+function makePresetButton(id: string, preset: Preset): HTMLButtonElement {
   const button = document.createElement('button');
-  button.dataset.presetName = name;
+  button.dataset.presetName = id;
   button.classList.add('presetButton');
   const img = document.createElement('img');
-  img.src = `img/preset/${name}.svg`;
-  const span = document.createElement('span');
-  span.textContent = description;
-  span.style.fontSize = 'smaller';
+  img.src = `img/preset/${id}.svg`;
   button.appendChild(img);
   button.appendChild(document.createElement('br'))
-  button.appendChild(document.createTextNode(text));
-  button.appendChild(document.createElement('br'))
-  button.appendChild(span);
-
-  button.addEventListener('click', () => {
-    loadPreset(name);
-  });
-
+  button.appendChild(document.createTextNode(preset.label));
+  button.title = preset.description;
+  button.addEventListener('click', () => loadPreset(preset));
   return button;
 }
 
@@ -280,92 +447,105 @@ const gammaBox = makeTextBox('1', '(auto)', 4);
 const brightnessBox = makeTextBox('0', '(auto)', 5);
 const contrastBox = makeTextBox('100', '(auto)', 5);
 const invertBox = makeCheckBox('階調反転');
-const presetRgb565Be =
-    makePresetButton('rgb565_be', 'RGB565-BE', '各種 16bit カラー液晶');
-const presetRgb332 =
-    makePresetButton('rgb332', 'RGB332', '各種 GFX ライブラリ');
-const presetBwHpMf =
-    makePresetButton('bw_hp_mf', '白黒 横パッキング', '各種 GFX ライブラリ');
-const presetBwVpLf =
-    makePresetButton('bw_vp_lf', '白黒 縦パッキング', 'SSD1306/1309, 他...');
-const formatBox = makeSelectBox(
-    {
-      rgb565: 'RGB565',
-      rgb555: 'RGB555',
-      rgb332: 'RGB332',
-      rgb111: 'RGB111',
-      gray4: 'Gray4',
-      gray2: 'Gray2',
-      bw: 'B/W',
-    },
-    'rgb565');
+const pixelFormatBox = makeSelectBox(
+    [
+      {value: PixelFormat.ARGB8888, label: 'ARGB8888'},
+      {value: PixelFormat.RGB888, label: 'RGB888'},
+      {value: PixelFormat.RGB666, label: 'RGB666'},
+      {value: PixelFormat.RGB565, label: 'RGB565'},
+      {value: PixelFormat.RGB555, label: 'RGB555'},
+      {value: PixelFormat.RGB332, label: 'RGB332'},
+      {value: PixelFormat.RGB111, label: 'RGB111'},
+      {value: PixelFormat.GRAY4, label: 'Gray4'},
+      {value: PixelFormat.GRAY2, label: 'Gray2'},
+      {value: PixelFormat.BW, label: 'B/W'},
+    ],
+    PixelFormat.RGB565);
 const widthBox = makeTextBox('', '(auto)', 4);
 const heightBox = makeTextBox('', '(auto)', 4);
 const scalingMethodBox = makeSelectBox(
-    {
-      zoom: 'ズーム',
-      fit: 'フィット',
-      stretch: 'ストレッチ',
-    },
-    'zoom');
+    [
+      {value: ScalingMethod.ZOOM, label: 'ズーム'},
+      {value: ScalingMethod.FIT, label: 'フィット'},
+      {value: ScalingMethod.STRETCH, label: 'ストレッチ'},
+    ],
+    ScalingMethod.ZOOM);
 const ditherBox = makeSelectBox(
-    {
-      none: 'なし',
-      diffusion: '誤差拡散',
-    },
-    'diffusion');
+    [
+      {value: DitherMethod.NONE, label: 'なし'},
+      {value: DitherMethod.DIFFUSION, label: '誤差拡散'},
+    ],
+    DitherMethod.DIFFUSION);
 const roundMethodBox = makeSelectBox(
-    {
-      nearest: '最も近い輝度',
-      equalDivision: '均等割り',
-    },
-    'nearest');
+    [
+      {value: RoundMethod.NEAREST, label: '最も近い輝度'},
+      {value: RoundMethod.EQUAL_DIVISION, label: '均等割り'},
+    ],
+    RoundMethod.NEAREST);
 const previewCanvas = document.createElement('canvas');
 const quantizeErrorBox = document.createElement('span');
 const channelOrderBox = makeSelectBox(
-    {
-      lsbRed: '下位から',
-      msbRed: '上位から',
-    },
-    'msbRed');
+    [
+      {value: BitOrder.LSB_FIRST, label: '下位から'},
+      {value: BitOrder.MSB_FIRST, label: '上位から'},
+    ],
+    BitOrder.MSB_FIRST);
 const pixelOrderBox = makeSelectBox(
-    {
-      lsb1st: '下位から',
-      msb1st: '上位から',
-    },
-    'msb1st');
+    [
+      {value: BitOrder.LSB_FIRST, label: '下位から'},
+      {value: BitOrder.MSB_FIRST, label: '上位から'},
+    ],
+    BitOrder.MSB_FIRST);
 const byteOrderBox = makeSelectBox(
-    {
-      le: 'Little Endian',
-      be: 'Big Endian',
-    },
-    'be');
-const packingBox = makeSelectBox(
-    {
-      hori: '横',
-      vert: '縦',
-    },
-    'hori');
+    [
+      {value: ByteOrder.LITTLE_ENDIAN, label: 'Little Endian'},
+      {value: ByteOrder.BIG_ENDIAN, label: 'Big Endian'},
+    ],
+    ByteOrder.BIG_ENDIAN);
+const packUnitBox = makeSelectBox(
+    [
+      {value: PackUnit.FRAGMENT, label: '複数ピクセル'},
+      {value: PackUnit.PIXEL, label: '単一ピクセル'},
+      {value: PackUnit.UNPACKED, label: 'アンパックド'},
+    ],
+    PackUnit.PIXEL);
+const packDirBox = makeSelectBox(
+    [
+      {value: ScanDir.HORIZONTAL, label: '横'},
+      {value: ScanDir.VERTICAL, label: '縦'},
+    ],
+    ScanDir.HORIZONTAL);
+const alignBoundaryBox = makeSelectBox(
+    [
+      {value: AlignBoundary.BYTE, label: 'バイト'},
+    ],
+    AlignBoundary.BYTE);
+const alignDirBox = makeSelectBox(
+    [
+      {value: AlignDir.LOWER, label: '右詰め'},
+      {value: AlignDir.HIGHER, label: '左詰め'},
+    ],
+    AlignDir.LOWER);
 const addressingBox = makeSelectBox(
-    {
-      hori: '水平',
-      vert: '垂直',
-    },
-    'hori');
+    [
+      {value: ScanDir.HORIZONTAL, label: '水平'},
+      {value: ScanDir.VERTICAL, label: '垂直'},
+    ],
+    ScanDir.HORIZONTAL);
 const codeColsBox = makeSelectBox(
-    {
-      '8': '8',
-      '16': '16',
-      '32': '32',
-    },
-    '16');
+    [
+      {value: 8, label: '8'},
+      {value: 16, label: '16'},
+      {value: 32, label: '32'},
+    ],
+    16);
 const indentBox = makeSelectBox(
-    {
-      sp2: 'スペース x2',
-      sp4: 'スペース x4',
-      tab: 'タブ',
-    },
-    'sp2');
+    [
+      {value: Indent.SPACE_X2, label: 'スペース x2'},
+      {value: Indent.SPACE_X4, label: 'スペース x4'},
+      {value: Indent.TAB, label: 'タブ'},
+    ],
+    Indent.SPACE_X2);
 const arrayCode = document.createElement('pre');
 const codeGenErrorBox = document.createElement('p');
 const copyButton = makeButton('コードをコピー');
@@ -381,7 +561,7 @@ let trimL = 0, trimT = 0, trimR = 1, trimB = 1;
 
 let trimUiState = TrimState.IDLE;
 
-let imageCacheFormat = new PixelFormat();
+let imageCacheFormat = new PixelFormatInfo(PixelFormat.RGB565);
 let imageCacheData: Uint8Array[] = [null, null, null, null];
 
 async function main() {
@@ -420,12 +600,13 @@ async function main() {
 
     container.appendChild(makeParagraph([
       makeSectionLabel('入力画像'), makeNoWrapSpan(['画像をドロップ、']),
-      makeNoWrapSpan(['または ', pasteTarget, '、']),
-      makeNoWrapSpan([' または ', fileBrowseButton, '、']), makeNoWrapSpan([
-        'またはサンプル: ',
+      makeNoWrapSpan([pasteTarget, '、']),
+      makeNoWrapSpan([' または ', fileBrowseButton]), makeNoWrapSpan([
+        ' (サンプル: ',
         makeSampleImageButton('./img/sample/gradient.png'),
         makeSampleImageButton('./img/sample/forest-path.jpg'),
         makeSampleImageButton('./img/sample/anime-girl.png'),
+        ' )',
       ])
     ]));
   }
@@ -435,11 +616,10 @@ async function main() {
       makeSectionLabel('プリセット'),
       '選んでください: ',
       document.createElement('br'),
-      presetRgb565Be,
-      presetRgb332,
-      presetBwHpMf,
-      presetBwVpLf,
     ]);
+    for (const id in presets) {
+      p.appendChild(makePresetButton(id, presets[id]));
+    }
     container.appendChild(p);
   }
 
@@ -547,7 +727,8 @@ async function main() {
     const p = makeParagraph([
       makeSectionLabel('量子化'),
       makePropertyContainer(
-          ['フォーマット: ', formatBox], 'ピクセルフォーマットを指定します。'),
+          ['フォーマット: ', pixelFormatBox],
+          'ピクセルフォーマットを指定します。'),
       makePropertyContainer(
           ['丸め方法: ', roundMethodBox],
           'パレットから色を選択する際の戦略を指定します。\nディザリングを行う場合はあまり関係ありません。'),
@@ -593,10 +774,19 @@ async function main() {
           ['バイト順: ', byteOrderBox],
           'ピクセル内のバイトの順序を指定します。\nGFX ライブラリなどでは BigEndian であることが多いです。'),
       makePropertyContainer(
-          ['パッキング方向: ', packingBox],
+          ['パッキング単位: ', packUnitBox],
+          'パッキングの単位を指定します。\n1 チャネルが 8 bit の倍数の場合は出力に影響しません。'),
+      makePropertyContainer(
+          ['パッキング方向: ', packDirBox],
           'ピクセルをどの方向にパッキングするかを指定します。\n' +
               '多くの場合横ですが、SSD1306/1309 などの一部の白黒ディスプレイに\n' +
               '直接転送可能なデータを生成する場合は縦を指定してください。'),
+      makePropertyContainer(
+          ['アライメント境界: ', alignBoundaryBox],
+          'アライメントの境界を指定します。\nパッキングの単位が 8 bit の倍数の場合は出力に影響しません。'),
+      makePropertyContainer(
+          ['アライメント方向: ', alignDirBox],
+          'アライメントの方向を指定します。\nパッキングの単位が 8 bit の倍数の場合は出力に影響しません。'),
       makePropertyContainer(
           ['アドレス方向: ', addressingBox],
           'アドレスのインクリメント方向を指定します。\n通常は水平です。'),
@@ -958,41 +1148,16 @@ function updateTrimCanvas(): void {
   }
 }
 
-function loadPreset(name: string): void {
-  const PRESETS: Record<string, Record<string, string>> = {
-    rgb565_be:
-        {fmt: 'rgb565', chOrder: 'msbRed', byteOrder: 'be', addrDir: 'hori'},
-    rgb332: {fmt: 'rgb332', chOrder: 'msbRed', addrDir: 'hori'},
-    bw_vp_lf: {fmt: 'bw', pixOrder: 'lsb1st', packDir: 'vert', addrDir: 'hori'},
-    bw_hp_mf: {fmt: 'bw', pixOrder: 'msb1st', packDir: 'hori', addrDir: 'hori'},
-  };
-  if (!(name in PRESETS)) {
-    throw new Error(`Unknown preset: ${name}`);
-  }
-  for (const [key, value] of Object.entries(PRESETS[name])) {
-    switch (key) {
-      case 'fmt':
-        formatBox.value = value;
-        break;
-      case 'chOrder':
-        channelOrderBox.value = value;
-        break;
-      case 'pixOrder':
-        pixelOrderBox.value = value;
-        break;
-      case 'byteOrder':
-        byteOrderBox.value = value;
-        break;
-      case 'packDir':
-        packingBox.value = value;
-        break;
-      case 'addrDir':
-        addressingBox.value = value;
-        break;
-      default:
-        throw new Error(`Unknown key: ${key}`);
-    }
-  }
+function loadPreset(preset: Preset): void {
+  pixelFormatBox.value = preset.format.toString();
+  channelOrderBox.value = preset.channelOrder.toString();
+  pixelOrderBox.value = preset.pixelOrder.toString();
+  byteOrderBox.value = preset.byteOrder.toString();
+  packUnitBox.value = preset.packUnit.toString();
+  packDirBox.value = preset.packDir.toString();
+  alignBoundaryBox.value = preset.alignUnit.toString();
+  alignDirBox.value = preset.alignDir.toString();
+  addressingBox.value = preset.addrDir.toString();
   requestQuantize();
 }
 
@@ -1063,22 +1228,22 @@ function quantize(): void {
         const srcAspect = srcW / srcH;
         const outAspect = outW / outH;
         let scaleX, scaleY;
-        switch (scalingMethodBox.value) {
-          case 'zoom':
+        switch (parseInt(scalingMethodBox.value)) {
+          case ScalingMethod.ZOOM:
             if (srcAspect > outAspect) {
               scaleX = scaleY = outH / srcH;
             } else {
               scaleX = scaleY = outW / srcW;
             }
             break;
-          case 'fit':
+          case ScalingMethod.FIT:
             if (srcAspect > outAspect) {
               scaleX = scaleY = outW / srcW;
             } else {
               scaleX = scaleY = outH / srcH;
             }
             break;
-          case 'stretch':
+          case ScalingMethod.STRETCH:
             scaleX = outW / srcW;
             scaleY = outH / srcH;
             break;
@@ -1093,56 +1258,24 @@ function quantize(): void {
       }
     }
 
-    const fmt = new PixelFormat();
-    switch (formatBox.value) {
-      case 'rgb565':
-        fmt.colorSpace = ColorSpace.RGB;
-        fmt.channelDepth = [5, 6, 5];
-        break;
-      case 'rgb555':
-        fmt.colorSpace = ColorSpace.RGB;
-        fmt.channelDepth = [5, 5, 5];
-        break;
-      case 'rgb332':
-        fmt.colorSpace = ColorSpace.RGB;
-        fmt.channelDepth = [3, 3, 2];
-        break;
-      case 'rgb111':
-        fmt.colorSpace = ColorSpace.RGB;
-        fmt.channelDepth = [1, 1, 1];
-        break;
-      case 'gray4':
-        fmt.colorSpace = ColorSpace.GRAYSCALE;
-        fmt.channelDepth = [4];
-        break;
-      case 'gray2':
-        fmt.colorSpace = ColorSpace.GRAYSCALE;
-        fmt.channelDepth = [2];
-        break;
-      case 'bw':
-        fmt.colorSpace = ColorSpace.GRAYSCALE;
-        fmt.channelDepth = [1];
-        break;
-      default:
-        throw new Error('Unknown image format');
-    }
+    const fmt = new PixelFormatInfo(parseInt(pixelFormatBox.value));
 
     let maxChannelDepth = 0;
-    let equalDivision = false;
-    for (const depth of fmt.channelDepth) {
+    let roundMethod: RoundMethod = RoundMethod.NEAREST;
+    for (const depth of fmt.channelBits) {
       if (depth > maxChannelDepth) {
         maxChannelDepth = depth;
       }
     }
     if (maxChannelDepth > 1) {
       roundMethodBox.disabled = false;
-      equalDivision = roundMethodBox.value === 'equalDivision';
+      roundMethod = parseInt(roundMethodBox.value);
     } else {
       // 均等割りはチャンネル深度が2以上でないと意味がないので無効化
       roundMethodBox.disabled = true;
     }
 
-    const palette = new Palette(fmt, equalDivision);
+    const palette = new Palette(fmt, roundMethod);
     const normData = new Float32Array(outW * outH * fmt.numChannels);
     const norm = new NormalizedImage(fmt, palette, outW, outH, normData);
 
@@ -1255,8 +1388,8 @@ function quantize(): void {
       }
 
       // 量子化
-      const diffusion = ditherBox.value === 'diffusion';
-      const palette = new Palette(fmt, equalDivision);
+      const diffusion = parseInt(ditherBox.value) === DitherMethod.DIFFUSION;
+      const palette = new Palette(fmt, roundMethod);
       const out = new Uint8Array(numCh);
       const error = new Float32Array(numCh);
       for (let y = 0; y < outH; y++) {
@@ -1374,6 +1507,16 @@ function requestGenerateCode(): void {
   }, 300);
 }
 
+function align(
+    data: number, width: number, boundary: number,
+    alignLeft: boolean): [number, number] {
+  const outWidth = Math.ceil(width / boundary) * boundary;
+  if (alignLeft) {
+    data <<= outWidth - width;
+  }
+  return [data, outWidth];
+}
+
 function generateCode(): void {
   if (!imageCacheData) {
     arrayCode.textContent = '';
@@ -1383,33 +1526,27 @@ function generateCode(): void {
   }
 
   try {
-    // チャネル順
-    const msbRed = channelOrderBox.value == 'msbRed';
-
-    // ピクセルオーダー
-    const msb1st = pixelOrderBox.value === 'msb1st';
-
-    // パッキング方向
-    const vertPack = packingBox.value === 'vert';
-
-    // アドレッシング
-    const vertAddr = addressingBox.value === 'vert';
-
-    // バイトオーダー
-    const bigEndian = byteOrderBox.value === 'be';
+    const msbRed = parseInt(channelOrderBox.value) == BitOrder.MSB_FIRST;
+    const msb1st = parseInt(pixelOrderBox.value) == BitOrder.MSB_FIRST;
+    const bigEndian = parseInt(byteOrderBox.value) == ByteOrder.BIG_ENDIAN;
+    const packUnit: PackUnit = parseInt(packUnitBox.value);
+    const vertPack = parseInt(packDirBox.value) == ScanDir.VERTICAL;
+    const alignBoundary: AlignBoundary = parseInt(alignBoundaryBox.value);
+    const alignLeft = parseInt(alignDirBox.value) == AlignDir.HIGHER;
+    const vertAddr = parseInt(addressingBox.value) == ScanDir.VERTICAL;
 
     // ピクセルあたりのビット数
     const numChannels = imageCacheData.length;
     let bitsPerPixel = 0;
     for (let i = 0; i < numChannels; i++) {
-      bitsPerPixel += imageCacheFormat.channelDepth[i];
+      bitsPerPixel += imageCacheFormat.channelBits[i];
     }
 
     // エンコードパラメータ
     let pixelsPerPack = Math.max(1, Math.floor(8 / bitsPerPixel));
     let bytesPerPack = Math.ceil(bitsPerPixel / 8);
-    let packWidth = vertPack ? 1 : pixelsPerPack;
-    let packHeight = vertPack ? pixelsPerPack : 1;
+    let fragWidth = vertPack ? 1 : pixelsPerPack;
+    let fragHeight = vertPack ? pixelsPerPack : 1;
 
     // 1 チャネルのときはチャネル順指定無効
     channelOrderBox.disabled = (numChannels <= 1);
@@ -1419,21 +1556,21 @@ function generateCode(): void {
 
     // 1 pixel/byte 以下のときはパッキング設定無効
     pixelOrderBox.disabled = (pixelsPerPack <= 1);
-    packingBox.disabled = (pixelsPerPack <= 1);
+    packDirBox.disabled = (pixelsPerPack <= 1);
 
     // 列数決定
     let arrayCols = parseInt(codeColsBox.value);
 
     // インデント決定
     let indent = '  ';
-    switch (indentBox.value) {
-      case 'sp2':
+    switch (parseInt(indentBox.value)) {
+      case Indent.SPACE_X2:
         indent = '  ';
         break;
-      case 'sp4':
+      case Indent.SPACE_X4:
         indent = '    ';
         break;
-      case 'tab':
+      case Indent.TAB:
         indent = '\t';
         break;
       default:
@@ -1442,8 +1579,8 @@ function generateCode(): void {
 
     const width = previewCanvas.width;
     const height = previewCanvas.height;
-    const cols = Math.ceil(width / packWidth);
-    const rows = Math.ceil(height / packHeight);
+    const cols = Math.ceil(width / fragWidth);
+    const rows = Math.ceil(height / fragHeight);
     const numPacks = cols * rows;
 
     const arrayData = new Uint8Array(numPacks * bytesPerPack);
@@ -1451,67 +1588,92 @@ function generateCode(): void {
     // 配列化
     let byteIndex = 0;
 
+    // パック単位
     for (let packIndex = 0; packIndex < numPacks; packIndex++) {
       let xCoarse, yCoarse;
       if (vertAddr) {
-        xCoarse = packWidth * Math.floor(packIndex / rows);
-        yCoarse = packHeight * (packIndex % rows);
+        xCoarse = fragWidth * Math.floor(packIndex / rows);
+        yCoarse = fragHeight * (packIndex % rows);
       } else {
-        xCoarse = packWidth * (packIndex % cols);
-        yCoarse = packHeight * Math.floor(packIndex / cols);
+        xCoarse = fragWidth * (packIndex % cols);
+        yCoarse = fragHeight * Math.floor(packIndex / cols);
       }
 
-      // パッキング
-      let packData = 0;
-      let pixPos = msb1st ? (bitsPerPixel * pixelsPerPack) : 0;
-      for (let yFine = 0; yFine < packHeight; yFine++) {
-        for (let xFine = 0; xFine < packWidth; xFine++) {
+      // ピクセル単位
+      let fragData = 0;
+      let fragBits = 0;
+      for (let yFine = 0; yFine < fragHeight; yFine++) {
+        for (let xFine = 0; xFine < fragWidth; xFine++) {
           const x = xCoarse + xFine;
           const y = yCoarse + yFine;
 
           // ピクセルのエンコード
           let pixData = 0;
-          let chPos = msbRed ? bitsPerPixel : 0;
+          let pixBits = 0;
           for (let ch = 0; ch < numChannels; ch++) {
-            const val = imageCacheData[ch][y * width + x];
-            const chBits = imageCacheFormat.channelDepth[ch];
-            if (msbRed) {
-              chPos -= chBits;
-              pixData |= val << chPos;
-            } else {
-              pixData |= val << chPos;
-              chPos += chBits;
+            let chData = 0;
+            if (y < height && x < width) {
+              chData = imageCacheData[ch][y * width + x];
             }
+            let chBits = imageCacheFormat.channelBits[ch];
+
+            if (packUnit == PackUnit.UNPACKED) {
+              [chData, chBits] =
+                  align(chData, chBits, alignBoundary, alignLeft);
+            }
+
+            if (msbRed) {
+              pixData <<= chBits;
+              pixData |= chData;
+            } else {
+              pixData |= chData << pixBits;
+            }
+            pixBits += chBits;
           }  // for ch
 
-          if (msb1st) {
-            pixPos -= bitsPerPixel;
-            packData |= pixData << pixPos;
-          } else {
-            packData |= pixData << pixPos;
-            pixPos += bitsPerPixel;
+          if (packUnit == PackUnit.PIXEL) {
+            [pixData, pixBits] =
+                align(pixData, pixBits, alignBoundary, alignLeft);
           }
+
+          if (msb1st) {
+            fragData <<= pixBits;
+            fragData |= pixData;
+          } else {
+            fragData |= pixData << fragBits;
+          }
+          fragBits += pixBits;
 
         }  // for xFine
       }  // for yFine
 
+      if (packUnit == PackUnit.FRAGMENT) {
+        [fragData, fragBits] =
+            align(fragData, fragBits, alignBoundary, alignLeft);
+      }
+
+      if (fragBits % 8 != 0) {
+        throw new Error(`Invalid fragment fields`);
+      }
+
       // バイト単位に変換
-      for (let j = 0; j < bytesPerPack; j++) {
+      for (let j = 0; j < fragBits / 8; j++) {
         if (bigEndian) {
-          arrayData[byteIndex++] =
-              (packData >> ((bytesPerPack - 1) * 8)) & 0xFF;
-          packData <<= 8;
+          arrayData[byteIndex++] = (fragData >> (fragBits - 8)) & 0xFF;
+          fragData <<= 8;
         } else {
-          arrayData[byteIndex++] = packData & 0xFF;
-          packData >>= 8;
+          arrayData[byteIndex++] = fragData & 0xFF;
+          fragData >>= 8;
         }
       }
     }  // for packIndex
 
-
-
     // コード生成
     let code = '';
+    code += `#pragma once\n`;
+    code += `\n`;
+    code += `#include <stdint.h>\n`;
+    code += `\n`;
     code += `// ${width}x${height}px, ${imageCacheFormat.toString()}\n`;
     {
       code += `// `;
@@ -1524,7 +1686,7 @@ function generateCode(): void {
       if (!byteOrderBox.disabled) {
         code += (bigEndian ? 'Big' : 'Little') + ' Endian, ';
       }
-      if (!packingBox.disabled) {
+      if (!packDirBox.disabled) {
         code += (vertPack ? 'Vertical' : 'Horizontal') + ' Packing, ';
       }
       code += `${vertAddr ? 'Vertical' : 'Horizontal'} Adressing\n`;

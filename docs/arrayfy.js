@@ -62,48 +62,142 @@ var __read = (this && this.__read) || function (o, n) {
     return ar;
 };
 var _this = this;
-var PixelFormat = /** @class */ (function () {
-    function PixelFormat() {
-        this.colorSpace = 0 /* ColorSpace.GRAYSCALE */;
-        this.channelDepth = [1];
+var Preset = /** @class */ (function () {
+    function Preset(label, description, format, ops) {
+        var e_1, _a;
+        if (ops === void 0) { ops = {}; }
+        this.label = label;
+        this.description = description;
+        this.format = format;
+        this.channelOrder = 1 /* BitOrder.MSB_FIRST */;
+        this.pixelOrder = 1 /* BitOrder.MSB_FIRST */;
+        this.byteOrder = 1 /* ByteOrder.BIG_ENDIAN */;
+        this.packUnit = 1 /* PackUnit.PIXEL */;
+        this.packDir = 0 /* ScanDir.HORIZONTAL */;
+        this.alignUnit = 8 /* AlignBoundary.BYTE */;
+        this.alignDir = 1 /* AlignDir.LOWER */;
+        this.addrDir = 0 /* ScanDir.HORIZONTAL */;
+        try {
+            for (var _b = __values(Object.keys(ops)), _c = _b.next(); !_c.done; _c = _b.next()) {
+                var k = _c.value;
+                if (!(k in this)) {
+                    throw new Error("Unknown property '".concat(k, "'"));
+                }
+                this[k] = ops[k];
+            }
+        }
+        catch (e_1_1) { e_1 = { error: e_1_1 }; }
+        finally {
+            try {
+                if (_c && !_c.done && (_a = _b.return)) _a.call(_b);
+            }
+            finally { if (e_1) throw e_1.error; }
+        }
     }
-    PixelFormat.prototype.toString = function () {
+    return Preset;
+}());
+var presets = {
+    //argb8888_be: new Preset(
+    //    'ARGB8888',
+    //    '透明度付きフルカラー。\n各種 GFX ライブラリで透明ピクセルを含む画像を扱う場合に。',
+    //    PixelFormat.ARGB8888,
+    //    {packUnit: PackUnit.UNPACKED},
+    //    ),
+    rgb888_be: new Preset('RGB888', 'フルカラー。24bit 液晶用。', 1 /* PixelFormat.RGB888 */, { packUnit: 2 /* PackUnit.UNPACKED */ }),
+    rgb666_be: new Preset('RGB666', '18bit 液晶用。', 2 /* PixelFormat.RGB666 */, { packUnit: 2 /* PackUnit.UNPACKED */ }),
+    rgb565_be: new Preset('RGB565', 'ハイカラー。\n各種 GFX ライブラリでの使用を含め、\n組み込み用途で一般的な形式。', 3 /* PixelFormat.RGB565 */),
+    rgb332: new Preset('RGB332', '各種 GFX ライブラリ用。', 5 /* PixelFormat.RGB332 */),
+    bw_hp_mf: new Preset('白黒 横パッキング', '各種 GFX ライブラリ用。', 9 /* PixelFormat.BW */, {
+        packUnit: 0 /* PackUnit.FRAGMENT */,
+        pixelOrder: 1 /* BitOrder.MSB_FIRST */,
+        packDir: 0 /* ScanDir.HORIZONTAL */,
+    }),
+    bw_vp_lf: new Preset('白黒 縦パッキング', 'SPI/I2C ドライバを使用して\nSSD1306/1309 等の白黒ディスプレイに直接転送可能。', 9 /* PixelFormat.BW */, {
+        packUnit: 0 /* PackUnit.FRAGMENT */,
+        pixelOrder: 0 /* BitOrder.LSB_FIRST */,
+        packDir: 1 /* ScanDir.VERTICAL */,
+    }),
+};
+var PixelFormatInfo = /** @class */ (function () {
+    function PixelFormatInfo(fmt) {
+        switch (fmt) {
+            case 1 /* PixelFormat.RGB888 */:
+                this.colorSpace = 1 /* ColorSpace.RGB */;
+                this.channelBits = [8, 8, 8];
+                break;
+            case 2 /* PixelFormat.RGB666 */:
+                this.colorSpace = 1 /* ColorSpace.RGB */;
+                this.channelBits = [6, 6, 6];
+                break;
+            case 3 /* PixelFormat.RGB565 */:
+                this.colorSpace = 1 /* ColorSpace.RGB */;
+                this.channelBits = [5, 6, 5];
+                break;
+            case 4 /* PixelFormat.RGB555 */:
+                this.colorSpace = 1 /* ColorSpace.RGB */;
+                this.channelBits = [5, 5, 5];
+                break;
+            case 5 /* PixelFormat.RGB332 */:
+                this.colorSpace = 1 /* ColorSpace.RGB */;
+                this.channelBits = [3, 3, 2];
+                break;
+            case 6 /* PixelFormat.RGB111 */:
+                this.colorSpace = 1 /* ColorSpace.RGB */;
+                this.channelBits = [1, 1, 1];
+                break;
+            case 7 /* PixelFormat.GRAY4 */:
+                this.colorSpace = 0 /* ColorSpace.GRAYSCALE */;
+                this.channelBits = [4];
+                break;
+            case 8 /* PixelFormat.GRAY2 */:
+                this.colorSpace = 0 /* ColorSpace.GRAYSCALE */;
+                this.channelBits = [2];
+                break;
+            case 9 /* PixelFormat.BW */:
+                this.colorSpace = 0 /* ColorSpace.GRAYSCALE */;
+                this.channelBits = [1];
+                break;
+            default:
+                throw new Error('Unknown image format');
+        }
+    }
+    PixelFormatInfo.prototype.toString = function () {
         var ret = '';
         switch (this.colorSpace) {
             case 0 /* ColorSpace.GRAYSCALE */:
-                if (this.channelDepth[0] == 1) {
+                if (this.channelBits[0] == 1) {
                     return 'B/W';
                 }
                 else {
-                    return 'Gray' + this.channelDepth[0];
+                    return 'Gray' + this.channelBits[0];
                 }
             case 1 /* ColorSpace.RGB */:
-                return 'RGB' + this.channelDepth.join('');
+                return 'RGB' + this.channelBits.join('');
             default:
                 throw new Error('Unknown color space');
         }
     };
-    Object.defineProperty(PixelFormat.prototype, "numChannels", {
+    Object.defineProperty(PixelFormatInfo.prototype, "numChannels", {
         get: function () {
-            return this.channelDepth.length;
+            return this.channelBits.length;
         },
         enumerable: false,
         configurable: true
     });
-    return PixelFormat;
+    return PixelFormatInfo;
 }());
 var Palette = /** @class */ (function () {
-    function Palette(format, equalDivision) {
+    function Palette(format, roundMethod) {
         this.format = format;
-        this.equalDivision = equalDivision;
+        this.roundMethod = roundMethod;
         this.inMin = new Float32Array(format.numChannels);
         this.inMax = new Float32Array(format.numChannels);
         this.outMax = new Uint8Array(format.numChannels);
+        var equDiv = roundMethod == 1 /* RoundMethod.EQUAL_DIVISION */;
         for (var ch = 0; ch < format.numChannels; ch++) {
-            var numLevel = 1 << format.channelDepth[ch];
-            this.inMin[ch] = equalDivision ? (1 / (numLevel * 2)) : 0;
-            this.inMax[ch] =
-                equalDivision ? ((numLevel * 2 - 1) / (numLevel * 2)) : 1;
+            var numLevel = 1 << format.channelBits[ch];
+            this.inMin[ch] = equDiv ? (1 / (numLevel * 2)) : 0;
+            this.inMax[ch] = equDiv ? ((numLevel * 2 - 1) / (numLevel * 2)) : 1;
             this.outMax[ch] = numLevel - 1;
         }
     }
@@ -245,28 +339,26 @@ function makeTextBox(value, placeholder, maxLength) {
     input.maxLength = maxLength;
     return input;
 }
-function makeSelectBox(dict, defaultValue) {
-    var e_1, _a;
-    if (dict === void 0) { dict = {}; }
-    if (defaultValue === void 0) { defaultValue = ''; }
+function makeSelectBox(items, defaultValue) {
+    var e_2, _a;
     var select = document.createElement('select');
     try {
-        for (var _b = __values(Object.entries(dict)), _c = _b.next(); !_c.done; _c = _b.next()) {
-            var _d = __read(_c.value, 2), value = _d[0], label = _d[1];
+        for (var items_1 = __values(items), items_1_1 = items_1.next(); !items_1_1.done; items_1_1 = items_1.next()) {
+            var _b = items_1_1.value, value = _b.value, label = _b.label;
             var option = document.createElement('option');
-            option.value = value;
+            option.value = value.toString();
             option.textContent = label;
             select.appendChild(option);
         }
     }
-    catch (e_1_1) { e_1 = { error: e_1_1 }; }
+    catch (e_2_1) { e_2 = { error: e_2_1 }; }
     finally {
         try {
-            if (_c && !_c.done && (_a = _b.return)) _a.call(_b);
+            if (items_1_1 && !items_1_1.done && (_a = items_1.return)) _a.call(items_1);
         }
-        finally { if (e_1) throw e_1.error; }
+        finally { if (e_2) throw e_2.error; }
     }
-    select.value = defaultValue;
+    select.value = defaultValue.toString();
     return select;
 }
 function makeCheckBox(labelText) {
@@ -292,23 +384,17 @@ function makeSampleImageButton(url) {
     });
     return button;
 }
-function makePresetButton(name, text, description) {
+function makePresetButton(id, preset) {
     var button = document.createElement('button');
-    button.dataset.presetName = name;
+    button.dataset.presetName = id;
     button.classList.add('presetButton');
     var img = document.createElement('img');
-    img.src = "img/preset/".concat(name, ".svg");
-    var span = document.createElement('span');
-    span.textContent = description;
-    span.style.fontSize = 'smaller';
+    img.src = "img/preset/".concat(id, ".svg");
     button.appendChild(img);
     button.appendChild(document.createElement('br'));
-    button.appendChild(document.createTextNode(text));
-    button.appendChild(document.createElement('br'));
-    button.appendChild(span);
-    button.addEventListener('click', function () {
-        loadPreset(name);
-    });
+    button.appendChild(document.createTextNode(preset.label));
+    button.title = preset.description;
+    button.addEventListener('click', function () { return loadPreset(preset); });
     return button;
 }
 var dropTarget = document.createElement('div');
@@ -322,66 +408,77 @@ var gammaBox = makeTextBox('1', '(auto)', 4);
 var brightnessBox = makeTextBox('0', '(auto)', 5);
 var contrastBox = makeTextBox('100', '(auto)', 5);
 var invertBox = makeCheckBox('階調反転');
-var presetRgb565Be = makePresetButton('rgb565_be', 'RGB565-BE', '各種 16bit カラー液晶');
-var presetRgb332 = makePresetButton('rgb332', 'RGB332', '各種 GFX ライブラリ');
-var presetBwHpMf = makePresetButton('bw_hp_mf', '白黒 横パッキング', '各種 GFX ライブラリ');
-var presetBwVpLf = makePresetButton('bw_vp_lf', '白黒 縦パッキング', 'SSD1306/1309, 他...');
-var formatBox = makeSelectBox({
-    rgb565: 'RGB565',
-    rgb555: 'RGB555',
-    rgb332: 'RGB332',
-    rgb111: 'RGB111',
-    gray4: 'Gray4',
-    gray2: 'Gray2',
-    bw: 'B/W',
-}, 'rgb565');
+var pixelFormatBox = makeSelectBox([
+    { value: 0 /* PixelFormat.ARGB8888 */, label: 'ARGB8888' },
+    { value: 1 /* PixelFormat.RGB888 */, label: 'RGB888' },
+    { value: 2 /* PixelFormat.RGB666 */, label: 'RGB666' },
+    { value: 3 /* PixelFormat.RGB565 */, label: 'RGB565' },
+    { value: 4 /* PixelFormat.RGB555 */, label: 'RGB555' },
+    { value: 5 /* PixelFormat.RGB332 */, label: 'RGB332' },
+    { value: 6 /* PixelFormat.RGB111 */, label: 'RGB111' },
+    { value: 7 /* PixelFormat.GRAY4 */, label: 'Gray4' },
+    { value: 8 /* PixelFormat.GRAY2 */, label: 'Gray2' },
+    { value: 9 /* PixelFormat.BW */, label: 'B/W' },
+], 3 /* PixelFormat.RGB565 */);
 var widthBox = makeTextBox('', '(auto)', 4);
 var heightBox = makeTextBox('', '(auto)', 4);
-var scalingMethodBox = makeSelectBox({
-    zoom: 'ズーム',
-    fit: 'フィット',
-    stretch: 'ストレッチ',
-}, 'zoom');
-var ditherBox = makeSelectBox({
-    none: 'なし',
-    diffusion: '誤差拡散',
-}, 'diffusion');
-var roundMethodBox = makeSelectBox({
-    nearest: '最も近い輝度',
-    equalDivision: '均等割り',
-}, 'nearest');
+var scalingMethodBox = makeSelectBox([
+    { value: 0 /* ScalingMethod.ZOOM */, label: 'ズーム' },
+    { value: 1 /* ScalingMethod.FIT */, label: 'フィット' },
+    { value: 2 /* ScalingMethod.STRETCH */, label: 'ストレッチ' },
+], 0 /* ScalingMethod.ZOOM */);
+var ditherBox = makeSelectBox([
+    { value: 0 /* DitherMethod.NONE */, label: 'なし' },
+    { value: 1 /* DitherMethod.DIFFUSION */, label: '誤差拡散' },
+], 1 /* DitherMethod.DIFFUSION */);
+var roundMethodBox = makeSelectBox([
+    { value: 0 /* RoundMethod.NEAREST */, label: '最も近い輝度' },
+    { value: 1 /* RoundMethod.EQUAL_DIVISION */, label: '均等割り' },
+], 0 /* RoundMethod.NEAREST */);
 var previewCanvas = document.createElement('canvas');
 var quantizeErrorBox = document.createElement('span');
-var channelOrderBox = makeSelectBox({
-    lsbRed: '下位から',
-    msbRed: '上位から',
-}, 'msbRed');
-var pixelOrderBox = makeSelectBox({
-    lsb1st: '下位から',
-    msb1st: '上位から',
-}, 'msb1st');
-var byteOrderBox = makeSelectBox({
-    le: 'Little Endian',
-    be: 'Big Endian',
-}, 'be');
-var packingBox = makeSelectBox({
-    hori: '横',
-    vert: '縦',
-}, 'hori');
-var addressingBox = makeSelectBox({
-    hori: '水平',
-    vert: '垂直',
-}, 'hori');
-var codeColsBox = makeSelectBox({
-    '8': '8',
-    '16': '16',
-    '32': '32',
-}, '16');
-var indentBox = makeSelectBox({
-    sp2: 'スペース x2',
-    sp4: 'スペース x4',
-    tab: 'タブ',
-}, 'sp2');
+var channelOrderBox = makeSelectBox([
+    { value: 0 /* BitOrder.LSB_FIRST */, label: '下位から' },
+    { value: 1 /* BitOrder.MSB_FIRST */, label: '上位から' },
+], 1 /* BitOrder.MSB_FIRST */);
+var pixelOrderBox = makeSelectBox([
+    { value: 0 /* BitOrder.LSB_FIRST */, label: '下位から' },
+    { value: 1 /* BitOrder.MSB_FIRST */, label: '上位から' },
+], 1 /* BitOrder.MSB_FIRST */);
+var byteOrderBox = makeSelectBox([
+    { value: 0 /* ByteOrder.LITTLE_ENDIAN */, label: 'Little Endian' },
+    { value: 1 /* ByteOrder.BIG_ENDIAN */, label: 'Big Endian' },
+], 1 /* ByteOrder.BIG_ENDIAN */);
+var packUnitBox = makeSelectBox([
+    { value: 0 /* PackUnit.FRAGMENT */, label: '複数ピクセル' },
+    { value: 1 /* PackUnit.PIXEL */, label: '単一ピクセル' },
+    { value: 2 /* PackUnit.UNPACKED */, label: 'アンパックド' },
+], 1 /* PackUnit.PIXEL */);
+var packDirBox = makeSelectBox([
+    { value: 0 /* ScanDir.HORIZONTAL */, label: '横' },
+    { value: 1 /* ScanDir.VERTICAL */, label: '縦' },
+], 0 /* ScanDir.HORIZONTAL */);
+var alignBoundaryBox = makeSelectBox([
+    { value: 8 /* AlignBoundary.BYTE */, label: 'バイト' },
+], 8 /* AlignBoundary.BYTE */);
+var alignDirBox = makeSelectBox([
+    { value: 1 /* AlignDir.LOWER */, label: '右詰め' },
+    { value: 0 /* AlignDir.HIGHER */, label: '左詰め' },
+], 1 /* AlignDir.LOWER */);
+var addressingBox = makeSelectBox([
+    { value: 0 /* ScanDir.HORIZONTAL */, label: '水平' },
+    { value: 1 /* ScanDir.VERTICAL */, label: '垂直' },
+], 0 /* ScanDir.HORIZONTAL */);
+var codeColsBox = makeSelectBox([
+    { value: 8, label: '8' },
+    { value: 16, label: '16' },
+    { value: 32, label: '32' },
+], 16);
+var indentBox = makeSelectBox([
+    { value: 1 /* Indent.SPACE_X2 */, label: 'スペース x2' },
+    { value: 2 /* Indent.SPACE_X4 */, label: 'スペース x4' },
+    { value: 0 /* Indent.TAB */, label: 'タブ' },
+], 1 /* Indent.SPACE_X2 */);
 var arrayCode = document.createElement('pre');
 var codeGenErrorBox = document.createElement('p');
 var copyButton = makeButton('コードをコピー');
@@ -392,11 +489,11 @@ var generateCodeTimeoutId = -1;
 var worldX0 = 0, worldY0 = 0, zoom = 1;
 var trimL = 0, trimT = 0, trimR = 1, trimB = 1;
 var trimUiState = 0 /* TrimState.IDLE */;
-var imageCacheFormat = new PixelFormat();
+var imageCacheFormat = new PixelFormatInfo(3 /* PixelFormat.RGB565 */);
 var imageCacheData = [null, null, null, null];
 function main() {
     return __awaiter(this, void 0, void 0, function () {
-        var fileBrowseButton, p, p, p, p, p, p, p, p, p, p, p, p, div;
+        var fileBrowseButton, p, id, p, p, p, p, p, p, p, p, p, p, p, div;
         var _this = this;
         return __generator(this, function (_a) {
             switch (_a.label) {
@@ -432,12 +529,13 @@ function main() {
                         pasteTarget.placeholder = 'ここに貼り付け';
                         container.appendChild(makeParagraph([
                             makeSectionLabel('入力画像'), makeNoWrapSpan(['画像をドロップ、']),
-                            makeNoWrapSpan(['または ', pasteTarget, '、']),
-                            makeNoWrapSpan([' または ', fileBrowseButton, '、']), makeNoWrapSpan([
-                                'またはサンプル: ',
+                            makeNoWrapSpan([pasteTarget, '、']),
+                            makeNoWrapSpan([' または ', fileBrowseButton]), makeNoWrapSpan([
+                                ' (サンプル: ',
                                 makeSampleImageButton('./img/sample/gradient.png'),
                                 makeSampleImageButton('./img/sample/forest-path.jpg'),
                                 makeSampleImageButton('./img/sample/anime-girl.png'),
+                                ' )',
                             ])
                         ]));
                     }
@@ -446,11 +544,10 @@ function main() {
                             makeSectionLabel('プリセット'),
                             '選んでください: ',
                             document.createElement('br'),
-                            presetRgb565Be,
-                            presetRgb332,
-                            presetBwHpMf,
-                            presetBwVpLf,
                         ]);
+                        for (id in presets) {
+                            p.appendChild(makePresetButton(id, presets[id]));
+                        }
                         container.appendChild(p);
                     }
                     {
@@ -533,7 +630,7 @@ function main() {
                     {
                         p = makeParagraph([
                             makeSectionLabel('量子化'),
-                            makePropertyContainer(['フォーマット: ', formatBox], 'ピクセルフォーマットを指定します。'),
+                            makePropertyContainer(['フォーマット: ', pixelFormatBox], 'ピクセルフォーマットを指定します。'),
                             makePropertyContainer(['丸め方法: ', roundMethodBox], 'パレットから色を選択する際の戦略を指定します。\nディザリングを行う場合はあまり関係ありません。'),
                             makePropertyContainer(['ディザリング: ', ditherBox], 'あえてノイズを加えることでできるだけ元画像の輝度を再現します。'),
                         ]);
@@ -565,9 +662,12 @@ function main() {
                             makePropertyContainer(['チャネル順: ', channelOrderBox], 'RGB のチャネルを並べる順序を指定します。\n上位からであることが多いです。'),
                             makePropertyContainer(['ピクセル順: ', pixelOrderBox], 'バイト内のピクセルの順序を指定します。\n横パッキングでは上位から、縦パッキングでは下位からであることが多いです。'),
                             makePropertyContainer(['バイト順: ', byteOrderBox], 'ピクセル内のバイトの順序を指定します。\nGFX ライブラリなどでは BigEndian であることが多いです。'),
-                            makePropertyContainer(['パッキング方向: ', packingBox], 'ピクセルをどの方向にパッキングするかを指定します。\n' +
+                            makePropertyContainer(['パッキング単位: ', packUnitBox], 'パッキングの単位を指定します。\n1 チャネルが 8 bit の倍数の場合は出力に影響しません。'),
+                            makePropertyContainer(['パッキング方向: ', packDirBox], 'ピクセルをどの方向にパッキングするかを指定します。\n' +
                                 '多くの場合横ですが、SSD1306/1309 などの一部の白黒ディスプレイに\n' +
                                 '直接転送可能なデータを生成する場合は縦を指定してください。'),
+                            makePropertyContainer(['アライメント境界: ', alignBoundaryBox], 'アライメントの境界を指定します。\nパッキングの単位が 8 bit の倍数の場合は出力に影響しません。'),
+                            makePropertyContainer(['アライメント方向: ', alignDirBox], 'アライメントの方向を指定します。\nパッキングの単位が 8 bit の倍数の場合は出力に影響しません。'),
                             makePropertyContainer(['アドレス方向: ', addressingBox], 'アドレスのインクリメント方向を指定します。\n通常は水平です。'),
                         ]);
                         container.appendChild(p);
@@ -630,25 +730,25 @@ function main() {
                     }); });
                     // ドラッグ & ドロップ
                     document.body.addEventListener('dragover', function (e) {
-                        var e_2, _a;
+                        var e_3, _a;
                         e.preventDefault();
                         e.stopPropagation();
                         var items = e.dataTransfer.items;
                         try {
-                            for (var items_1 = __values(items), items_1_1 = items_1.next(); !items_1_1.done; items_1_1 = items_1.next()) {
-                                var item = items_1_1.value;
+                            for (var items_2 = __values(items), items_2_1 = items_2.next(); !items_2_1.done; items_2_1 = items_2.next()) {
+                                var item = items_2_1.value;
                                 if (item.kind === 'file') {
                                     dropTarget.style.display = 'block';
                                     break;
                                 }
                             }
                         }
-                        catch (e_2_1) { e_2 = { error: e_2_1 }; }
+                        catch (e_3_1) { e_3 = { error: e_3_1 }; }
                         finally {
                             try {
-                                if (items_1_1 && !items_1_1.done && (_a = items_1.return)) _a.call(items_1);
+                                if (items_2_1 && !items_2_1.done && (_a = items_2.return)) _a.call(items_2);
                             }
-                            finally { if (e_2) throw e_2.error; }
+                            finally { if (e_3) throw e_3.error; }
                         }
                     });
                     dropTarget.addEventListener('dragleave', function (e) {
@@ -657,8 +757,8 @@ function main() {
                         dropTarget.style.display = 'none';
                     });
                     dropTarget.addEventListener('drop', function (e) { return __awaiter(_this, void 0, void 0, function () {
-                        var items, items_2, items_2_1, item, e_3_1;
-                        var e_3, _a;
+                        var items, items_3, items_3_1, item, e_4_1;
+                        var e_4, _a;
                         return __generator(this, function (_b) {
                             switch (_b.label) {
                                 case 0:
@@ -666,45 +766,6 @@ function main() {
                                     e.stopPropagation();
                                     dropTarget.style.display = 'none';
                                     items = e.dataTransfer.items;
-                                    _b.label = 1;
-                                case 1:
-                                    _b.trys.push([1, 6, 7, 8]);
-                                    items_2 = __values(items), items_2_1 = items_2.next();
-                                    _b.label = 2;
-                                case 2:
-                                    if (!!items_2_1.done) return [3 /*break*/, 5];
-                                    item = items_2_1.value;
-                                    if (!(item.kind === 'file')) return [3 /*break*/, 4];
-                                    return [4 /*yield*/, loadFromFile(item.getAsFile())];
-                                case 3:
-                                    _b.sent();
-                                    return [3 /*break*/, 5];
-                                case 4:
-                                    items_2_1 = items_2.next();
-                                    return [3 /*break*/, 2];
-                                case 5: return [3 /*break*/, 8];
-                                case 6:
-                                    e_3_1 = _b.sent();
-                                    e_3 = { error: e_3_1 };
-                                    return [3 /*break*/, 8];
-                                case 7:
-                                    try {
-                                        if (items_2_1 && !items_2_1.done && (_a = items_2.return)) _a.call(items_2);
-                                    }
-                                    finally { if (e_3) throw e_3.error; }
-                                    return [7 /*endfinally*/];
-                                case 8: return [2 /*return*/];
-                            }
-                        });
-                    }); });
-                    // 貼り付け
-                    pasteTarget.addEventListener('paste', function (e) { return __awaiter(_this, void 0, void 0, function () {
-                        var items, items_3, items_3_1, item, e_4_1;
-                        var e_4, _a;
-                        return __generator(this, function (_b) {
-                            switch (_b.label) {
-                                case 0:
-                                    items = e.clipboardData.items;
                                     _b.label = 1;
                                 case 1:
                                     _b.trys.push([1, 6, 7, 8]);
@@ -731,6 +792,45 @@ function main() {
                                         if (items_3_1 && !items_3_1.done && (_a = items_3.return)) _a.call(items_3);
                                     }
                                     finally { if (e_4) throw e_4.error; }
+                                    return [7 /*endfinally*/];
+                                case 8: return [2 /*return*/];
+                            }
+                        });
+                    }); });
+                    // 貼り付け
+                    pasteTarget.addEventListener('paste', function (e) { return __awaiter(_this, void 0, void 0, function () {
+                        var items, items_4, items_4_1, item, e_5_1;
+                        var e_5, _a;
+                        return __generator(this, function (_b) {
+                            switch (_b.label) {
+                                case 0:
+                                    items = e.clipboardData.items;
+                                    _b.label = 1;
+                                case 1:
+                                    _b.trys.push([1, 6, 7, 8]);
+                                    items_4 = __values(items), items_4_1 = items_4.next();
+                                    _b.label = 2;
+                                case 2:
+                                    if (!!items_4_1.done) return [3 /*break*/, 5];
+                                    item = items_4_1.value;
+                                    if (!(item.kind === 'file')) return [3 /*break*/, 4];
+                                    return [4 /*yield*/, loadFromFile(item.getAsFile())];
+                                case 3:
+                                    _b.sent();
+                                    return [3 /*break*/, 5];
+                                case 4:
+                                    items_4_1 = items_4.next();
+                                    return [3 /*break*/, 2];
+                                case 5: return [3 /*break*/, 8];
+                                case 6:
+                                    e_5_1 = _b.sent();
+                                    e_5 = { error: e_5_1 };
+                                    return [3 /*break*/, 8];
+                                case 7:
+                                    try {
+                                        if (items_4_1 && !items_4_1.done && (_a = items_4.return)) _a.call(items_4);
+                                    }
+                                    finally { if (e_5) throw e_5.error; }
                                     return [7 /*endfinally*/];
                                 case 8: return [2 /*return*/];
                             }
@@ -1001,51 +1101,16 @@ function updateTrimCanvas() {
         ctx.fillRect(0, trimViewB, canvasW, lineWidth);
     }
 }
-function loadPreset(name) {
-    var e_5, _a;
-    var PRESETS = {
-        rgb565_be: { fmt: 'rgb565', chOrder: 'msbRed', byteOrder: 'be', addrDir: 'hori' },
-        rgb332: { fmt: 'rgb332', chOrder: 'msbRed', addrDir: 'hori' },
-        bw_vp_lf: { fmt: 'bw', pixOrder: 'lsb1st', packDir: 'vert', addrDir: 'hori' },
-        bw_hp_mf: { fmt: 'bw', pixOrder: 'msb1st', packDir: 'hori', addrDir: 'hori' },
-    };
-    if (!(name in PRESETS)) {
-        throw new Error("Unknown preset: ".concat(name));
-    }
-    try {
-        for (var _b = __values(Object.entries(PRESETS[name])), _c = _b.next(); !_c.done; _c = _b.next()) {
-            var _d = __read(_c.value, 2), key = _d[0], value = _d[1];
-            switch (key) {
-                case 'fmt':
-                    formatBox.value = value;
-                    break;
-                case 'chOrder':
-                    channelOrderBox.value = value;
-                    break;
-                case 'pixOrder':
-                    pixelOrderBox.value = value;
-                    break;
-                case 'byteOrder':
-                    byteOrderBox.value = value;
-                    break;
-                case 'packDir':
-                    packingBox.value = value;
-                    break;
-                case 'addrDir':
-                    addressingBox.value = value;
-                    break;
-                default:
-                    throw new Error("Unknown key: ".concat(key));
-            }
-        }
-    }
-    catch (e_5_1) { e_5 = { error: e_5_1 }; }
-    finally {
-        try {
-            if (_c && !_c.done && (_a = _b.return)) _a.call(_b);
-        }
-        finally { if (e_5) throw e_5.error; }
-    }
+function loadPreset(preset) {
+    pixelFormatBox.value = preset.format.toString();
+    channelOrderBox.value = preset.channelOrder.toString();
+    pixelOrderBox.value = preset.pixelOrder.toString();
+    byteOrderBox.value = preset.byteOrder.toString();
+    packUnitBox.value = preset.packUnit.toString();
+    packDirBox.value = preset.packDir.toString();
+    alignBoundaryBox.value = preset.alignUnit.toString();
+    alignDirBox.value = preset.alignDir.toString();
+    addressingBox.value = preset.addrDir.toString();
     requestQuantize();
 }
 function requestQuantize() {
@@ -1111,8 +1176,8 @@ function quantize() {
                 var srcAspect = srcW / srcH;
                 var outAspect = outW / outH;
                 var scaleX = void 0, scaleY = void 0;
-                switch (scalingMethodBox.value) {
-                    case 'zoom':
+                switch (parseInt(scalingMethodBox.value)) {
+                    case 0 /* ScalingMethod.ZOOM */:
                         if (srcAspect > outAspect) {
                             scaleX = scaleY = outH / srcH;
                         }
@@ -1120,7 +1185,7 @@ function quantize() {
                             scaleX = scaleY = outW / srcW;
                         }
                         break;
-                    case 'fit':
+                    case 1 /* ScalingMethod.FIT */:
                         if (srcAspect > outAspect) {
                             scaleX = scaleY = outW / srcW;
                         }
@@ -1128,7 +1193,7 @@ function quantize() {
                             scaleX = scaleY = outH / srcH;
                         }
                         break;
-                    case 'stretch':
+                    case 2 /* ScalingMethod.STRETCH */:
                         scaleX = outW / srcW;
                         scaleY = outH / srcH;
                         break;
@@ -1142,43 +1207,11 @@ function quantize() {
                 outCtx.drawImage(origCanvas, trimL, trimT, srcW, srcH, dx, dy, dw, dh);
             }
         }
-        var fmt = new PixelFormat();
-        switch (formatBox.value) {
-            case 'rgb565':
-                fmt.colorSpace = 1 /* ColorSpace.RGB */;
-                fmt.channelDepth = [5, 6, 5];
-                break;
-            case 'rgb555':
-                fmt.colorSpace = 1 /* ColorSpace.RGB */;
-                fmt.channelDepth = [5, 5, 5];
-                break;
-            case 'rgb332':
-                fmt.colorSpace = 1 /* ColorSpace.RGB */;
-                fmt.channelDepth = [3, 3, 2];
-                break;
-            case 'rgb111':
-                fmt.colorSpace = 1 /* ColorSpace.RGB */;
-                fmt.channelDepth = [1, 1, 1];
-                break;
-            case 'gray4':
-                fmt.colorSpace = 0 /* ColorSpace.GRAYSCALE */;
-                fmt.channelDepth = [4];
-                break;
-            case 'gray2':
-                fmt.colorSpace = 0 /* ColorSpace.GRAYSCALE */;
-                fmt.channelDepth = [2];
-                break;
-            case 'bw':
-                fmt.colorSpace = 0 /* ColorSpace.GRAYSCALE */;
-                fmt.channelDepth = [1];
-                break;
-            default:
-                throw new Error('Unknown image format');
-        }
+        var fmt = new PixelFormatInfo(parseInt(pixelFormatBox.value));
         var maxChannelDepth = 0;
-        var equalDivision = false;
+        var roundMethod = 0 /* RoundMethod.NEAREST */;
         try {
-            for (var _b = __values(fmt.channelDepth), _c = _b.next(); !_c.done; _c = _b.next()) {
+            for (var _b = __values(fmt.channelBits), _c = _b.next(); !_c.done; _c = _b.next()) {
                 var depth = _c.value;
                 if (depth > maxChannelDepth) {
                     maxChannelDepth = depth;
@@ -1194,13 +1227,13 @@ function quantize() {
         }
         if (maxChannelDepth > 1) {
             roundMethodBox.disabled = false;
-            equalDivision = roundMethodBox.value === 'equalDivision';
+            roundMethod = parseInt(roundMethodBox.value);
         }
         else {
             // 均等割りはチャンネル深度が2以上でないと意味がないので無効化
             roundMethodBox.disabled = true;
         }
-        var palette = new Palette(fmt, equalDivision);
+        var palette = new Palette(fmt, roundMethod);
         var normData = new Float32Array(outW * outH * fmt.numChannels);
         var norm = new NormalizedImage(fmt, palette, outW, outH, normData);
         // 量子化の適用
@@ -1307,8 +1340,8 @@ function quantize() {
                 }
             }
             // 量子化
-            var diffusion = ditherBox.value === 'diffusion';
-            var palette_1 = new Palette(fmt, equalDivision);
+            var diffusion = parseInt(ditherBox.value) === 1 /* DitherMethod.DIFFUSION */;
+            var palette_1 = new Palette(fmt, roundMethod);
             var out = new Uint8Array(numCh);
             var error = new Float32Array(numCh);
             for (var y = 0; y < outH; y++) {
@@ -1415,7 +1448,15 @@ function requestGenerateCode() {
         generateCodeTimeoutId = -1;
     }, 300);
 }
+function align(data, width, boundary, alignLeft) {
+    var outWidth = Math.ceil(width / boundary) * boundary;
+    if (alignLeft) {
+        data <<= outWidth - width;
+    }
+    return [data, outWidth];
+}
 function generateCode() {
+    var _a, _b, _c;
     if (!imageCacheData) {
         arrayCode.textContent = '';
         arrayCode.style.display = 'block';
@@ -1423,46 +1464,44 @@ function generateCode() {
         return;
     }
     try {
-        // チャネル順
-        var msbRed = channelOrderBox.value == 'msbRed';
-        // ピクセルオーダー
-        var msb1st = pixelOrderBox.value === 'msb1st';
-        // パッキング方向
-        var vertPack = packingBox.value === 'vert';
-        // アドレッシング
-        var vertAddr = addressingBox.value === 'vert';
-        // バイトオーダー
-        var bigEndian = byteOrderBox.value === 'be';
+        var msbRed = parseInt(channelOrderBox.value) == 1 /* BitOrder.MSB_FIRST */;
+        var msb1st = parseInt(pixelOrderBox.value) == 1 /* BitOrder.MSB_FIRST */;
+        var bigEndian = parseInt(byteOrderBox.value) == 1 /* ByteOrder.BIG_ENDIAN */;
+        var packUnit = parseInt(packUnitBox.value);
+        var vertPack = parseInt(packDirBox.value) == 1 /* ScanDir.VERTICAL */;
+        var alignBoundary = parseInt(alignBoundaryBox.value);
+        var alignLeft = parseInt(alignDirBox.value) == 0 /* AlignDir.HIGHER */;
+        var vertAddr = parseInt(addressingBox.value) == 1 /* ScanDir.VERTICAL */;
         // ピクセルあたりのビット数
         var numChannels = imageCacheData.length;
         var bitsPerPixel = 0;
         for (var i = 0; i < numChannels; i++) {
-            bitsPerPixel += imageCacheFormat.channelDepth[i];
+            bitsPerPixel += imageCacheFormat.channelBits[i];
         }
         // エンコードパラメータ
         var pixelsPerPack = Math.max(1, Math.floor(8 / bitsPerPixel));
         var bytesPerPack = Math.ceil(bitsPerPixel / 8);
-        var packWidth = vertPack ? 1 : pixelsPerPack;
-        var packHeight = vertPack ? pixelsPerPack : 1;
+        var fragWidth = vertPack ? 1 : pixelsPerPack;
+        var fragHeight = vertPack ? pixelsPerPack : 1;
         // 1 チャネルのときはチャネル順指定無効
         channelOrderBox.disabled = (numChannels <= 1);
         // 1 byte/pack 以下のときはエンディアン指定無効
         byteOrderBox.disabled = (bytesPerPack <= 1);
         // 1 pixel/byte 以下のときはパッキング設定無効
         pixelOrderBox.disabled = (pixelsPerPack <= 1);
-        packingBox.disabled = (pixelsPerPack <= 1);
+        packDirBox.disabled = (pixelsPerPack <= 1);
         // 列数決定
         var arrayCols = parseInt(codeColsBox.value);
         // インデント決定
         var indent = '  ';
-        switch (indentBox.value) {
-            case 'sp2':
+        switch (parseInt(indentBox.value)) {
+            case 1 /* Indent.SPACE_X2 */:
                 indent = '  ';
                 break;
-            case 'sp4':
+            case 2 /* Indent.SPACE_X4 */:
                 indent = '    ';
                 break;
-            case 'tab':
+            case 0 /* Indent.TAB */:
                 indent = '\t';
                 break;
             default:
@@ -1470,69 +1509,88 @@ function generateCode() {
         }
         var width = previewCanvas.width;
         var height = previewCanvas.height;
-        var cols = Math.ceil(width / packWidth);
-        var rows = Math.ceil(height / packHeight);
+        var cols = Math.ceil(width / fragWidth);
+        var rows = Math.ceil(height / fragHeight);
         var numPacks = cols * rows;
         var arrayData = new Uint8Array(numPacks * bytesPerPack);
         // 配列化
         var byteIndex = 0;
+        // パック単位
         for (var packIndex = 0; packIndex < numPacks; packIndex++) {
             var xCoarse = void 0, yCoarse = void 0;
             if (vertAddr) {
-                xCoarse = packWidth * Math.floor(packIndex / rows);
-                yCoarse = packHeight * (packIndex % rows);
+                xCoarse = fragWidth * Math.floor(packIndex / rows);
+                yCoarse = fragHeight * (packIndex % rows);
             }
             else {
-                xCoarse = packWidth * (packIndex % cols);
-                yCoarse = packHeight * Math.floor(packIndex / cols);
+                xCoarse = fragWidth * (packIndex % cols);
+                yCoarse = fragHeight * Math.floor(packIndex / cols);
             }
-            // パッキング
-            var packData = 0;
-            var pixPos = msb1st ? (bitsPerPixel * pixelsPerPack) : 0;
-            for (var yFine = 0; yFine < packHeight; yFine++) {
-                for (var xFine = 0; xFine < packWidth; xFine++) {
+            // ピクセル単位
+            var fragData = 0;
+            var fragBits = 0;
+            for (var yFine = 0; yFine < fragHeight; yFine++) {
+                for (var xFine = 0; xFine < fragWidth; xFine++) {
                     var x = xCoarse + xFine;
                     var y = yCoarse + yFine;
                     // ピクセルのエンコード
                     var pixData = 0;
-                    var chPos = msbRed ? bitsPerPixel : 0;
+                    var pixBits = 0;
                     for (var ch = 0; ch < numChannels; ch++) {
-                        var val = imageCacheData[ch][y * width + x];
-                        var chBits = imageCacheFormat.channelDepth[ch];
+                        var chData = 0;
+                        if (y < height && x < width) {
+                            chData = imageCacheData[ch][y * width + x];
+                        }
+                        var chBits = imageCacheFormat.channelBits[ch];
+                        if (packUnit == 2 /* PackUnit.UNPACKED */) {
+                            _a = __read(align(chData, chBits, alignBoundary, alignLeft), 2), chData = _a[0], chBits = _a[1];
+                        }
                         if (msbRed) {
-                            chPos -= chBits;
-                            pixData |= val << chPos;
+                            pixData <<= chBits;
+                            pixData |= chData;
                         }
                         else {
-                            pixData |= val << chPos;
-                            chPos += chBits;
+                            pixData |= chData << pixBits;
                         }
+                        pixBits += chBits;
                     } // for ch
+                    if (packUnit == 1 /* PackUnit.PIXEL */) {
+                        _b = __read(align(pixData, pixBits, alignBoundary, alignLeft), 2), pixData = _b[0], pixBits = _b[1];
+                    }
                     if (msb1st) {
-                        pixPos -= bitsPerPixel;
-                        packData |= pixData << pixPos;
+                        fragData <<= pixBits;
+                        fragData |= pixData;
                     }
                     else {
-                        packData |= pixData << pixPos;
-                        pixPos += bitsPerPixel;
+                        fragData |= pixData << fragBits;
                     }
+                    fragBits += pixBits;
                 } // for xFine
             } // for yFine
+            if (packUnit == 0 /* PackUnit.FRAGMENT */) {
+                _c = __read(align(fragData, fragBits, alignBoundary, alignLeft), 2), fragData = _c[0], fragBits = _c[1];
+            }
+            if (fragBits % 8 != 0) {
+                throw new Error("Invalid fragment fields");
+            }
             // バイト単位に変換
-            for (var j = 0; j < bytesPerPack; j++) {
+            for (var j = 0; j < fragBits / 8; j++) {
                 if (bigEndian) {
-                    arrayData[byteIndex++] =
-                        (packData >> ((bytesPerPack - 1) * 8)) & 0xFF;
-                    packData <<= 8;
+                    arrayData[byteIndex++] = (fragData >> (fragBits - 8)) & 0xFF;
+                    fragData <<= 8;
                 }
                 else {
-                    arrayData[byteIndex++] = packData & 0xFF;
-                    packData >>= 8;
+                    arrayData[byteIndex++] = fragData & 0xFF;
+                    fragData >>= 8;
                 }
             }
         } // for packIndex
         // コード生成
         var code = '';
+        code += "#pragma once\n";
+        code += "\n";
+        code += "#include <stdint.h>\n";
+        code += "\n";
         code += "// ".concat(width, "x").concat(height, "px, ").concat(imageCacheFormat.toString(), "\n");
         {
             code += "// ";
@@ -1545,7 +1603,7 @@ function generateCode() {
             if (!byteOrderBox.disabled) {
                 code += (bigEndian ? 'Big' : 'Little') + ' Endian, ';
             }
-            if (!packingBox.disabled) {
+            if (!packDirBox.disabled) {
                 code += (vertPack ? 'Vertical' : 'Horizontal') + ' Packing, ';
             }
             code += "".concat(vertAddr ? 'Vertical' : 'Horizontal', " Adressing\n");
