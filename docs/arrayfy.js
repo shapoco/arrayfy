@@ -1088,10 +1088,10 @@ function updateTrimCanvas() {
     var view = getTrimViewArea();
     if (trimUiState == 0 /* TrimState.IDLE */) {
         // ビューに触れていない間に座標系を調整
-        var worldL = Math.min(trimL, 0);
-        var worldR = Math.max(trimR, origW);
-        var worldT = Math.min(trimT, 0);
-        var worldB = Math.max(trimB, origH);
+        var worldL = trimL; // Math.min(trimL, 0);
+        var worldR = trimR; // Math.max(trimR, origW);
+        var worldT = trimT; // Math.min(trimT, 0);
+        var worldB = trimB; // Math.max(trimB, origH);
         var worldW = worldR - worldL;
         var worldH = worldB - worldT;
         worldX0 = (worldL + worldR) / 2;
