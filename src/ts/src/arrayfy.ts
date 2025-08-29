@@ -26,12 +26,13 @@ const enum PixelFormat {
 }
 
 const enum PackUnit {
-  FRAGMENT,
-  PIXEL,
-  UNPACKED,
+  MULTI_PIXEL,
+  SINGLE_PIXEL,
+  CHANNEL,
 }
 
 const enum AlignBoundary {
+  NIBBLE = 4,
   BYTE = 8,
 }
 
@@ -89,11 +90,18 @@ type Rect = {
   height: number,
 };
 
+class ArrayfyError extends Error {
+  constructor(public element: HTMLElement, message: string) {
+    super(message);
+    this.name = 'ArrayfyError';
+  }
+}
+
 class Preset {
   public channelOrder: BitOrder = BitOrder.MSB_FIRST;
   public pixelOrder: BitOrder = BitOrder.MSB_FIRST;
   public byteOrder: ByteOrder = ByteOrder.BIG_ENDIAN;
-  public packUnit: PackUnit = PackUnit.PIXEL;
+  public packUnit: PackUnit = PackUnit.SINGLE_PIXEL;
   public packDir: ScanDir = ScanDir.HORIZONTAL;
   public alignUnit: AlignBoundary = AlignBoundary.BYTE;
   public alignDir: AlignDir = AlignDir.LOWER;
@@ -111,24 +119,34 @@ class Preset {
 }
 
 let presets: Record<string, Preset> = {
-  // argb8888_be: new Preset(
+  // rgba8888_le: new Preset(
   //    'ARGB8888',
   //    '透明度付きフルカラー。\n各種 GFX
   //    ライブラリで透明ピクセルを含む画像を扱う場合に。',
   //    PixelFormat.ARGB8888,
   //    {packUnit: PackUnit.UNPACKED},
   //    ),
-  rgb888_be: new Preset(
+  rgb888_le: new Preset(
       'RGB888',
       'フルカラー。24bit 液晶用。',
       PixelFormat.RGB888,
-      {packUnit: PackUnit.UNPACKED},
+      {
+        packUnit: PackUnit.CHANNEL,
+        channelOrder: BitOrder.LSB_FIRST,
+        pixelOrder: BitOrder.LSB_FIRST,
+        byteOrder: ByteOrder.LITTLE_ENDIAN,
+      },
       ),
-  rgb666_be: new Preset(
+  rgb666_le: new Preset(
       'RGB666',
       '18bit 液晶用。',
       PixelFormat.RGB666,
-      {packUnit: PackUnit.UNPACKED},
+      {
+        packUnit: PackUnit.CHANNEL,
+        channelOrder: BitOrder.LSB_FIRST,
+        pixelOrder: BitOrder.LSB_FIRST,
+        byteOrder: ByteOrder.LITTLE_ENDIAN,
+      },
       ),
   rgb565_be: new Preset(
       'RGB565',
@@ -145,7 +163,7 @@ let presets: Record<string, Preset> = {
       '各種 GFX ライブラリ用。',
       PixelFormat.BW,
       {
-        packUnit: PackUnit.FRAGMENT,
+        packUnit: PackUnit.MULTI_PIXEL,
         pixelOrder: BitOrder.MSB_FIRST,
         packDir: ScanDir.HORIZONTAL,
       },
@@ -155,7 +173,7 @@ let presets: Record<string, Preset> = {
       'SPI/I2C ドライバを使用して\nSSD1306/1309 等の白黒ディスプレイに直接転送可能。',
       PixelFormat.BW,
       {
-        packUnit: PackUnit.FRAGMENT,
+        packUnit: PackUnit.MULTI_PIXEL,
         pixelOrder: BitOrder.LSB_FIRST,
         packDir: ScanDir.VERTICAL,
       },
@@ -227,6 +245,17 @@ class PixelFormatInfo {
 
   get numChannels(): number {
     return this.channelBits.length;
+  }
+
+  channelName(i: number): string {
+    switch (this.colorSpace) {
+      case ColorSpace.GRAYSCALE:
+        return 'V';
+      case ColorSpace.RGB:
+        return 'RGB'.slice(i, i + 1);
+      default:
+        throw new Error('Unknown color space');
+    }
   }
 }
 
@@ -515,14 +544,14 @@ const previewCanvas = document.createElement('canvas');
 const quantizeErrorBox = document.createElement('span');
 const channelOrderBox = makeSelectBox(
     [
-      {value: BitOrder.LSB_FIRST, label: '下位から'},
       {value: BitOrder.MSB_FIRST, label: '上位から'},
+      {value: BitOrder.LSB_FIRST, label: '下位から'},
     ],
     BitOrder.MSB_FIRST);
 const pixelOrderBox = makeSelectBox(
     [
-      {value: BitOrder.LSB_FIRST, label: '下位から'},
       {value: BitOrder.MSB_FIRST, label: '上位から'},
+      {value: BitOrder.LSB_FIRST, label: '下位から'},
     ],
     BitOrder.MSB_FIRST);
 const byteOrderBox = makeSelectBox(
@@ -533,11 +562,11 @@ const byteOrderBox = makeSelectBox(
     ByteOrder.BIG_ENDIAN);
 const packUnitBox = makeSelectBox(
     [
-      {value: PackUnit.FRAGMENT, label: '複数ピクセル'},
-      {value: PackUnit.PIXEL, label: '単一ピクセル'},
-      {value: PackUnit.UNPACKED, label: 'アンパックド'},
+      {value: PackUnit.CHANNEL, label: 'チャネル'},
+      {value: PackUnit.SINGLE_PIXEL, label: '単一ピクセル'},
+      {value: PackUnit.MULTI_PIXEL, label: '複数ピクセル'},
     ],
-    PackUnit.PIXEL);
+    PackUnit.SINGLE_PIXEL);
 const packDirBox = makeSelectBox(
     [
       {value: ScanDir.HORIZONTAL, label: '横'},
@@ -547,12 +576,13 @@ const packDirBox = makeSelectBox(
 const alignBoundaryBox = makeSelectBox(
     [
       {value: AlignBoundary.BYTE, label: 'バイト'},
+      {value: AlignBoundary.NIBBLE, label: 'ニブル'},
     ],
     AlignBoundary.BYTE);
 const alignDirBox = makeSelectBox(
     [
-      {value: AlignDir.LOWER, label: '右詰め'},
-      {value: AlignDir.HIGHER, label: '左詰め'},
+      {value: AlignDir.HIGHER, label: '上位詰め'},
+      {value: AlignDir.LOWER, label: '下位詰め'},
     ],
     AlignDir.LOWER);
 const addressingBox = makeSelectBox(
@@ -561,6 +591,8 @@ const addressingBox = makeSelectBox(
       {value: ScanDir.VERTICAL, label: '垂直'},
     ],
     ScanDir.HORIZONTAL);
+const structCanvas = document.createElement('canvas');
+const structErrorBox = makeParagraph();
 const codeColsBox = makeSelectBox(
     [
       {value: 8, label: '8'},
@@ -576,7 +608,7 @@ const indentBox = makeSelectBox(
     ],
     Indent.SPACE_X2);
 const codeBox = document.createElement('pre');
-const codeGenErrorBox = document.createElement('p');
+const codeErrorBox = makeParagraph();
 const copyButton = makeButton('コードをコピー');
 
 let container: HTMLDivElement = null;
@@ -784,30 +816,39 @@ async function main() {
     });
   }
 
-  {}
-
   {
-    const section = makeSection(makeFloatList([
-      makeHeader('エンコード'),
-      tip(['チャネル順: ', channelOrderBox],
-          'RGB のチャネルを並べる順序を指定します。\n上位からであることが多いです。'),
-      tip(['ピクセル順: ', pixelOrderBox],
-          'バイト内のピクセルの順序を指定します。\n横パッキングでは上位から、縦パッキングでは下位からであることが多いです。'),
-      tip(['バイト順: ', byteOrderBox],
-          'ピクセル内のバイトの順序を指定します。\nGFX ライブラリなどでは BigEndian であることが多いです。'),
-      tip(['パッキング単位: ', packUnitBox],
-          'パッキングの単位を指定します。\n1 チャネルが 8 bit の倍数の場合は出力に影響しません。'),
-      tip(['パッキング方向: ', packDirBox],
-          'ピクセルをどの方向にパッキングするかを指定します。\n' +
-              '多くの場合横ですが、SSD1306/1309 などの一部の白黒ディスプレイに\n' +
-              '直接転送可能なデータを生成する場合は縦を指定してください。'),
-      tip(['アライメント境界: ', alignBoundaryBox],
-          'アライメントの境界を指定します。\nパッキングの単位が 8 bit の倍数の場合は出力に影響しません。'),
-      tip(['アライメント方向: ', alignDirBox],
-          'アライメントの方向を指定します。\nパッキングの単位が 8 bit の倍数の場合は出力に影響しません。'),
-      tip(['アドレス方向: ', addressingBox],
-          'アドレスのインクリメント方向を指定します。\n通常は水平です。'),
-    ]));
+    structCanvas.style.maxWidth = '100%';
+    structErrorBox.style.textAlign = 'center';
+    structErrorBox.style.color = 'red';
+    structErrorBox.style.display = 'none';
+
+    const pCanvas = makeParagraph([structCanvas, structErrorBox]);
+    pCanvas.style.textAlign = 'center';
+
+    const section = makeSection([
+      makeFloatList([
+        makeHeader('エンコード'),
+        tip(['パッキング単位: ', packUnitBox],
+            'パッキングの単位を指定します。'),
+        tip(['パッキング方向: ', packDirBox],
+            '複数ピクセルをパッキングする場合に、どの方向にパッキングするかを指定します。\n' +
+                '多くの場合横ですが、SSD1306/1309 などの一部の白黒ディスプレイに\n' +
+                '直接転送可能なデータを生成する場合は縦を指定してください。'),
+        tip(['アドレス方向: ', addressingBox],
+            'アドレスのインクリメント方向を指定します。\n通常は水平です。'),
+        tip(['チャネル順: ', channelOrderBox],
+            'RGB のチャネルを並べる順序を指定します。'),
+        tip(['ピクセル順: ', pixelOrderBox],
+            'バイト内のピクセルの順序を指定します。'),
+        tip(['アライメント境界: ', alignBoundaryBox],
+            'アライメントの境界を指定します。'),
+        tip(['アライメント方向: ', alignDirBox],
+            'アライメントの方向を指定します。'),
+        tip(['バイト順: ', byteOrderBox],
+            'ピクセル内のバイトの順序を指定します。'),
+      ]),
+      pCanvas,
+    ]);
 
     container.appendChild(section);
 
@@ -824,9 +865,9 @@ async function main() {
   {
     codeBox.id = 'arrayCode';
     codeBox.classList.add('lang_cpp');
-    codeGenErrorBox.style.textAlign = 'center';
-    codeGenErrorBox.style.color = 'red';
-    codeGenErrorBox.style.display = 'none';
+    codeErrorBox.style.textAlign = 'center';
+    codeErrorBox.style.color = 'red';
+    codeErrorBox.style.display = 'none';
 
     const section = makeSection([
       makeFloatList([
@@ -837,7 +878,7 @@ async function main() {
         copyButton,
       ]),
       codeBox,
-      codeGenErrorBox,
+      codeErrorBox,
     ]);
 
     container.appendChild(section);
@@ -1520,25 +1561,18 @@ function requestGenerateCode(): void {
   }, 300);
 }
 
-function align(
-    data: number, width: number, boundary: number,
-    alignLeft: boolean): [number, number] {
-  const outWidth = Math.ceil(width / boundary) * boundary;
-  if (alignLeft) {
-    data <<= outWidth - width;
-  }
-  return [data, outWidth];
-}
-
 function generateCode(): void {
   if (!imageCacheData) {
     codeBox.textContent = '';
     codeBox.style.display = 'block';
-    codeGenErrorBox.style.display = 'none';
+    codeErrorBox.style.display = 'none';
     return;
   }
 
   try {
+    const channelData = imageCacheData;
+    const fmt = imageCacheFormat;
+
     const msbRed = parseInt(channelOrderBox.value) == BitOrder.MSB_FIRST;
     const msb1st = parseInt(pixelOrderBox.value) == BitOrder.MSB_FIRST;
     const bigEndian = parseInt(byteOrderBox.value) == ByteOrder.BIG_ENDIAN;
@@ -1548,182 +1582,331 @@ function generateCode(): void {
     const alignLeft = parseInt(alignDirBox.value) == AlignDir.HIGHER;
     const vertAddr = parseInt(addressingBox.value) == ScanDir.VERTICAL;
 
-    // ピクセルあたりのビット数
-    const numChannels = imageCacheData.length;
-    let bitsPerPixel = 0;
-    for (let i = 0; i < numChannels; i++) {
-      bitsPerPixel += imageCacheFormat.channelBits[i];
+    const numChannels = fmt.numChannels;
+
+    let chPos = new Uint8Array(numChannels);  // チャネル毎のビット位置
+    let pixelStride = 0;  // ピクセルあたりのビット数 (パディング含む)
+    let pixelsPerFrag = 0;  // フラグメントあたりのピクセル数
+    let bytesPerFrag = 0;   // フラグメントあたりのバイト数
+    let alignRequired = false;
+    if (packUnit == PackUnit.CHANNEL) {
+      // 一番幅の広いチャネルに合わせてチャネル毎の幅を決定
+      let maxChBits = 0;
+      for (let i = 0; i < numChannels; i++) {
+        if (maxChBits < fmt.channelBits[i]) {
+          maxChBits = fmt.channelBits[i];
+        }
+      }
+      const chStride = Math.ceil(maxChBits / alignBoundary) * alignBoundary;
+
+      // 各チャネルのビット位置を算出
+      for (let i = 0; i < numChannels; i++) {
+        const iCh = msbRed ? (numChannels - 1 - i) : i;
+        chPos[iCh] = i * chStride;
+        alignRequired ||= chStride != fmt.channelBits[iCh];
+        if (alignLeft) {
+          chPos[iCh] += chStride - fmt.channelBits[iCh];
+        }
+      }
+
+      pixelStride = chStride * numChannels;
+      bytesPerFrag = Math.ceil(pixelStride / 8);
+      pixelsPerFrag = 1;
+
+    } else {
+      // 各チャネルのビット位置 (下位詰めの場合)
+      let pixBits = 0;
+      for (let i = 0; i < numChannels; i++) {
+        const iCh = msbRed ? (numChannels - 1 - i) : i;
+        chPos[iCh] = pixBits;
+        pixBits += fmt.channelBits[iCh];
+      }
+
+      switch (packUnit) {
+        case PackUnit.SINGLE_PIXEL:
+          // ピクセル単位のパッキングの場合
+          pixelStride = Math.ceil(pixBits / alignBoundary) * alignBoundary;
+          pixelsPerFrag = Math.max(1, Math.floor(8 / pixelStride));
+          bytesPerFrag = Math.ceil(pixelStride / 8);
+          alignRequired = pixelStride != pixBits;
+          if (alignLeft) {
+            // 上位詰めの場合はチャネルのビット位置修正
+            for (let i = 0; i < numChannels; i++) {
+              chPos[i] += pixelStride - pixBits;
+            }
+          }
+          break;
+
+        case PackUnit.MULTI_PIXEL:
+          // 複数ピクセルをパッキングする場合
+          if (pixBits > alignBoundary / 2) {
+            throw new ArrayfyError(
+                packUnitBox,
+                'アライメント境界の半分より大きなピクセルを複数パッキングできません。',
+            );
+          }
+          pixelStride = pixBits;
+          pixelsPerFrag = Math.floor(8 / pixBits);
+
+          const fragBits = pixBits * pixelsPerFrag;
+          const fragStride =
+              Math.ceil(fragBits / alignBoundary) * alignBoundary;
+          bytesPerFrag = Math.ceil(fragStride / 8);
+          alignRequired = fragStride != fragBits;
+          if (alignLeft) {
+            // 上位詰めの場合はチャネルビット位置に下駄を履かせる
+            for (let i = 0; i < numChannels; i++) {
+              chPos[i] += fragStride - fragBits;
+            }
+          }
+
+          break;
+
+        default:
+          throw new Error('Unsupported PackUnit');
+      }
+    }
+
+    alignDirBox.disabled = !alignRequired;
+    channelOrderBox.disabled = numChannels <= 1;
+    pixelOrderBox.disabled = pixelsPerFrag <= 1;
+    packDirBox.disabled = pixelsPerFrag <= 1;
+    byteOrderBox.disabled = bytesPerFrag <= 1;
+
+    // 構造体の図を描画
+    {
+      const numCols = bytesPerFrag * 8;
+      const numRows = 3;
+
+      const colW = clip(20, 40, Math.round(800 / numCols));
+      const rowH = 30;
+      const tableW = numCols * colW;
+      const tableH = numRows * rowH;
+
+      const pad = 10;
+
+      structCanvas.width = tableW + pad * 2;
+      structCanvas.height = tableH + pad * 2;
+      const ctx = structCanvas.getContext('2d');
+
+      ctx.fillStyle = '#FFF';
+      ctx.fillRect(0, 0, structCanvas.width, structCanvas.height);
+      ctx.font = '16px sans-serif';
+
+      // 線が滲むの防ぐため半ピクセルオフセット
+      ctx.translate(0.5, 0.5);
+
+      ctx.fillStyle = '#888';
+      ctx.fillRect(pad, pad + tableH - rowH, tableW, rowH);
+
+      // 縦の罫線
+      ctx.strokeStyle = '#000';
+      ctx.fillStyle = '#000';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      for (let i = 0; i <= numCols; i++) {
+        const x = pad + i * colW;
+        ctx.beginPath();
+        if (i % 8 == 0) {
+          ctx.moveTo(x, pad);
+        } else {
+          ctx.moveTo(x, pad + rowH);
+        }
+        ctx.lineTo(x, pad + tableH);
+        ctx.stroke();
+        if (i < numCols) {
+          const iBit = (numCols - 1 - i) % 8;
+          ctx.fillText(iBit.toString(), x + colW / 2, pad + rowH + rowH / 2);
+          if (iBit == 3) {
+            const ib = Math.floor((numCols - 1 - i) / 8);
+            const iByte = bigEndian ? (bytesPerFrag - 1 - ib) : ib;
+            ctx.fillText('Byte' + iByte.toString(), x, pad + rowH / 2);
+          }
+        }
+      }
+
+      // 横の罫線
+      for (let i = 0; i <= numRows; i++) {
+        ctx.beginPath();
+        ctx.moveTo(pad, pad + i * rowH);
+        ctx.moveTo(pad, pad + i * rowH);
+        ctx.lineTo(pad + tableW, pad + i * rowH);
+        ctx.stroke();
+      }
+
+      // 各チャネルの色
+      let rgbColors: string[];
+      switch (fmt.colorSpace) {
+        case ColorSpace.GRAYSCALE:
+          rgbColors = ['rgba(255,255,255,0.8)'];
+          break;
+        case ColorSpace.RGB:
+          rgbColors = [
+            'rgba(255,128,128,0.8)',
+            'rgba(128,255,128,0.8)',
+            'rgba(128,160,255,0.8)',
+          ];
+          break;
+        default:
+          throw new Error('Unknown color space');
+      }
+
+      // チャネルの描画
+      for (let ip = 0; ip < pixelsPerFrag; ip++) {
+        const iPix = msb1st ? (pixelsPerFrag - 1 - ip) : ip;
+        for (let iCh = 0; iCh < numChannels; iCh++) {
+          const r = pad + tableW - (ip * pixelStride + chPos[iCh]) * colW;
+          const w = fmt.channelBits[iCh] * colW;
+          const x = r - w;
+          const y = pad + tableH - rowH;
+          ctx.fillStyle = rgbColors[iCh];
+          ctx.fillRect(x, y, w, rowH);
+
+          ctx.strokeStyle = '#000';
+          ctx.strokeRect(x, y, w, rowH);
+
+          ctx.fillStyle = '#000';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          const label = fmt.channelName(iCh) + (pixelsPerFrag > 1 ? iPix : '');
+          const mtx = ctx.measureText(label);
+          ctx.fillText(label, x + w / 2, y + rowH / 2);
+        }
+      }
     }
 
     // エンコードパラメータ
-    let pixelsPerPack = Math.max(1, Math.floor(8 / bitsPerPixel));
-    let bytesPerPack = Math.ceil(bitsPerPixel / 8);
-    let fragWidth = vertPack ? 1 : pixelsPerPack;
-    let fragHeight = vertPack ? pixelsPerPack : 1;
-
-    // 1 チャネルのときはチャネル順指定無効
-    channelOrderBox.disabled = (numChannels <= 1);
-
-    // 1 byte/pack 以下のときはエンディアン指定無効
-    byteOrderBox.disabled = (bytesPerPack <= 1);
-
-    // 1 pixel/byte 以下のときはパッキング設定無効
-    pixelOrderBox.disabled = (pixelsPerPack <= 1);
-    packDirBox.disabled = (pixelsPerPack <= 1);
-
-    // 列数決定
-    let arrayCols = parseInt(codeColsBox.value);
-
-    // インデント決定
-    let indent = '  ';
-    switch (parseInt(indentBox.value)) {
-      case Indent.SPACE_X2:
-        indent = '  ';
-        break;
-      case Indent.SPACE_X4:
-        indent = '    ';
-        break;
-      case Indent.TAB:
-        indent = '\t';
-        break;
-      default:
-        throw new Error('Unknown indent type');
-    }
-
+    const fragWidth = vertPack ? 1 : pixelsPerFrag;
+    const fragHeight = vertPack ? pixelsPerFrag : 1;
     const width = previewCanvas.width;
     const height = previewCanvas.height;
     const cols = Math.ceil(width / fragWidth);
     const rows = Math.ceil(height / fragHeight);
     const numPacks = cols * rows;
 
-    const arrayData = new Uint8Array(numPacks * bytesPerPack);
+    const arrayData = new Uint8Array(numPacks * bytesPerFrag);
+    let iByte = 0;
 
-    // 配列化
-    let byteIndex = 0;
-
-    // パック単位
-    for (let packIndex = 0; packIndex < numPacks; packIndex++) {
-      let xCoarse, yCoarse;
+    // フラグメントループ
+    for (let fragIndex = 0; fragIndex < numPacks; fragIndex++) {
+      let xCoarse: number, yCoarse: number;
       if (vertAddr) {
-        xCoarse = fragWidth * Math.floor(packIndex / rows);
-        yCoarse = fragHeight * (packIndex % rows);
+        xCoarse = fragWidth * Math.floor(fragIndex / rows);
+        yCoarse = fragHeight * (fragIndex % rows);
       } else {
-        xCoarse = fragWidth * (packIndex % cols);
-        yCoarse = fragHeight * Math.floor(packIndex / cols);
+        xCoarse = fragWidth * (fragIndex % cols);
+        yCoarse = fragHeight * Math.floor(fragIndex / cols);
       }
 
-      // ピクセル単位
+      // ピクセルループ
       let fragData = 0;
-      let fragBits = 0;
+      let ip = 0;
       for (let yFine = 0; yFine < fragHeight; yFine++) {
         for (let xFine = 0; xFine < fragWidth; xFine++) {
           const x = xCoarse + xFine;
           const y = yCoarse + yFine;
 
-          // ピクセルのエンコード
-          let pixData = 0;
-          let pixBits = 0;
-          for (let ch = 0; ch < numChannels; ch++) {
-            let chData = 0;
-            if (y < height && x < width) {
-              chData = imageCacheData[ch][y * width + x];
-            }
-            let chBits = imageCacheFormat.channelBits[ch];
-
-            if (packUnit == PackUnit.UNPACKED) {
-              [chData, chBits] =
-                  align(chData, chBits, alignBoundary, alignLeft);
-            }
-
-            if (msbRed) {
-              pixData <<= chBits;
-              pixData |= chData;
-            } else {
-              pixData |= chData << pixBits;
-            }
-            pixBits += chBits;
-          }  // for ch
-
-          if (packUnit == PackUnit.PIXEL) {
-            [pixData, pixBits] =
-                align(pixData, pixBits, alignBoundary, alignLeft);
+          if (y < height && x < width) {
+            // チャネルループ
+            const iPix = msb1st ? (pixelsPerFrag - 1 - ip) : ip;
+            const pixOffset = pixelStride * iPix;
+            for (let ic = 0; ic < numChannels; ic++) {
+              const iCh = msbRed ? (numChannels - 1 - ic) : ic;
+              const chData = channelData[iCh][y * width + x];
+              const shift = pixOffset + chPos[iCh];
+              fragData |= chData << shift;
+            }  // for ch
           }
 
-          if (msb1st) {
-            fragData <<= pixBits;
-            fragData |= pixData;
-          } else {
-            fragData |= pixData << fragBits;
-          }
-          fragBits += pixBits;
-
+          ip++;
         }  // for xFine
       }  // for yFine
 
-      if (packUnit == PackUnit.FRAGMENT) {
-        [fragData, fragBits] =
-            align(fragData, fragBits, alignBoundary, alignLeft);
-      }
-
-      if (fragBits % 8 != 0) {
-        throw new Error(`Invalid fragment fields`);
-      }
-
       // バイト単位に変換
-      for (let j = 0; j < fragBits / 8; j++) {
+      const fragBits = bytesPerFrag * 8;
+      for (let j = 0; j < bytesPerFrag; j++) {
         if (bigEndian) {
-          arrayData[byteIndex++] = (fragData >> (fragBits - 8)) & 0xFF;
+          arrayData[iByte++] = (fragData >> (fragBits - 8)) & 0xFF;
           fragData <<= 8;
         } else {
-          arrayData[byteIndex++] = fragData & 0xFF;
+          arrayData[iByte++] = fragData & 0xFF;
           fragData >>= 8;
         }
       }
     }  // for packIndex
 
-    // コード生成
-    let code = '';
-    code += `#pragma once\n`;
-    code += `\n`;
-    code += `#include <stdint.h>\n`;
-    code += `\n`;
-    code += `// ${width}x${height}px, ${imageCacheFormat.toString()}\n`;
-    {
-      code += `// `;
-      if (!channelOrderBox.disabled) {
-        code += (msbRed ? 'R->G->B' : 'B->G->R') + ', ';
-      }
-      if (!pixelOrderBox.disabled) {
-        code += (msb1st ? 'MSB' : 'LSB') + ' First, ';
-      }
-      if (!byteOrderBox.disabled) {
-        code += (bigEndian ? 'Big' : 'Little') + ' Endian, ';
-      }
-      if (!packDirBox.disabled) {
-        code += (vertPack ? 'Vertical' : 'Horizontal') + ' Packing, ';
-      }
-      code += `${vertAddr ? 'Vertical' : 'Horizontal'} Adressing\n`;
-    }
-    code += `// ${arrayData.length} Bytes\n`;
-    code += 'const uint8_t imageArray[] = {\n';
-    for (let i = 0; i < arrayData.length; i++) {
-      if (i % arrayCols == 0) code += indent;
-      code += '0x' + arrayData[i].toString(16).padStart(2, '0') + ',';
-      if ((i + 1) % arrayCols == 0 || i + 1 == arrayData.length) {
-        code += '\n';
-      } else {
-        code += ' ';
-      }
-    }
-    code += '};';
+    try {
+      // 列数決定
+      let arrayCols = parseInt(codeColsBox.value);
 
-    codeBox.textContent = code;
-    codeBox.style.display = 'block';
-    codeGenErrorBox.style.display = 'none';
+      // インデント決定
+      let indent = '  ';
+      switch (parseInt(indentBox.value)) {
+        case Indent.SPACE_X2:
+          indent = '  ';
+          break;
+        case Indent.SPACE_X4:
+          indent = '    ';
+          break;
+        case Indent.TAB:
+          indent = '\t';
+          break;
+        default:
+          throw new Error('Unknown indent type');
+      }
+
+      // コード生成
+      let code = '';
+      code += `#pragma once\n`;
+      code += `\n`;
+      code += `#include <stdint.h>\n`;
+      code += `\n`;
+      code += `// ${width}x${height}px, ${imageCacheFormat.toString()}\n`;
+      {
+        code += `// `;
+        if (numChannels > 1) {
+          code += (msbRed ? 'R->G->B' : 'B<-G<-R') + ', ';
+        }
+        if (pixelsPerFrag > 1) {
+          code += (msb1st ? 'MSB' : 'LSB') + ' First, ';
+          code += (vertPack ? 'Vertical' : 'Horizontal') + ' Packing, ';
+        }
+        if (bytesPerFrag > 1) {
+          code += (bigEndian ? 'Big' : 'Little') + ' Endian, ';
+        }
+        code += `${vertAddr ? 'Vertical' : 'Horizontal'} Adressing\n`;
+      }
+      code += `// ${arrayData.length} Bytes\n`;
+      code += 'const uint8_t imageArray[] = {\n';
+      for (let i = 0; i < arrayData.length; i++) {
+        if (i % arrayCols == 0) code += indent;
+        code += '0x' + arrayData[i].toString(16).padStart(2, '0') + ',';
+        if ((i + 1) % arrayCols == 0 || i + 1 == arrayData.length) {
+          code += '\n';
+        } else {
+          code += ' ';
+        }
+      }
+      code += '};';
+
+      codeBox.textContent = code;
+      codeBox.style.display = 'block';
+      codeErrorBox.style.display = 'none';
+    } catch (error) {
+      codeBox.style.display = 'none';
+      codeErrorBox.textContent = error.message;
+      codeErrorBox.style.display = 'block';
+    }
+
+    structCanvas.style.display = 'inline-block';
+    structErrorBox.style.display = 'none';
   } catch (error) {
-    codeBox.style.display = 'none';
-    codeGenErrorBox.textContent = error.message;
-    codeGenErrorBox.style.display = 'block';
+    codeBox.textContent = '';
+    codeBox.style.display = 'block';
+    codeErrorBox.style.display = 'none';
+    structCanvas.style.display = 'none';
+    structErrorBox.textContent = error.message;
+    structErrorBox.style.display = 'block';
   }
 }
 

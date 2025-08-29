@@ -1,3 +1,18 @@
+var __extends = (this && this.__extends) || (function () {
+    var extendStatics = function (d, b) {
+        extendStatics = Object.setPrototypeOf ||
+            ({ __proto__: [] } instanceof Array && function (d, b) { d.__proto__ = b; }) ||
+            function (d, b) { for (var p in b) if (Object.prototype.hasOwnProperty.call(b, p)) d[p] = b[p]; };
+        return extendStatics(d, b);
+    };
+    return function (d, b) {
+        if (typeof b !== "function" && b !== null)
+            throw new TypeError("Class extends value " + String(b) + " is not a constructor or null");
+        extendStatics(d, b);
+        function __() { this.constructor = d; }
+        d.prototype = b === null ? Object.create(b) : (__.prototype = b.prototype, new __());
+    };
+})();
 var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
@@ -62,6 +77,16 @@ var __read = (this && this.__read) || function (o, n) {
     return ar;
 };
 var _this = this;
+var ArrayfyError = /** @class */ (function (_super) {
+    __extends(ArrayfyError, _super);
+    function ArrayfyError(element, message) {
+        var _this = _super.call(this, message) || this;
+        _this.element = element;
+        _this.name = 'ArrayfyError';
+        return _this;
+    }
+    return ArrayfyError;
+}(Error));
 var Preset = /** @class */ (function () {
     function Preset(label, description, format, ops) {
         var e_1, _a;
@@ -72,7 +97,7 @@ var Preset = /** @class */ (function () {
         this.channelOrder = 1 /* BitOrder.MSB_FIRST */;
         this.pixelOrder = 1 /* BitOrder.MSB_FIRST */;
         this.byteOrder = 1 /* ByteOrder.BIG_ENDIAN */;
-        this.packUnit = 1 /* PackUnit.PIXEL */;
+        this.packUnit = 1 /* PackUnit.SINGLE_PIXEL */;
         this.packDir = 0 /* ScanDir.HORIZONTAL */;
         this.alignUnit = 8 /* AlignBoundary.BYTE */;
         this.alignDir = 1 /* AlignDir.LOWER */;
@@ -97,24 +122,34 @@ var Preset = /** @class */ (function () {
     return Preset;
 }());
 var presets = {
-    // argb8888_be: new Preset(
+    // rgba8888_le: new Preset(
     //    'ARGB8888',
     //    '透明度付きフルカラー。\n各種 GFX
     //    ライブラリで透明ピクセルを含む画像を扱う場合に。',
     //    PixelFormat.ARGB8888,
     //    {packUnit: PackUnit.UNPACKED},
     //    ),
-    rgb888_be: new Preset('RGB888', 'フルカラー。24bit 液晶用。', 0 /* PixelFormat.RGB888 */, { packUnit: 2 /* PackUnit.UNPACKED */ }),
-    rgb666_be: new Preset('RGB666', '18bit 液晶用。', 1 /* PixelFormat.RGB666 */, { packUnit: 2 /* PackUnit.UNPACKED */ }),
+    rgb888_le: new Preset('RGB888', 'フルカラー。24bit 液晶用。', 0 /* PixelFormat.RGB888 */, {
+        packUnit: 2 /* PackUnit.CHANNEL */,
+        channelOrder: 0 /* BitOrder.LSB_FIRST */,
+        pixelOrder: 0 /* BitOrder.LSB_FIRST */,
+        byteOrder: 0 /* ByteOrder.LITTLE_ENDIAN */,
+    }),
+    rgb666_le: new Preset('RGB666', '18bit 液晶用。', 1 /* PixelFormat.RGB666 */, {
+        packUnit: 2 /* PackUnit.CHANNEL */,
+        channelOrder: 0 /* BitOrder.LSB_FIRST */,
+        pixelOrder: 0 /* BitOrder.LSB_FIRST */,
+        byteOrder: 0 /* ByteOrder.LITTLE_ENDIAN */,
+    }),
     rgb565_be: new Preset('RGB565', 'ハイカラー。\n各種 GFX ライブラリでの使用を含め、\n組み込み用途で一般的な形式。', 2 /* PixelFormat.RGB565 */),
     rgb332: new Preset('RGB332', '各種 GFX ライブラリ用。', 4 /* PixelFormat.RGB332 */),
     bw_hp_mf: new Preset('白黒 横パッキング', '各種 GFX ライブラリ用。', 8 /* PixelFormat.BW */, {
-        packUnit: 0 /* PackUnit.FRAGMENT */,
+        packUnit: 0 /* PackUnit.MULTI_PIXEL */,
         pixelOrder: 1 /* BitOrder.MSB_FIRST */,
         packDir: 0 /* ScanDir.HORIZONTAL */,
     }),
     bw_vp_lf: new Preset('白黒 縦パッキング', 'SPI/I2C ドライバを使用して\nSSD1306/1309 等の白黒ディスプレイに直接転送可能。', 8 /* PixelFormat.BW */, {
-        packUnit: 0 /* PackUnit.FRAGMENT */,
+        packUnit: 0 /* PackUnit.MULTI_PIXEL */,
         pixelOrder: 0 /* BitOrder.LSB_FIRST */,
         packDir: 1 /* ScanDir.VERTICAL */,
     }),
@@ -185,6 +220,16 @@ var PixelFormatInfo = /** @class */ (function () {
         enumerable: false,
         configurable: true
     });
+    PixelFormatInfo.prototype.channelName = function (i) {
+        switch (this.colorSpace) {
+            case 0 /* ColorSpace.GRAYSCALE */:
+                return 'V';
+            case 1 /* ColorSpace.RGB */:
+                return 'RGB'.slice(i, i + 1);
+            default:
+                throw new Error('Unknown color space');
+        }
+    };
     return PixelFormatInfo;
 }());
 var Palette = /** @class */ (function () {
@@ -470,37 +515,40 @@ var roundMethodBox = makeSelectBox([
 var previewCanvas = document.createElement('canvas');
 var quantizeErrorBox = document.createElement('span');
 var channelOrderBox = makeSelectBox([
-    { value: 0 /* BitOrder.LSB_FIRST */, label: '下位から' },
     { value: 1 /* BitOrder.MSB_FIRST */, label: '上位から' },
+    { value: 0 /* BitOrder.LSB_FIRST */, label: '下位から' },
 ], 1 /* BitOrder.MSB_FIRST */);
 var pixelOrderBox = makeSelectBox([
-    { value: 0 /* BitOrder.LSB_FIRST */, label: '下位から' },
     { value: 1 /* BitOrder.MSB_FIRST */, label: '上位から' },
+    { value: 0 /* BitOrder.LSB_FIRST */, label: '下位から' },
 ], 1 /* BitOrder.MSB_FIRST */);
 var byteOrderBox = makeSelectBox([
     { value: 0 /* ByteOrder.LITTLE_ENDIAN */, label: 'Little Endian' },
     { value: 1 /* ByteOrder.BIG_ENDIAN */, label: 'Big Endian' },
 ], 1 /* ByteOrder.BIG_ENDIAN */);
 var packUnitBox = makeSelectBox([
-    { value: 0 /* PackUnit.FRAGMENT */, label: '複数ピクセル' },
-    { value: 1 /* PackUnit.PIXEL */, label: '単一ピクセル' },
-    { value: 2 /* PackUnit.UNPACKED */, label: 'アンパックド' },
-], 1 /* PackUnit.PIXEL */);
+    { value: 2 /* PackUnit.CHANNEL */, label: 'チャネル' },
+    { value: 1 /* PackUnit.SINGLE_PIXEL */, label: '単一ピクセル' },
+    { value: 0 /* PackUnit.MULTI_PIXEL */, label: '複数ピクセル' },
+], 1 /* PackUnit.SINGLE_PIXEL */);
 var packDirBox = makeSelectBox([
     { value: 0 /* ScanDir.HORIZONTAL */, label: '横' },
     { value: 1 /* ScanDir.VERTICAL */, label: '縦' },
 ], 0 /* ScanDir.HORIZONTAL */);
 var alignBoundaryBox = makeSelectBox([
     { value: 8 /* AlignBoundary.BYTE */, label: 'バイト' },
+    { value: 4 /* AlignBoundary.NIBBLE */, label: 'ニブル' },
 ], 8 /* AlignBoundary.BYTE */);
 var alignDirBox = makeSelectBox([
-    { value: 1 /* AlignDir.LOWER */, label: '右詰め' },
-    { value: 0 /* AlignDir.HIGHER */, label: '左詰め' },
+    { value: 0 /* AlignDir.HIGHER */, label: '上位詰め' },
+    { value: 1 /* AlignDir.LOWER */, label: '下位詰め' },
 ], 1 /* AlignDir.LOWER */);
 var addressingBox = makeSelectBox([
     { value: 0 /* ScanDir.HORIZONTAL */, label: '水平' },
     { value: 1 /* ScanDir.VERTICAL */, label: '垂直' },
 ], 0 /* ScanDir.HORIZONTAL */);
+var structCanvas = document.createElement('canvas');
+var structErrorBox = makeParagraph();
 var codeColsBox = makeSelectBox([
     { value: 8, label: '8' },
     { value: 16, label: '16' },
@@ -512,7 +560,7 @@ var indentBox = makeSelectBox([
     { value: 0 /* Indent.TAB */, label: 'タブ' },
 ], 1 /* Indent.SPACE_X2 */);
 var codeBox = document.createElement('pre');
-var codeGenErrorBox = document.createElement('p');
+var codeErrorBox = makeParagraph();
 var copyButton = makeButton('コードをコピー');
 var container = null;
 var updateTrimCanvasTimeoutId = -1;
@@ -525,7 +573,7 @@ var imageCacheFormat = new PixelFormatInfo(2 /* PixelFormat.RGB565 */);
 var imageCacheData = [null, null, null, null];
 function main() {
     return __awaiter(this, void 0, void 0, function () {
-        var fileBrowseButton, pPresetButtons, id, pNote, pCanvas, section, p, section, pCanvas, section, section, section;
+        var fileBrowseButton, pPresetButtons, id, pNote, pCanvas, section, p, section, pCanvas, section, pCanvas, section, section;
         var _this = this;
         return __generator(this, function (_a) {
             switch (_a.label) {
@@ -690,21 +738,29 @@ function main() {
                             });
                         });
                     }
-                    { }
                     {
-                        section = makeSection(makeFloatList([
-                            makeHeader('エンコード'),
-                            tip(['チャネル順: ', channelOrderBox], 'RGB のチャネルを並べる順序を指定します。\n上位からであることが多いです。'),
-                            tip(['ピクセル順: ', pixelOrderBox], 'バイト内のピクセルの順序を指定します。\n横パッキングでは上位から、縦パッキングでは下位からであることが多いです。'),
-                            tip(['バイト順: ', byteOrderBox], 'ピクセル内のバイトの順序を指定します。\nGFX ライブラリなどでは BigEndian であることが多いです。'),
-                            tip(['パッキング単位: ', packUnitBox], 'パッキングの単位を指定します。\n1 チャネルが 8 bit の倍数の場合は出力に影響しません。'),
-                            tip(['パッキング方向: ', packDirBox], 'ピクセルをどの方向にパッキングするかを指定します。\n' +
-                                '多くの場合横ですが、SSD1306/1309 などの一部の白黒ディスプレイに\n' +
-                                '直接転送可能なデータを生成する場合は縦を指定してください。'),
-                            tip(['アライメント境界: ', alignBoundaryBox], 'アライメントの境界を指定します。\nパッキングの単位が 8 bit の倍数の場合は出力に影響しません。'),
-                            tip(['アライメント方向: ', alignDirBox], 'アライメントの方向を指定します。\nパッキングの単位が 8 bit の倍数の場合は出力に影響しません。'),
-                            tip(['アドレス方向: ', addressingBox], 'アドレスのインクリメント方向を指定します。\n通常は水平です。'),
-                        ]));
+                        structCanvas.style.maxWidth = '100%';
+                        structErrorBox.style.textAlign = 'center';
+                        structErrorBox.style.color = 'red';
+                        structErrorBox.style.display = 'none';
+                        pCanvas = makeParagraph([structCanvas, structErrorBox]);
+                        pCanvas.style.textAlign = 'center';
+                        section = makeSection([
+                            makeFloatList([
+                                makeHeader('エンコード'),
+                                tip(['パッキング単位: ', packUnitBox], 'パッキングの単位を指定します。'),
+                                tip(['パッキング方向: ', packDirBox], '複数ピクセルをパッキングする場合に、どの方向にパッキングするかを指定します。\n' +
+                                    '多くの場合横ですが、SSD1306/1309 などの一部の白黒ディスプレイに\n' +
+                                    '直接転送可能なデータを生成する場合は縦を指定してください。'),
+                                tip(['アドレス方向: ', addressingBox], 'アドレスのインクリメント方向を指定します。\n通常は水平です。'),
+                                tip(['チャネル順: ', channelOrderBox], 'RGB のチャネルを並べる順序を指定します。'),
+                                tip(['ピクセル順: ', pixelOrderBox], 'バイト内のピクセルの順序を指定します。'),
+                                tip(['アライメント境界: ', alignBoundaryBox], 'アライメントの境界を指定します。'),
+                                tip(['アライメント方向: ', alignDirBox], 'アライメントの方向を指定します。'),
+                                tip(['バイト順: ', byteOrderBox], 'ピクセル内のバイトの順序を指定します。'),
+                            ]),
+                            pCanvas,
+                        ]);
                         container.appendChild(section);
                         section.querySelectorAll('input, select').forEach(function (el) {
                             el.addEventListener('change', function () {
@@ -718,9 +774,9 @@ function main() {
                     {
                         codeBox.id = 'arrayCode';
                         codeBox.classList.add('lang_cpp');
-                        codeGenErrorBox.style.textAlign = 'center';
-                        codeGenErrorBox.style.color = 'red';
-                        codeGenErrorBox.style.display = 'none';
+                        codeErrorBox.style.textAlign = 'center';
+                        codeErrorBox.style.color = 'red';
+                        codeErrorBox.style.display = 'none';
                         section = makeSection([
                             makeFloatList([
                                 makeHeader('コード生成'),
@@ -729,7 +785,7 @@ function main() {
                                 copyButton,
                             ]),
                             codeBox,
-                            codeGenErrorBox,
+                            codeErrorBox,
                         ]);
                         container.appendChild(section);
                         copyButton.parentElement.style.float = 'right';
@@ -1481,22 +1537,16 @@ function requestGenerateCode() {
         generateCodeTimeoutId = -1;
     }, 300);
 }
-function align(data, width, boundary, alignLeft) {
-    var outWidth = Math.ceil(width / boundary) * boundary;
-    if (alignLeft) {
-        data <<= outWidth - width;
-    }
-    return [data, outWidth];
-}
 function generateCode() {
-    var _a, _b, _c;
     if (!imageCacheData) {
         codeBox.textContent = '';
         codeBox.style.display = 'block';
-        codeGenErrorBox.style.display = 'none';
+        codeErrorBox.style.display = 'none';
         return;
     }
     try {
+        var channelData = imageCacheData;
+        var fmt = imageCacheFormat;
         var msbRed = parseInt(channelOrderBox.value) == 1 /* BitOrder.MSB_FIRST */;
         var msb1st = parseInt(pixelOrderBox.value) == 1 /* BitOrder.MSB_FIRST */;
         var bigEndian = parseInt(byteOrderBox.value) == 1 /* ByteOrder.BIG_ENDIAN */;
@@ -1505,164 +1555,303 @@ function generateCode() {
         var alignBoundary = parseInt(alignBoundaryBox.value);
         var alignLeft = parseInt(alignDirBox.value) == 0 /* AlignDir.HIGHER */;
         var vertAddr = parseInt(addressingBox.value) == 1 /* ScanDir.VERTICAL */;
-        // ピクセルあたりのビット数
-        var numChannels = imageCacheData.length;
-        var bitsPerPixel = 0;
-        for (var i = 0; i < numChannels; i++) {
-            bitsPerPixel += imageCacheFormat.channelBits[i];
+        var numChannels = fmt.numChannels;
+        var chPos = new Uint8Array(numChannels); // チャネル毎のビット位置
+        var pixelStride = 0; // ピクセルあたりのビット数 (パディング含む)
+        var pixelsPerFrag = 0; // フラグメントあたりのピクセル数
+        var bytesPerFrag = 0; // フラグメントあたりのバイト数
+        var alignRequired = false;
+        if (packUnit == 2 /* PackUnit.CHANNEL */) {
+            // 一番幅の広いチャネルに合わせてチャネル毎の幅を決定
+            var maxChBits = 0;
+            for (var i = 0; i < numChannels; i++) {
+                if (maxChBits < fmt.channelBits[i]) {
+                    maxChBits = fmt.channelBits[i];
+                }
+            }
+            var chStride = Math.ceil(maxChBits / alignBoundary) * alignBoundary;
+            // 各チャネルのビット位置を算出
+            for (var i = 0; i < numChannels; i++) {
+                var iCh = msbRed ? (numChannels - 1 - i) : i;
+                chPos[iCh] = i * chStride;
+                alignRequired || (alignRequired = chStride != fmt.channelBits[iCh]);
+                if (alignLeft) {
+                    chPos[iCh] += chStride - fmt.channelBits[iCh];
+                }
+            }
+            pixelStride = chStride * numChannels;
+            bytesPerFrag = Math.ceil(pixelStride / 8);
+            pixelsPerFrag = 1;
+        }
+        else {
+            // 各チャネルのビット位置 (下位詰めの場合)
+            var pixBits = 0;
+            for (var i = 0; i < numChannels; i++) {
+                var iCh = msbRed ? (numChannels - 1 - i) : i;
+                chPos[iCh] = pixBits;
+                pixBits += fmt.channelBits[iCh];
+            }
+            switch (packUnit) {
+                case 1 /* PackUnit.SINGLE_PIXEL */:
+                    // ピクセル単位のパッキングの場合
+                    pixelStride = Math.ceil(pixBits / alignBoundary) * alignBoundary;
+                    pixelsPerFrag = Math.max(1, Math.floor(8 / pixelStride));
+                    bytesPerFrag = Math.ceil(pixelStride / 8);
+                    alignRequired = pixelStride != pixBits;
+                    if (alignLeft) {
+                        // 上位詰めの場合はチャネルのビット位置修正
+                        for (var i = 0; i < numChannels; i++) {
+                            chPos[i] += pixelStride - pixBits;
+                        }
+                    }
+                    break;
+                case 0 /* PackUnit.MULTI_PIXEL */:
+                    // 複数ピクセルをパッキングする場合
+                    if (pixBits > alignBoundary / 2) {
+                        throw new ArrayfyError(packUnitBox, 'アライメント境界の半分より大きなピクセルを複数パッキングできません。');
+                    }
+                    pixelStride = pixBits;
+                    pixelsPerFrag = Math.floor(8 / pixBits);
+                    var fragBits = pixBits * pixelsPerFrag;
+                    var fragStride = Math.ceil(fragBits / alignBoundary) * alignBoundary;
+                    bytesPerFrag = Math.ceil(fragStride / 8);
+                    alignRequired = fragStride != fragBits;
+                    if (alignLeft) {
+                        // 上位詰めの場合はチャネルビット位置に下駄を履かせる
+                        for (var i = 0; i < numChannels; i++) {
+                            chPos[i] += fragStride - fragBits;
+                        }
+                    }
+                    break;
+                default:
+                    throw new Error('Unsupported PackUnit');
+            }
+        }
+        alignDirBox.disabled = !alignRequired;
+        channelOrderBox.disabled = numChannels <= 1;
+        pixelOrderBox.disabled = pixelsPerFrag <= 1;
+        packDirBox.disabled = pixelsPerFrag <= 1;
+        byteOrderBox.disabled = bytesPerFrag <= 1;
+        // 構造体の図を描画
+        {
+            var numCols = bytesPerFrag * 8;
+            var numRows = 3;
+            var colW = clip(20, 40, Math.round(800 / numCols));
+            var rowH = 30;
+            var tableW = numCols * colW;
+            var tableH = numRows * rowH;
+            var pad = 10;
+            structCanvas.width = tableW + pad * 2;
+            structCanvas.height = tableH + pad * 2;
+            var ctx = structCanvas.getContext('2d');
+            ctx.fillStyle = '#FFF';
+            ctx.fillRect(0, 0, structCanvas.width, structCanvas.height);
+            ctx.font = '16px sans-serif';
+            // 線が滲むの防ぐため半ピクセルオフセット
+            ctx.translate(0.5, 0.5);
+            ctx.fillStyle = '#888';
+            ctx.fillRect(pad, pad + tableH - rowH, tableW, rowH);
+            // 縦の罫線
+            ctx.strokeStyle = '#000';
+            ctx.fillStyle = '#000';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            for (var i = 0; i <= numCols; i++) {
+                var x = pad + i * colW;
+                ctx.beginPath();
+                if (i % 8 == 0) {
+                    ctx.moveTo(x, pad);
+                }
+                else {
+                    ctx.moveTo(x, pad + rowH);
+                }
+                ctx.lineTo(x, pad + tableH);
+                ctx.stroke();
+                if (i < numCols) {
+                    var iBit = (numCols - 1 - i) % 8;
+                    ctx.fillText(iBit.toString(), x + colW / 2, pad + rowH + rowH / 2);
+                    if (iBit == 3) {
+                        var ib = Math.floor((numCols - 1 - i) / 8);
+                        var iByte_1 = bigEndian ? (bytesPerFrag - 1 - ib) : ib;
+                        ctx.fillText('Byte' + iByte_1.toString(), x, pad + rowH / 2);
+                    }
+                }
+            }
+            // 横の罫線
+            for (var i = 0; i <= numRows; i++) {
+                ctx.beginPath();
+                ctx.moveTo(pad, pad + i * rowH);
+                ctx.moveTo(pad, pad + i * rowH);
+                ctx.lineTo(pad + tableW, pad + i * rowH);
+                ctx.stroke();
+            }
+            // 各チャネルの色
+            var rgbColors = void 0;
+            switch (fmt.colorSpace) {
+                case 0 /* ColorSpace.GRAYSCALE */:
+                    rgbColors = ['rgba(255,255,255,0.8)'];
+                    break;
+                case 1 /* ColorSpace.RGB */:
+                    rgbColors = [
+                        'rgba(255,128,128,0.8)',
+                        'rgba(128,255,128,0.8)',
+                        'rgba(128,160,255,0.8)',
+                    ];
+                    break;
+                default:
+                    throw new Error('Unknown color space');
+            }
+            // チャネルの描画
+            for (var ip = 0; ip < pixelsPerFrag; ip++) {
+                var iPix = msb1st ? (pixelsPerFrag - 1 - ip) : ip;
+                for (var iCh = 0; iCh < numChannels; iCh++) {
+                    var r = pad + tableW - (ip * pixelStride + chPos[iCh]) * colW;
+                    var w = fmt.channelBits[iCh] * colW;
+                    var x = r - w;
+                    var y = pad + tableH - rowH;
+                    ctx.fillStyle = rgbColors[iCh];
+                    ctx.fillRect(x, y, w, rowH);
+                    ctx.strokeStyle = '#000';
+                    ctx.strokeRect(x, y, w, rowH);
+                    ctx.fillStyle = '#000';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    var label = fmt.channelName(iCh) + (pixelsPerFrag > 1 ? iPix : '');
+                    var mtx = ctx.measureText(label);
+                    ctx.fillText(label, x + w / 2, y + rowH / 2);
+                }
+            }
         }
         // エンコードパラメータ
-        var pixelsPerPack = Math.max(1, Math.floor(8 / bitsPerPixel));
-        var bytesPerPack = Math.ceil(bitsPerPixel / 8);
-        var fragWidth = vertPack ? 1 : pixelsPerPack;
-        var fragHeight = vertPack ? pixelsPerPack : 1;
-        // 1 チャネルのときはチャネル順指定無効
-        channelOrderBox.disabled = (numChannels <= 1);
-        // 1 byte/pack 以下のときはエンディアン指定無効
-        byteOrderBox.disabled = (bytesPerPack <= 1);
-        // 1 pixel/byte 以下のときはパッキング設定無効
-        pixelOrderBox.disabled = (pixelsPerPack <= 1);
-        packDirBox.disabled = (pixelsPerPack <= 1);
-        // 列数決定
-        var arrayCols = parseInt(codeColsBox.value);
-        // インデント決定
-        var indent = '  ';
-        switch (parseInt(indentBox.value)) {
-            case 1 /* Indent.SPACE_X2 */:
-                indent = '  ';
-                break;
-            case 2 /* Indent.SPACE_X4 */:
-                indent = '    ';
-                break;
-            case 0 /* Indent.TAB */:
-                indent = '\t';
-                break;
-            default:
-                throw new Error('Unknown indent type');
-        }
+        var fragWidth = vertPack ? 1 : pixelsPerFrag;
+        var fragHeight = vertPack ? pixelsPerFrag : 1;
         var width = previewCanvas.width;
         var height = previewCanvas.height;
         var cols = Math.ceil(width / fragWidth);
         var rows = Math.ceil(height / fragHeight);
         var numPacks = cols * rows;
-        var arrayData = new Uint8Array(numPacks * bytesPerPack);
-        // 配列化
-        var byteIndex = 0;
-        // パック単位
-        for (var packIndex = 0; packIndex < numPacks; packIndex++) {
+        var arrayData = new Uint8Array(numPacks * bytesPerFrag);
+        var iByte = 0;
+        // フラグメントループ
+        for (var fragIndex = 0; fragIndex < numPacks; fragIndex++) {
             var xCoarse = void 0, yCoarse = void 0;
             if (vertAddr) {
-                xCoarse = fragWidth * Math.floor(packIndex / rows);
-                yCoarse = fragHeight * (packIndex % rows);
+                xCoarse = fragWidth * Math.floor(fragIndex / rows);
+                yCoarse = fragHeight * (fragIndex % rows);
             }
             else {
-                xCoarse = fragWidth * (packIndex % cols);
-                yCoarse = fragHeight * Math.floor(packIndex / cols);
+                xCoarse = fragWidth * (fragIndex % cols);
+                yCoarse = fragHeight * Math.floor(fragIndex / cols);
             }
-            // ピクセル単位
+            // ピクセルループ
             var fragData = 0;
-            var fragBits = 0;
+            var ip = 0;
             for (var yFine = 0; yFine < fragHeight; yFine++) {
                 for (var xFine = 0; xFine < fragWidth; xFine++) {
                     var x = xCoarse + xFine;
                     var y = yCoarse + yFine;
-                    // ピクセルのエンコード
-                    var pixData = 0;
-                    var pixBits = 0;
-                    for (var ch = 0; ch < numChannels; ch++) {
-                        var chData = 0;
-                        if (y < height && x < width) {
-                            chData = imageCacheData[ch][y * width + x];
-                        }
-                        var chBits = imageCacheFormat.channelBits[ch];
-                        if (packUnit == 2 /* PackUnit.UNPACKED */) {
-                            _a = __read(align(chData, chBits, alignBoundary, alignLeft), 2), chData = _a[0], chBits = _a[1];
-                        }
-                        if (msbRed) {
-                            pixData <<= chBits;
-                            pixData |= chData;
-                        }
-                        else {
-                            pixData |= chData << pixBits;
-                        }
-                        pixBits += chBits;
-                    } // for ch
-                    if (packUnit == 1 /* PackUnit.PIXEL */) {
-                        _b = __read(align(pixData, pixBits, alignBoundary, alignLeft), 2), pixData = _b[0], pixBits = _b[1];
+                    if (y < height && x < width) {
+                        // チャネルループ
+                        var iPix = msb1st ? (pixelsPerFrag - 1 - ip) : ip;
+                        var pixOffset = pixelStride * iPix;
+                        for (var ic = 0; ic < numChannels; ic++) {
+                            var iCh = msbRed ? (numChannels - 1 - ic) : ic;
+                            var chData = channelData[iCh][y * width + x];
+                            var shift = pixOffset + chPos[iCh];
+                            fragData |= chData << shift;
+                        } // for ch
                     }
-                    if (msb1st) {
-                        fragData <<= pixBits;
-                        fragData |= pixData;
-                    }
-                    else {
-                        fragData |= pixData << fragBits;
-                    }
-                    fragBits += pixBits;
+                    ip++;
                 } // for xFine
             } // for yFine
-            if (packUnit == 0 /* PackUnit.FRAGMENT */) {
-                _c = __read(align(fragData, fragBits, alignBoundary, alignLeft), 2), fragData = _c[0], fragBits = _c[1];
-            }
-            if (fragBits % 8 != 0) {
-                throw new Error("Invalid fragment fields");
-            }
             // バイト単位に変換
-            for (var j = 0; j < fragBits / 8; j++) {
+            var fragBits = bytesPerFrag * 8;
+            for (var j = 0; j < bytesPerFrag; j++) {
                 if (bigEndian) {
-                    arrayData[byteIndex++] = (fragData >> (fragBits - 8)) & 0xFF;
+                    arrayData[iByte++] = (fragData >> (fragBits - 8)) & 0xFF;
                     fragData <<= 8;
                 }
                 else {
-                    arrayData[byteIndex++] = fragData & 0xFF;
+                    arrayData[iByte++] = fragData & 0xFF;
                     fragData >>= 8;
                 }
             }
         } // for packIndex
-        // コード生成
-        var code = '';
-        code += "#pragma once\n";
-        code += "\n";
-        code += "#include <stdint.h>\n";
-        code += "\n";
-        code += "// ".concat(width, "x").concat(height, "px, ").concat(imageCacheFormat.toString(), "\n");
-        {
-            code += "// ";
-            if (!channelOrderBox.disabled) {
-                code += (msbRed ? 'R->G->B' : 'B->G->R') + ', ';
+        try {
+            // 列数決定
+            var arrayCols = parseInt(codeColsBox.value);
+            // インデント決定
+            var indent = '  ';
+            switch (parseInt(indentBox.value)) {
+                case 1 /* Indent.SPACE_X2 */:
+                    indent = '  ';
+                    break;
+                case 2 /* Indent.SPACE_X4 */:
+                    indent = '    ';
+                    break;
+                case 0 /* Indent.TAB */:
+                    indent = '\t';
+                    break;
+                default:
+                    throw new Error('Unknown indent type');
             }
-            if (!pixelOrderBox.disabled) {
-                code += (msb1st ? 'MSB' : 'LSB') + ' First, ';
+            // コード生成
+            var code = '';
+            code += "#pragma once\n";
+            code += "\n";
+            code += "#include <stdint.h>\n";
+            code += "\n";
+            code += "// ".concat(width, "x").concat(height, "px, ").concat(imageCacheFormat.toString(), "\n");
+            {
+                code += "// ";
+                if (numChannels > 1) {
+                    code += (msbRed ? 'R->G->B' : 'B<-G<-R') + ', ';
+                }
+                if (pixelsPerFrag > 1) {
+                    code += (msb1st ? 'MSB' : 'LSB') + ' First, ';
+                    code += (vertPack ? 'Vertical' : 'Horizontal') + ' Packing, ';
+                }
+                if (alignRequired) {
+                    code += (alignLeft ? 'Left' : 'Right') + ' Aligned, ';
+                }
+                if (bytesPerFrag > 1) {
+                    code += (bigEndian ? 'Big' : 'Little') + ' Endian, ';
+                }
+                code += "".concat(vertAddr ? 'Vertical' : 'Horizontal', " Adressing\n");
             }
-            if (!byteOrderBox.disabled) {
-                code += (bigEndian ? 'Big' : 'Little') + ' Endian, ';
+            code += "// ".concat(arrayData.length, " Bytes\n");
+            code += 'const uint8_t imageArray[] = {\n';
+            for (var i = 0; i < arrayData.length; i++) {
+                if (i % arrayCols == 0)
+                    code += indent;
+                code += '0x' + arrayData[i].toString(16).padStart(2, '0') + ',';
+                if ((i + 1) % arrayCols == 0 || i + 1 == arrayData.length) {
+                    code += '\n';
+                }
+                else {
+                    code += ' ';
+                }
             }
-            if (!packDirBox.disabled) {
-                code += (vertPack ? 'Vertical' : 'Horizontal') + ' Packing, ';
-            }
-            code += "".concat(vertAddr ? 'Vertical' : 'Horizontal', " Adressing\n");
+            code += '};';
+            codeBox.textContent = code;
+            codeBox.style.display = 'block';
+            codeErrorBox.style.display = 'none';
         }
-        code += "// ".concat(arrayData.length, " Bytes\n");
-        code += 'const uint8_t imageArray[] = {\n';
-        for (var i = 0; i < arrayData.length; i++) {
-            if (i % arrayCols == 0)
-                code += indent;
-            code += '0x' + arrayData[i].toString(16).padStart(2, '0') + ',';
-            if ((i + 1) % arrayCols == 0 || i + 1 == arrayData.length) {
-                code += '\n';
-            }
-            else {
-                code += ' ';
-            }
+        catch (error) {
+            codeBox.style.display = 'none';
+            codeErrorBox.textContent = error.message;
+            codeErrorBox.style.display = 'block';
         }
-        code += '};';
-        codeBox.textContent = code;
-        codeBox.style.display = 'block';
-        codeGenErrorBox.style.display = 'none';
+        structCanvas.style.display = 'inline-block';
+        structErrorBox.style.display = 'none';
     }
     catch (error) {
-        codeBox.style.display = 'none';
-        codeGenErrorBox.textContent = error.message;
-        codeGenErrorBox.style.display = 'block';
+        codeBox.textContent = '';
+        codeBox.style.display = 'block';
+        codeErrorBox.style.display = 'none';
+        structCanvas.style.display = 'none';
+        structErrorBox.textContent = error.message;
+        structErrorBox.style.display = 'block';
     }
 }
 function clip(min, max, val) {
