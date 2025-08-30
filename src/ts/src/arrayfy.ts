@@ -7,13 +7,21 @@ const enum TrimState {
   DRAG_LEFT,
 }
 
+const enum AlphaProc {
+  KEEP,
+  FILL,
+  BINARIZE,
+  SET_KEY_COLOR,
+}
+
 const enum ColorSpace {
   GRAYSCALE,
   RGB,
 }
 
 const enum PixelFormat {
-  // ARGB8888,
+  RGBA8888,
+  // RGBA4444,
   RGB888,
   RGB666,
   RGB565,
@@ -27,8 +35,8 @@ const enum PixelFormat {
 
 const enum PackUnit {
   MULTI_PIXEL,
-  SINGLE_PIXEL,
-  CHANNEL,
+  PIXEL,
+  UNPACKED,
 }
 
 const enum AlignBoundary {
@@ -57,9 +65,16 @@ const enum RoundMethod {
   EQUAL_DIVISION,
 }
 
-const enum BitOrder {
-  LSB_FIRST,
-  MSB_FIRST,
+const enum ChannelOrder {
+  RGBA,
+  BGRA,
+  ARGB,
+  ABGR,
+}
+
+const enum PixelOrder {
+  NEAR_FIRST,
+  FAR_FIRST,
 }
 
 const enum ByteOrder {
@@ -70,6 +85,12 @@ const enum ByteOrder {
 const enum ScanDir {
   HORIZONTAL,
   VERTICAL,
+}
+
+const enum CodeUnit {
+  ELEMENTS,
+  ARRAY_DEF,
+  FILE,
 }
 
 const enum Indent {
@@ -98,10 +119,10 @@ class ArrayfyError extends Error {
 }
 
 class Preset {
-  public channelOrder: BitOrder = BitOrder.MSB_FIRST;
-  public pixelOrder: BitOrder = BitOrder.MSB_FIRST;
+  public channelOrder: ChannelOrder = ChannelOrder.ARGB;
+  public pixelOrder: PixelOrder = PixelOrder.NEAR_FIRST;
   public byteOrder: ByteOrder = ByteOrder.BIG_ENDIAN;
-  public packUnit: PackUnit = PackUnit.SINGLE_PIXEL;
+  public packUnit: PackUnit = PackUnit.PIXEL;
   public packDir: ScanDir = ScanDir.HORIZONTAL;
   public alignUnit: AlignBoundary = AlignBoundary.BYTE;
   public alignDir: AlignDir = AlignDir.LOWER;
@@ -119,62 +140,64 @@ class Preset {
 }
 
 let presets: Record<string, Preset> = {
-  // rgba8888_le: new Preset(
-  //    'ARGB8888',
-  //    '透明度付きフルカラー。\n各種 GFX
-  //    ライブラリで透明ピクセルを含む画像を扱う場合に。',
-  //    PixelFormat.ARGB8888,
-  //    {packUnit: PackUnit.UNPACKED},
-  //    ),
-  rgb888_le: new Preset(
-      'RGB888',
+  argb8888_le: new Preset(
+      'ARGB8888-LE',
+      '透明度付きフルカラー。\nLovyanGFX の pushAlphaImage 関数向け。',
+      PixelFormat.RGBA8888,
+      {
+        channelOrder: ChannelOrder.ARGB,
+        byteOrder: ByteOrder.LITTLE_ENDIAN,
+      },
+      ),
+  rgb888_be: new Preset(
+      'RGB888-BE',
       'フルカラー。24bit 液晶用。',
       PixelFormat.RGB888,
       {
-        packUnit: PackUnit.CHANNEL,
-        channelOrder: BitOrder.LSB_FIRST,
-        pixelOrder: BitOrder.LSB_FIRST,
-        byteOrder: ByteOrder.LITTLE_ENDIAN,
+        channelOrder: ChannelOrder.ARGB,
+        byteOrder: ByteOrder.BIG_ENDIAN,
       },
       ),
-  rgb666_le: new Preset(
-      'RGB666',
-      '18bit 液晶用。',
+  rgb666_be_ra: new Preset(
+      'RGB666-BE',
+      '各バイトにチャネルを右詰で配置した RGB666。LovyanGFX 用。',
       PixelFormat.RGB666,
       {
-        packUnit: PackUnit.CHANNEL,
-        channelOrder: BitOrder.LSB_FIRST,
-        pixelOrder: BitOrder.LSB_FIRST,
-        byteOrder: ByteOrder.LITTLE_ENDIAN,
+        channelOrder: ChannelOrder.ARGB,
+        packUnit: PackUnit.UNPACKED,
+        byteOrder: ByteOrder.BIG_ENDIAN,
       },
       ),
   rgb565_be: new Preset(
-      'RGB565',
+      'RGB565-BE',
       'ハイカラー。\n各種 GFX ライブラリでの使用を含め、\n組み込み用途で一般的な形式。',
       PixelFormat.RGB565,
+      {
+        byteOrder: ByteOrder.BIG_ENDIAN,
+      },
       ),
   rgb332: new Preset(
       'RGB332',
       '各種 GFX ライブラリ用。',
       PixelFormat.RGB332,
       ),
-  bw_hp_mf: new Preset(
-      '白黒 横パッキング',
+  bw_hscan: new Preset(
+      '白黒 横スキャン',
       '各種 GFX ライブラリ用。',
       PixelFormat.BW,
       {
         packUnit: PackUnit.MULTI_PIXEL,
-        pixelOrder: BitOrder.MSB_FIRST,
+        pixelOrder: PixelOrder.FAR_FIRST,
         packDir: ScanDir.HORIZONTAL,
       },
       ),
-  bw_vp_lf: new Preset(
+  bw_vpack: new Preset(
       '白黒 縦パッキング',
-      'SPI/I2C ドライバを使用して\nSSD1306/1309 等の白黒ディスプレイに直接転送可能。',
+      'SPI/I2C ドライバを使用して\nSSD1306/1309 等の白黒ディスプレイに直接転送するための形式。',
       PixelFormat.BW,
       {
         packUnit: PackUnit.MULTI_PIXEL,
-        pixelOrder: BitOrder.LSB_FIRST,
+        pixelOrder: PixelOrder.NEAR_FIRST,
         packDir: ScanDir.VERTICAL,
       },
       ),
@@ -182,45 +205,56 @@ let presets: Record<string, Preset> = {
 
 class PixelFormatInfo {
   public colorSpace: ColorSpace;
-  public channelBits: number[];
+  public colorBits: number[];
+  public alphaBits = 0;
 
   constructor(fmt: PixelFormat) {
     switch (fmt) {
+      case PixelFormat.RGBA8888:
+        this.colorSpace = ColorSpace.RGB;
+        this.colorBits = [8, 8, 8];
+        this.alphaBits = 8;
+        break;
+      // case PixelFormat.RGBA4444:
+      //   this.colorSpace = ColorSpace.RGB;
+      //   this.colorBits = [4, 4, 4];
+      //   this.alphaBits = 4;
+      //   break;
       case PixelFormat.RGB888:
         this.colorSpace = ColorSpace.RGB;
-        this.channelBits = [8, 8, 8];
+        this.colorBits = [8, 8, 8];
         break;
       case PixelFormat.RGB666:
         this.colorSpace = ColorSpace.RGB;
-        this.channelBits = [6, 6, 6];
+        this.colorBits = [6, 6, 6];
         break;
       case PixelFormat.RGB565:
         this.colorSpace = ColorSpace.RGB;
-        this.channelBits = [5, 6, 5];
+        this.colorBits = [5, 6, 5];
         break;
       case PixelFormat.RGB555:
         this.colorSpace = ColorSpace.RGB;
-        this.channelBits = [5, 5, 5];
+        this.colorBits = [5, 5, 5];
         break;
       case PixelFormat.RGB332:
         this.colorSpace = ColorSpace.RGB;
-        this.channelBits = [3, 3, 2];
+        this.colorBits = [3, 3, 2];
         break;
       case PixelFormat.RGB111:
         this.colorSpace = ColorSpace.RGB;
-        this.channelBits = [1, 1, 1];
+        this.colorBits = [1, 1, 1];
         break;
       case PixelFormat.GRAY4:
         this.colorSpace = ColorSpace.GRAYSCALE;
-        this.channelBits = [4];
+        this.colorBits = [4];
         break;
       case PixelFormat.GRAY2:
         this.colorSpace = ColorSpace.GRAYSCALE;
-        this.channelBits = [2];
+        this.colorBits = [2];
         break;
       case PixelFormat.BW:
         this.colorSpace = ColorSpace.GRAYSCALE;
-        this.channelBits = [1];
+        this.colorBits = [1];
         break;
       default:
         throw new Error('Unknown image format');
@@ -228,31 +262,44 @@ class PixelFormatInfo {
   }
 
   toString(): string {
-    let ret = '';
     switch (this.colorSpace) {
       case ColorSpace.GRAYSCALE:
-        if (this.channelBits[0] == 1) {
+        if (this.colorBits[0] == 1) {
           return 'B/W';
         } else {
-          return 'Gray' + this.channelBits[0];
+          return 'Gray' + this.colorBits[0];
         }
       case ColorSpace.RGB:
-        return 'RGB' + this.channelBits.join('');
+        if (this.hasAlpha) {
+          return 'RGBA' + this.colorBits.join('') + this.alphaBits.toString();
+        } else {
+          return 'RGB' + this.colorBits.join('');
+        }
       default:
         throw new Error('Unknown color space');
     }
   }
 
-  get numChannels(): number {
-    return this.channelBits.length;
+  get hasAlpha(): boolean {
+    return this.alphaBits > 0;
   }
+
+  get numTotalChannels(): number {
+    return this.colorBits.length + (this.hasAlpha ? 1 : 0);
+  }
+
+  get numColorChannels(): number {
+    return this.colorBits.length;
+  }
+
+
 
   channelName(i: number): string {
     switch (this.colorSpace) {
       case ColorSpace.GRAYSCALE:
         return 'V';
       case ColorSpace.RGB:
-        return 'RGB'.slice(i, i + 1);
+        return 'RGBA'.slice(i, i + 1);
       default:
         throw new Error('Unknown color space');
     }
@@ -263,13 +310,13 @@ class Palette {
   public inMin: Float32Array;
   public inMax: Float32Array;
   public outMax: Uint8Array;
-  constructor(public format: PixelFormatInfo, public roundMethod: RoundMethod) {
-    this.inMin = new Float32Array(format.numChannels);
-    this.inMax = new Float32Array(format.numChannels);
-    this.outMax = new Uint8Array(format.numChannels);
+  constructor(public channelBits: number[], public roundMethod: RoundMethod) {
+    this.inMin = new Float32Array(channelBits.length);
+    this.inMax = new Float32Array(channelBits.length);
+    this.outMax = new Uint8Array(channelBits.length);
     const equDiv = roundMethod == RoundMethod.EQUAL_DIVISION;
-    for (let ch = 0; ch < format.numChannels; ch++) {
-      const numLevel = 1 << format.channelBits[ch];
+    for (let ch = 0; ch < channelBits.length; ch++) {
+      const numLevel = 1 << channelBits[ch];
       this.inMin[ch] = equDiv ? (1 / (numLevel * 2)) : 0;
       this.inMax[ch] = equDiv ? ((numLevel * 2 - 1) / (numLevel * 2)) : 1;
       this.outMax[ch] = numLevel - 1;
@@ -279,7 +326,7 @@ class Palette {
   nearest(
       src: Float32Array, srcOffset: number, dest: Uint8Array,
       destOffset: number, error: Float32Array): void {
-    for (let ch = 0; ch < this.format.numChannels; ch++) {
+    for (let ch = 0; ch < this.channelBits.length; ch++) {
       const inNorm = src[srcOffset + ch];
       const inMod = clip(
           0, 1, (inNorm - this.inMin[ch]) / (this.inMax[ch] - this.inMin[ch]));
@@ -292,23 +339,46 @@ class Palette {
 }
 
 class NormalizedImage {
-  constructor(
-      public format: PixelFormatInfo, public palette: Palette,
-      public width: number, public height: number, public data: Float32Array) {}
+  public color: Float32Array;
+  public alpha: Float32Array;
 
-  getMinMax(): [number, number] {
+  constructor(
+
+      public width: number, public height: number,
+      public numColorChannels: number) {
+    this.color = new Float32Array(width * height * numColorChannels);
+    this.alpha = new Float32Array(width * height);
+    for (let i = 0; i < this.alpha.length; i++) {
+      this.alpha[i] = 1;
+    }
+  }
+
+  getColorMinMax(): [number, number] {
     let min = Infinity;
     let max = -Infinity;
-    for (let i = 0; i < this.data.length; i++) {
-      const value = this.data[i];
+    const numColCh = this.numColorChannels;
+    for (let i = 0; i < this.alpha.length; i++) {
+      if (this.alpha[i] == 0) continue;
+      const value = this.color[i * numColCh];
       if (value < min) min = value;
       if (value > max) max = value;
     }
     return [min, max];
   }
 
-  diffuseError(error: Float32Array, x: number, y: number, forward: boolean) {
-    const numCh = this.format.numChannels;
+  diffuseColorError(
+      error: Float32Array, x: number, y: number, forward: boolean) {
+    this.diffuseError(this.color, this.numColorChannels, error, x, y, forward);
+  }
+
+  diffuseAlphaError(
+      error: Float32Array, x: number, y: number, forward: boolean) {
+    this.diffuseError(this.alpha, 1, error, x, y, forward);
+  }
+
+  diffuseError(
+      target: Float32Array, numCh: number, error: Float32Array, x: number,
+      y: number, forward: boolean) {
     const w = this.width;
     const h = this.height;
     const stride = this.width * numCh;
@@ -318,28 +388,28 @@ class NormalizedImage {
       if (e == 0) continue;
       if (forward) {
         if (x < w - 1) {
-          this.data[i + numCh] += e * 7 / 16;
+          target[i + numCh] += e * 7 / 16;
         }
         if (y < h - 1) {
           if (x > 0) {
-            this.data[i + stride - numCh] += e * 3 / 16;
+            target[i + stride - numCh] += e * 3 / 16;
           }
-          this.data[i + stride] += e * 5 / 16;
+          target[i + stride] += e * 5 / 16;
           if (x < w - 1) {
-            this.data[i + stride + numCh] += e * 1 / 16;
+            target[i + stride + numCh] += e * 1 / 16;
           }
         }
       } else {
         if (x > 0) {
-          this.data[i - numCh] += e * 7 / 16;
+          target[i - numCh] += e * 7 / 16;
         }
         if (y < h - 1) {
           if (x < w - 1) {
-            this.data[i + stride + numCh] += e * 3 / 16;
+            target[i + stride + numCh] += e * 3 / 16;
           }
-          this.data[i + stride] += e * 5 / 16;
+          target[i + stride] += e * 5 / 16;
           if (x > 0) {
-            this.data[i + stride - numCh] += e * 1 / 16;
+            target[i + stride - numCh] += e * 1 / 16;
           }
         }
       }
@@ -421,6 +491,14 @@ function tip(children: any, text: string): HTMLElement {
   return target;
 }
 
+function parentLiOf(child: HTMLElement): HTMLLIElement {
+  let parent = child;
+  while (parent && parent.tagName !== 'LI') {
+    parent = parent.parentElement;
+  }
+  return parent as HTMLLIElement;
+}
+
 function makeHeader(text: string): HTMLSpanElement {
   const span = document.createElement('span');
   span.classList.add('sectionHeader');
@@ -498,8 +576,20 @@ const dropTarget = document.createElement('div');
 const hiddenFileBox = document.createElement('input');
 const pasteTarget = document.createElement('input');
 const origCanvas = document.createElement('canvas');
-const bgColorBox = makeTextBox('#000');
+const preModCanvas = document.createElement('canvas');
 const resetTrimButton = makeButton('範囲をリセット');
+const alphaProcBox = makeSelectBox(
+    [
+      {value: AlphaProc.KEEP, label: '変更しない'},
+      {value: AlphaProc.FILL, label: '不透明化'},
+      {value: AlphaProc.BINARIZE, label: '二値化'},
+      {value: AlphaProc.SET_KEY_COLOR, label: '抜き色指定'},
+    ],
+    AlphaProc.KEEP);
+const bgColorBox = makeTextBox('#000');
+const keyColorBox = makeTextBox('#0F0');
+const keyToleranceBox = makeTextBox('0', '(auto)', 5);
+const alphaThreshBox = makeTextBox('128', '(auto)', 5);
 const trimCanvas = document.createElement('canvas');
 const gammaBox = makeTextBox('1', '(auto)', 4);
 const brightnessBox = makeTextBox('0', '(auto)', 5);
@@ -507,7 +597,8 @@ const contrastBox = makeTextBox('100', '(auto)', 5);
 const invertBox = makeCheckBox('階調反転');
 const pixelFormatBox = makeSelectBox(
     [
-      //{value: PixelFormat.ARGB8888, label: 'ARGB8888'},
+      {value: PixelFormat.RGBA8888, label: 'RGBA8888'},
+      //{value: PixelFormat.RGBA4444, label: 'RGBA4444'},
       {value: PixelFormat.RGB888, label: 'RGB888'},
       {value: PixelFormat.RGB666, label: 'RGB666'},
       {value: PixelFormat.RGB565, label: 'RGB565'},
@@ -528,12 +619,18 @@ const scalingMethodBox = makeSelectBox(
       {value: ScalingMethod.STRETCH, label: 'ストレッチ'},
     ],
     ScalingMethod.ZOOM);
-const ditherBox = makeSelectBox(
+const colorDitherBox = makeSelectBox(
     [
       {value: DitherMethod.NONE, label: 'なし'},
       {value: DitherMethod.DIFFUSION, label: '誤差拡散'},
     ],
-    DitherMethod.DIFFUSION);
+    DitherMethod.NONE);
+const alphaDitherBox = makeSelectBox(
+    [
+      {value: DitherMethod.NONE, label: 'なし'},
+      {value: DitherMethod.DIFFUSION, label: '誤差拡散'},
+    ],
+    DitherMethod.NONE);
 const roundMethodBox = makeSelectBox(
     [
       {value: RoundMethod.NEAREST, label: '最も近い輝度'},
@@ -544,16 +641,18 @@ const previewCanvas = document.createElement('canvas');
 const quantizeErrorBox = document.createElement('span');
 const channelOrderBox = makeSelectBox(
     [
-      {value: BitOrder.MSB_FIRST, label: '上位から'},
-      {value: BitOrder.LSB_FIRST, label: '下位から'},
+      {value: ChannelOrder.RGBA, label: 'RGBA'},
+      {value: ChannelOrder.BGRA, label: 'BGRA'},
+      {value: ChannelOrder.ARGB, label: 'ARGB'},
+      {value: ChannelOrder.ABGR, label: 'ABGR'},
     ],
-    BitOrder.MSB_FIRST);
+    ChannelOrder.RGBA);
 const pixelOrderBox = makeSelectBox(
     [
-      {value: BitOrder.MSB_FIRST, label: '上位から'},
-      {value: BitOrder.LSB_FIRST, label: '下位から'},
+      {value: PixelOrder.FAR_FIRST, label: '上位から'},
+      {value: PixelOrder.NEAR_FIRST, label: '下位から'},
     ],
-    BitOrder.MSB_FIRST);
+    PixelOrder.FAR_FIRST);
 const byteOrderBox = makeSelectBox(
     [
       {value: ByteOrder.LITTLE_ENDIAN, label: 'Little Endian'},
@@ -562,11 +661,11 @@ const byteOrderBox = makeSelectBox(
     ByteOrder.BIG_ENDIAN);
 const packUnitBox = makeSelectBox(
     [
-      {value: PackUnit.CHANNEL, label: 'チャネル'},
-      {value: PackUnit.SINGLE_PIXEL, label: '単一ピクセル'},
+      {value: PackUnit.UNPACKED, label: 'アンパックド'},
+      {value: PackUnit.PIXEL, label: '1 ピクセル'},
       {value: PackUnit.MULTI_PIXEL, label: '複数ピクセル'},
     ],
-    PackUnit.SINGLE_PIXEL);
+    PackUnit.PIXEL);
 const packDirBox = makeSelectBox(
     [
       {value: ScanDir.HORIZONTAL, label: '横'},
@@ -593,6 +692,13 @@ const addressingBox = makeSelectBox(
     ScanDir.HORIZONTAL);
 const structCanvas = document.createElement('canvas');
 const structErrorBox = makeParagraph();
+const codeUnitBox = makeSelectBox(
+    [
+      {value: CodeUnit.FILE, label: 'ファイル全体'},
+      {value: CodeUnit.ARRAY_DEF, label: '配列定義'},
+      {value: CodeUnit.ELEMENTS, label: '要素のみ'},
+    ],
+    CodeUnit.FILE)
 const codeColsBox = makeSelectBox(
     [
       {value: 8, label: '8'},
@@ -682,7 +788,7 @@ async function main() {
       pPresetButtons.appendChild(makePresetButton(id, presets[id]));
     }
     const pNote = makeParagraph([
-      '白黒ディスプレイについては、各種 GFX ライブラリを使用して描画する場合は横パッキングを選択してください。',
+      '白黒ディスプレイについては、各種 GFX ライブラリを使用して描画する場合は横スキャンを選択してください。',
       'I2C や SPI ドライバを用いて直接転送する場合はディスプレイの仕様に従ってください。',
       'SSD1306/1309 など一部のディスプレイでは縦パッキングされたデータが必要です。',
     ])
@@ -719,12 +825,40 @@ async function main() {
   {
     const section = makeSection(makeFloatList(([
       makeHeader('透過色'),
-      tip(['塗りつぶす: ', bgColorBox],
+      tip(['透過色の扱い: ', alphaProcBox],
+          '入力画像に対する透過色の取り扱いを指定します。'),
+      tip(['背景色: ', bgColorBox],
           '画像の透明部分をこの色で塗り潰して不透明化します。'),
+      tip(['キーカラー: ', keyColorBox], '透明にしたい色を指定します。'),
+      tip(['許容誤差: ', keyToleranceBox],
+          'キーカラーからの許容誤差を指定します。'),
+      tip(['閾値: ', alphaThreshBox], '透明にするかどうかの閾値を指定します。'),
     ])));
     container.appendChild(section);
 
-    section.querySelectorAll('input, button').forEach((el) => {
+    function updateVisibility() {
+      parentLiOf(bgColorBox).style.display = 'none';
+      parentLiOf(keyColorBox).style.display = 'none';
+      parentLiOf(keyToleranceBox).style.display = 'none';
+      parentLiOf(alphaThreshBox).style.display = 'none';
+      const alphaProc: AlphaProc = parseInt(alphaProcBox.value);
+      switch (alphaProc) {
+        case AlphaProc.FILL:
+          parentLiOf(bgColorBox).style.display = 'inline-block';
+          break;
+        case AlphaProc.SET_KEY_COLOR:
+          parentLiOf(keyColorBox).style.display = 'inline-block';
+          parentLiOf(keyToleranceBox).style.display = 'inline-block';
+          break;
+        case AlphaProc.BINARIZE:
+          parentLiOf(alphaThreshBox).style.display = 'inline-block';
+          break;
+      }
+    }
+    alphaProcBox.addEventListener('change', updateVisibility);
+    updateVisibility();
+
+    section.querySelectorAll('input, select').forEach((el) => {
       el.addEventListener('change', () => {
         requestUpdateTrimCanvas();
         requestQuantize();
@@ -799,8 +933,10 @@ async function main() {
             'ピクセルフォーマットを指定します。'),
         tip(['丸め方法: ', roundMethodBox],
             'パレットから色を選択する際の戦略を指定します。\nディザリングを行う場合はあまり関係ありません。'),
-        tip(['ディザリング: ', ditherBox],
-            'あえてノイズを加えることでできるだけ元画像の輝度を再現します。'),
+        tip(['色のディザ: ', colorDitherBox],
+            'あえてノイズを加えることでできるだけ元画像の色を再現します。'),
+        tip(['透明度のディザ: ', alphaDitherBox],
+            'あえてノイズを加えることでできるだけ元画像の透明度を再現します。'),
       ]),
       pCanvas,
     ]);
@@ -872,6 +1008,7 @@ async function main() {
     const section = makeSection([
       makeFloatList([
         makeHeader('コード生成'),
+        tip(['生成範囲: ', codeUnitBox], '生成するコードの範囲を指定します。'),
         tip(['列数: ', codeColsBox], '1 行に詰め込む要素数を指定します。'),
         tip(['インデント: ', indentBox],
             'インデントの形式とサイズを指定します。'),
@@ -1173,10 +1310,6 @@ function updateTrimCanvas(): void {
   const ctx = trimCanvas.getContext('2d', {willReadFrequently: true});
   ctx.clearRect(0, 0, canvasW, canvasH);
 
-  ctx.fillStyle = bgColorBox.value;
-  ctx.fillRect(
-      trimViewL, trimViewT, trimViewR - trimViewL, trimViewB - trimViewT);
-
   // 画像描画
   {
     const dx = view.x - worldX0 * zoom;
@@ -1265,15 +1398,63 @@ function quantize(): void {
     widthBox.placeholder = '(' + outW + ')';
     heightBox.placeholder = '(' + outH + ')';
 
+    const alphaProc: AlphaProc = parseInt(alphaProcBox.value);
+    const alphaThresh = parseInt(alphaThreshBox.value) / 255;
+
+    preModCanvas.width = origCanvas.width;
+    preModCanvas.height = origCanvas.height;
+    if (alphaProc == AlphaProc.SET_KEY_COLOR) {
+      // 抜き色の処理
+      const keyCol = hexToRgb(keyColorBox.value);
+      const keyR = (keyCol >> 24) & 255;
+      const keyG = (keyCol >> 16) & 255;
+      const keyB = (keyCol >> 8) & 255;
+      const keyTol = parseInt(keyToleranceBox.value);
+
+      const origCtx = origCanvas.getContext('2d', {willReadFrequently: true});
+      const origImageData =
+          origCtx.getImageData(0, 0, origCanvas.width, origCanvas.height);
+      const origData = origImageData.data;
+
+      const modImageData =
+          new ImageData(preModCanvas.width, preModCanvas.height);
+      const modData = modImageData.data;
+
+      for (let i = 0; i < origData.length; i += 4) {
+        const r = origData[i];
+        const g = origData[i + 1];
+        const b = origData[i + 2];
+        let a = origData[i + 3];
+        const d = Math.abs(r - keyR) + Math.abs(g - keyG) + Math.abs(b - keyB);
+        if (d <= keyTol) {
+          a = 0;
+        }
+        modData[i] = r;
+        modData[i + 1] = g;
+        modData[i + 2] = b;
+        modData[i + 3] = a;
+      }
+
+      const origModCtx =
+          preModCanvas.getContext('2d', {willReadFrequently: true});
+      origModCtx.putImageData(modImageData, 0, 0);
+    } else {
+      const modCtx = preModCanvas.getContext('2d', {willReadFrequently: true});
+      modCtx.clearRect(0, 0, preModCanvas.width, preModCanvas.height);
+      modCtx.drawImage(origCanvas, 0, 0);
+    }
+
     // トリミング + リサイズの適用
     {
       const outCtx = previewCanvas.getContext('2d', {willReadFrequently: true});
       previewCanvas.width = outW;
       previewCanvas.height = outH;
 
-      // 背景色の適用
-      outCtx.fillStyle = bgColorBox.value;
-      outCtx.fillRect(0, 0, outW, outH);
+      if (alphaProc == AlphaProc.FILL) {
+        // 背景色の適用
+        outCtx.fillStyle = bgColorBox.value;
+        outCtx.fillRect(0, 0, outW, outH);
+      }
 
       {
         // トリミング + リサイズ
@@ -1308,7 +1489,8 @@ function quantize(): void {
         const dy = outH / 2 + (trimT - srcY0) * scaleY;
         const dw = srcW * scaleX;
         const dh = srcH * scaleY;
-        outCtx.drawImage(origCanvas, trimL, trimT, srcW, srcH, dx, dy, dw, dh);
+        outCtx.drawImage(
+            preModCanvas, trimL, trimT, srcW, srcH, dx, dy, dw, dh);
       }
     }
 
@@ -1316,7 +1498,7 @@ function quantize(): void {
 
     let maxChannelDepth = 0;
     let roundMethod: RoundMethod = RoundMethod.NEAREST;
-    for (const depth of fmt.channelBits) {
+    for (const depth of fmt.colorBits) {
       if (depth > maxChannelDepth) {
         maxChannelDepth = depth;
       }
@@ -1329,9 +1511,7 @@ function quantize(): void {
       roundMethodBox.disabled = true;
     }
 
-    const palette = new Palette(fmt, roundMethod);
-    const normData = new Float32Array(outW * outH * fmt.numChannels);
-    const norm = new NormalizedImage(fmt, palette, outW, outH, normData);
+    const norm = new NormalizedImage(outW, outH, fmt.colorBits.length);
 
     // 量子化の適用
     {
@@ -1342,10 +1522,11 @@ function quantize(): void {
       const previewData = new Uint8Array(srcRgbData.length);
 
       const numPixels = outW * outH;
-      const numCh = fmt.colorSpace === ColorSpace.GRAYSCALE ? 1 : 3;
+      const numAllCh = fmt.numTotalChannels;
+      const numColCh = fmt.numColorChannels;
 
       let outData = [];
-      for (let i = 0; i < numCh; i++) {
+      for (let i = 0; i < numAllCh; i++) {
         outData.push(new Uint8Array(numPixels));
       }
 
@@ -1356,20 +1537,22 @@ function quantize(): void {
         const r = srcRgbData[i * 4] / 255;
         const g = srcRgbData[i * 4 + 1] / 255;
         const b = srcRgbData[i * 4 + 2] / 255;
+        const a = srcRgbData[i * 4 + 3] / 255;
         const gray = 0.299 * r + 0.587 * g + 0.114 * b;
         histogram[Math.round(gray * (HISTOGRAM_SIZE - 1))]++;
         switch (fmt.colorSpace) {
           case ColorSpace.GRAYSCALE:
-            norm.data[i * numCh] = gray;
+            norm.color[i * numColCh] = gray;
             break;
           case ColorSpace.RGB:
-            norm.data[i * numCh + 0] = r;
-            norm.data[i * numCh + 1] = g;
-            norm.data[i * numCh + 2] = b;
+            norm.color[i * numColCh + 0] = r;
+            norm.color[i * numColCh + 1] = g;
+            norm.color[i * numColCh + 2] = b;
             break;
           default:
             throw new Error('Unknown color space');
         }
+        norm.alpha[i] = a;
       }
 
       // ガンマ補正
@@ -1384,9 +1567,9 @@ function quantize(): void {
         gamma = clip(0.01, 5, gamma);
         gammaBox.placeholder = '(' + Math.round(gamma * 100) / 100 + ')';
         if (gamma != 1) {
-          for (let i = 0; i < norm.data.length; i++) {
-            const val = Math.pow(norm.data[i], 1 / gamma);
-            norm.data[i] = val;
+          for (let i = 0; i < norm.color.length; i++) {
+            const val = Math.pow(norm.color[i], 1 / gamma);
+            norm.color[i] = val;
           }
         }
       }
@@ -1398,14 +1581,14 @@ function quantize(): void {
           brightness = parseFloat(brightnessBox.value) / 255;
           brightnessBox.placeholder = '';
         } else {
-          const [chMin, chMax] = norm.getMinMax();
+          const [chMin, chMax] = norm.getColorMinMax();
           brightness = 0.5 - (chMin + chMax) / 2;
         }
         brightness = clip(-1, 1, brightness);
         brightnessBox.placeholder = '(' + Math.round(brightness * 255) + ')';
         if (brightness != 0) {
-          for (let i = 0; i < norm.data.length; i++) {
-            norm.data[i] = clip(0, 1, norm.data[i] + brightness);
+          for (let i = 0; i < norm.color.length; i++) {
+            norm.color[i] = clip(0, 1, norm.color[i] + brightness);
           }
         }
       }
@@ -1417,7 +1600,7 @@ function quantize(): void {
           contrast = parseFloat(contrastBox.value) / 100;
           contrastBox.placeholder = '';
         } else {
-          const [chMin, chMax] = norm.getMinMax();
+          const [chMin, chMax] = norm.getColorMinMax();
           const middle = (chMin + chMax) / 2;
           if (middle < 0.5 && chMin < middle) {
             contrast = 0.5 / (middle - chMin);
@@ -1428,64 +1611,110 @@ function quantize(): void {
         contrast = clip(0.01, 10, contrast);
         contrastBox.placeholder = '(' + Math.round(contrast * 100) + ')';
         if (contrast != 1) {
-          for (let i = 0; i < norm.data.length; i++) {
-            norm.data[i] = clip(0, 1, (norm.data[i] - 0.5) * contrast + 0.5);
+          for (let i = 0; i < norm.color.length; i++) {
+            norm.color[i] = clip(0, 1, (norm.color[i] - 0.5) * contrast + 0.5);
           }
         }
       }
 
       // 階調反転
       if (invertBox.checked) {
-        for (let i = 0; i < norm.data.length; i++) {
-          norm.data[i] = 1 - norm.data[i];
+        for (let i = 0; i < norm.color.length; i++) {
+          norm.color[i] = 1 - norm.color[i];
         }
       }
 
+      // プレビューのアルファチャンネルを初期化
+      for (let i = 0; i < numPixels; i++) {
+        previewData[i * 4 + 3] = 255;
+      }
+
+      // 減色方法の決定
+      let minColBits = 999;
+      for (const bits of fmt.colorBits) {
+        if (bits < minColBits) minColBits = bits;
+      }
+      const colReduce = (minColBits < 8);
+      const alpReduce = fmt.hasAlpha && (fmt.alphaBits < 8);
+      const colDither: DitherMethod =
+          colReduce ? parseInt(colorDitherBox.value) : DitherMethod.NONE;
+      const alpDither: DitherMethod =
+          alpReduce ? parseInt(alphaDitherBox.value) : DitherMethod.NONE;
+      colorDitherBox.disabled = !colReduce;
+      alphaDitherBox.disabled = !alpReduce;
+
       // 量子化
-      const diffusion = parseInt(ditherBox.value) === DitherMethod.DIFFUSION;
-      const palette = new Palette(fmt, roundMethod);
-      const out = new Uint8Array(numCh);
-      const error = new Float32Array(numCh);
+      const colErrDiffuse = colReduce && colDither === DitherMethod.DIFFUSION;
+      const alpErrDiffuse = alpReduce && alpDither === DitherMethod.DIFFUSION;
+      const colPalette = new Palette(fmt.colorBits, roundMethod);
+      const alpOutMax = (1 << fmt.alphaBits) - 1;
+      const colOut = new Uint8Array(numColCh);
+      const colErr = new Float32Array(numColCh);
+      const alpErr = new Float32Array(1);
       for (let y = 0; y < outH; y++) {
         for (let ix = 0; ix < outW; ix++) {
           // 誤差拡散をジグザグに行うため
           // ライン毎にスキャン方向を変える
           const fwd = y % 2 == 0;
           const x = fwd ? ix : (outW - 1 - ix);
+          const iPix = (y * outW + x);
+
+          // アルファチャンネルの値を算出
+          let transparent = false;
+          let alpOut = alpOutMax;
+          if (fmt.hasAlpha) {
+            const alpNormIn = norm.alpha[iPix];
+            if (alphaProc == AlphaProc.BINARIZE) {
+              alpOut = alpNormIn < alphaThresh ? 0 : alpOutMax;
+              alpErr[0] = 0;
+            } else {
+              alpOut = Math.round(alpNormIn * alpOutMax);
+              const alpNormOut = alpOut / alpOutMax;
+              alpErr[0] = alpNormIn - alpNormOut;
+            }
+            transparent = alpOut == 0;
+          }
 
           // パレットから最も近い色を選択
-          const iPix = (y * outW + x);
-          palette.nearest(norm.data, iPix * numCh, out, 0, error);
+          colPalette.nearest(norm.color, iPix * numColCh, colOut, 0, colErr);
 
           // 出力
-          for (let ch = 0; ch < numCh; ch++) {
-            outData[ch][iPix] = out[ch];
+          for (let ch = 0; ch < numColCh; ch++) {
+            outData[ch][iPix] = colOut[ch];
+          }
+          if (fmt.hasAlpha) {
+            outData[numColCh][iPix] = alpOut;
           }
 
           // プレビュー用の色生成
           if (fmt.colorSpace === ColorSpace.GRAYSCALE) {
-            const gray = Math.round(out[0] * 255 / palette.outMax[0]);
+            const gray = Math.round(colOut[0] * 255 / colPalette.outMax[0]);
             for (let ch = 0; ch < 3; ch++) {
               previewData[iPix * 4 + ch] = gray;
             }
           } else {
             for (let ch = 0; ch < 3; ch++) {
-              const outMax = palette.outMax[ch];
-              previewData[iPix * 4 + ch] = Math.round(out[ch] * 255 / outMax);
+              const outMax = colPalette.outMax[ch];
+              previewData[iPix * 4 + ch] =
+                  Math.round(colOut[ch] * 255 / outMax);
             }
           }
 
-          if (diffusion) {
+          // プレビュー用のアルファ生成
+          if (fmt.hasAlpha) {
+            previewData[iPix * 4 + 3] = Math.round(alpOut * 255 / alpOutMax);
+          }
+
+          if (alpErrDiffuse && fmt.hasAlpha) {
+            norm.diffuseAlphaError(alpErr, x, y, fwd);
+          }
+
+          if (colErrDiffuse && !transparent) {
             // 誤差拡散
-            norm.diffuseError(error, x, y, fwd);
+            norm.diffuseColorError(colErr, x, y, fwd);
           }
         }  // for ix
       }  // for y
-
-      // プレビューを不透明化
-      for (let i = 0; i < numPixels; i++) {
-        previewData[i * 4 + 3] = 255;
-      }
 
       imageCacheFormat = fmt;
       imageCacheData = outData;
@@ -1573,8 +1802,8 @@ function generateCode(): void {
     const channelData = imageCacheData;
     const fmt = imageCacheFormat;
 
-    const msbRed = parseInt(channelOrderBox.value) == BitOrder.MSB_FIRST;
-    const msb1st = parseInt(pixelOrderBox.value) == BitOrder.MSB_FIRST;
+    const chOrder: ChannelOrder = parseInt(channelOrderBox.value);
+    const msb1st = parseInt(pixelOrderBox.value) == PixelOrder.FAR_FIRST;
     const bigEndian = parseInt(byteOrderBox.value) == ByteOrder.BIG_ENDIAN;
     const packUnit: PackUnit = parseInt(packUnitBox.value);
     const vertPack = parseInt(packDirBox.value) == ScanDir.VERTICAL;
@@ -1582,48 +1811,102 @@ function generateCode(): void {
     const alignLeft = parseInt(alignDirBox.value) == AlignDir.HIGHER;
     const vertAddr = parseInt(addressingBox.value) == ScanDir.VERTICAL;
 
-    const numChannels = fmt.numChannels;
+    const numCh = fmt.numTotalChannels;
 
-    let chPos = new Uint8Array(numChannels);  // チャネル毎のビット位置
+    let chMap: Int32Array;
+    switch (fmt.colorSpace) {
+      case ColorSpace.GRAYSCALE:
+        chMap = new Int32Array([0]);
+        break;
+      case ColorSpace.RGB:
+        if (fmt.hasAlpha) {
+          switch (chOrder) {
+            case ChannelOrder.RGBA:
+              chMap = new Int32Array([3, 2, 1, 0]);
+              break;
+            case ChannelOrder.BGRA:
+              chMap = new Int32Array([3, 0, 1, 2]);
+              break;
+            case ChannelOrder.ARGB:
+              chMap = new Int32Array([2, 1, 0, 3]);
+              break;
+            case ChannelOrder.ABGR:
+              chMap = new Int32Array([0, 1, 2, 3]);
+              break;
+            default:
+              throw new Error('Unsupported channel order');
+          }
+        } else {
+          switch (chOrder) {
+            case ChannelOrder.RGBA:
+            case ChannelOrder.ARGB:
+              chMap = new Int32Array([2, 1, 0]);
+              break;
+            case ChannelOrder.BGRA:
+            case ChannelOrder.ABGR:
+              chMap = new Int32Array([0, 1, 2]);
+              break;
+            default:
+              throw new Error('Unsupported channel order');
+          }
+        }
+        break;
+      default:
+        throw new Error('Unsupported color space');
+    }
+
+    const chBits = new Int32Array(numCh);
+    {
+      const tmp = new Int32Array(numCh);
+      for (let i = 0; i < fmt.numColorChannels; i++) {
+        tmp[i] = fmt.colorBits[i];
+      }
+      if (fmt.hasAlpha) {
+        tmp[fmt.numColorChannels] = fmt.alphaBits;
+      }
+      for (let i = 0; i < numCh; i++) {
+        chBits[i] = tmp[chMap[i]];
+      }
+    }
+
+    let chPos = new Uint8Array(numCh);  // チャネル毎のビット位置
     let pixelStride = 0;  // ピクセルあたりのビット数 (パディング含む)
     let pixelsPerFrag = 0;  // フラグメントあたりのピクセル数
     let bytesPerFrag = 0;   // フラグメントあたりのバイト数
     let alignRequired = false;
-    if (packUnit == PackUnit.CHANNEL) {
+    if (packUnit == PackUnit.UNPACKED) {
       // 一番幅の広いチャネルに合わせてチャネル毎の幅を決定
       let maxChBits = 0;
-      for (let i = 0; i < numChannels; i++) {
-        if (maxChBits < fmt.channelBits[i]) {
-          maxChBits = fmt.channelBits[i];
+      for (let i = 0; i < numCh; i++) {
+        if (maxChBits < chBits[i]) {
+          maxChBits = chBits[i];
         }
       }
       const chStride = Math.ceil(maxChBits / alignBoundary) * alignBoundary;
 
       // 各チャネルのビット位置を算出
-      for (let i = 0; i < numChannels; i++) {
-        const iCh = msbRed ? (numChannels - 1 - i) : i;
-        chPos[iCh] = i * chStride;
-        alignRequired ||= chStride != fmt.channelBits[iCh];
+      for (let ch = 0; ch < numCh; ch++) {
+        chPos[ch] = ch * chStride;
+        alignRequired ||= chStride != chBits[ch];
         if (alignLeft) {
-          chPos[iCh] += chStride - fmt.channelBits[iCh];
+          chPos[ch] += chStride - chBits[ch];
         }
       }
 
-      pixelStride = chStride * numChannels;
+      pixelStride = chStride * numCh;
       bytesPerFrag = Math.ceil(pixelStride / 8);
       pixelsPerFrag = 1;
 
     } else {
       // 各チャネルのビット位置 (下位詰めの場合)
       let pixBits = 0;
-      for (let i = 0; i < numChannels; i++) {
-        const iCh = msbRed ? (numChannels - 1 - i) : i;
-        chPos[iCh] = pixBits;
-        pixBits += fmt.channelBits[iCh];
+      for (let ch = 0; ch < numCh; ch++) {
+        chPos[ch] = pixBits;
+        pixBits += chBits[ch];
       }
 
       switch (packUnit) {
-        case PackUnit.SINGLE_PIXEL:
+        case PackUnit.PIXEL:
           // ピクセル単位のパッキングの場合
           pixelStride = Math.ceil(pixBits / alignBoundary) * alignBoundary;
           pixelsPerFrag = Math.max(1, Math.floor(8 / pixelStride));
@@ -1631,8 +1914,8 @@ function generateCode(): void {
           alignRequired = pixelStride != pixBits;
           if (alignLeft) {
             // 上位詰めの場合はチャネルのビット位置修正
-            for (let i = 0; i < numChannels; i++) {
-              chPos[i] += pixelStride - pixBits;
+            for (let ch = 0; ch < numCh; ch++) {
+              chPos[ch] += pixelStride - pixBits;
             }
           }
           break;
@@ -1655,7 +1938,7 @@ function generateCode(): void {
           alignRequired = fragStride != fragBits;
           if (alignLeft) {
             // 上位詰めの場合はチャネルビット位置に下駄を履かせる
-            for (let i = 0; i < numChannels; i++) {
+            for (let i = 0; i < numCh; i++) {
               chPos[i] += fragStride - fragBits;
             }
           }
@@ -1668,7 +1951,7 @@ function generateCode(): void {
     }
 
     alignDirBox.disabled = !alignRequired;
-    channelOrderBox.disabled = numChannels <= 1;
+    channelOrderBox.disabled = numCh <= 1;
     pixelOrderBox.disabled = pixelsPerFrag <= 1;
     packDirBox.disabled = pixelsPerFrag <= 1;
     byteOrderBox.disabled = bytesPerFrag <= 1;
@@ -1745,6 +2028,7 @@ function generateCode(): void {
             'rgba(255,128,128,0.8)',
             'rgba(128,255,128,0.8)',
             'rgba(128,160,255,0.8)',
+            'rgba(192,128,255,0.8)',
           ];
           break;
         default:
@@ -1754,12 +2038,12 @@ function generateCode(): void {
       // チャネルの描画
       for (let ip = 0; ip < pixelsPerFrag; ip++) {
         const iPix = msb1st ? (pixelsPerFrag - 1 - ip) : ip;
-        for (let iCh = 0; iCh < numChannels; iCh++) {
-          const r = pad + tableW - (ip * pixelStride + chPos[iCh]) * colW;
-          const w = fmt.channelBits[iCh] * colW;
+        for (let ch = 0; ch < numCh; ch++) {
+          const r = pad + tableW - (ip * pixelStride + chPos[ch]) * colW;
+          const w = chBits[ch] * colW;
           const x = r - w;
           const y = pad + tableH - rowH;
-          ctx.fillStyle = rgbColors[iCh];
+          ctx.fillStyle = rgbColors[chMap[ch]];
           ctx.fillRect(x, y, w, rowH);
 
           ctx.strokeStyle = '#000';
@@ -1768,7 +2052,8 @@ function generateCode(): void {
           ctx.fillStyle = '#000';
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
-          const label = fmt.channelName(iCh) + (pixelsPerFrag > 1 ? iPix : '');
+          const label =
+              fmt.channelName(chMap[ch]) + (pixelsPerFrag > 1 ? iPix : '');
           const mtx = ctx.measureText(label);
           ctx.fillText(label, x + w / 2, y + rowH / 2);
         }
@@ -1810,10 +2095,9 @@ function generateCode(): void {
             // チャネルループ
             const iPix = msb1st ? (pixelsPerFrag - 1 - ip) : ip;
             const pixOffset = pixelStride * iPix;
-            for (let ic = 0; ic < numChannels; ic++) {
-              const iCh = msbRed ? (numChannels - 1 - ic) : ic;
-              const chData = channelData[iCh][y * width + x];
-              const shift = pixOffset + chPos[iCh];
+            for (let ch = 0; ch < numCh; ch++) {
+              const chData = channelData[chMap[ch]][y * width + x];
+              const shift = pixOffset + chPos[ch];
               fragData |= chData << shift;
             }  // for ch
           }
@@ -1855,17 +2139,27 @@ function generateCode(): void {
           throw new Error('Unknown indent type');
       }
 
+      const codeUnit: CodeUnit = parseInt(codeUnitBox.value);
+
       // コード生成
       let code = '';
-      code += `#pragma once\n`;
-      code += `\n`;
-      code += `#include <stdint.h>\n`;
-      code += `\n`;
-      code += `// ${width}x${height}px, ${imageCacheFormat.toString()}\n`;
-      {
+      if (codeUnit >= CodeUnit.FILE) {
+        code += `#pragma once\n`;
+        code += `\n`;
+        code += `#include <stdint.h>\n`;
+        code += `\n`;
+      }
+
+      if (codeUnit >= CodeUnit.ARRAY_DEF) {
+        code += `// ${width}x${height}px, ${imageCacheFormat.toString()}\n`;
         code += `// `;
-        if (numChannels > 1) {
-          code += (msbRed ? 'R->G->B' : 'B<-G<-R') + ', ';
+        if (numCh > 1) {
+          let chOrderStr = '';
+          for (let i = 0; i < numCh; i++) {
+            if (i > 0) chOrderStr += ':';
+            chOrderStr += fmt.channelName(chMap[numCh - 1 - i]);
+          }
+          code += chOrderStr + ', ';
         }
         if (pixelsPerFrag > 1) {
           code += (msb1st ? 'MSB' : 'LSB') + ' First, ';
@@ -1875,9 +2169,10 @@ function generateCode(): void {
           code += (bigEndian ? 'Big' : 'Little') + ' Endian, ';
         }
         code += `${vertAddr ? 'Vertical' : 'Horizontal'} Adressing\n`;
+        code += `// ${arrayData.length} Bytes\n`;
+        code += 'const uint8_t imageArray[] = {\n';
       }
-      code += `// ${arrayData.length} Bytes\n`;
-      code += 'const uint8_t imageArray[] = {\n';
+
       for (let i = 0; i < arrayData.length; i++) {
         if (i % arrayCols == 0) code += indent;
         code += '0x' + arrayData[i].toString(16).padStart(2, '0') + ',';
@@ -1887,7 +2182,10 @@ function generateCode(): void {
           code += ' ';
         }
       }
-      code += '};';
+
+      if (codeUnit >= CodeUnit.ARRAY_DEF) {
+        code += '};\n';
+      }
 
       codeBox.textContent = code;
       codeBox.style.display = 'block';
@@ -1914,6 +2212,25 @@ function clip(min: number, max: number, val: number): number {
   if (val < min) return min;
   if (val > max) return max;
   return val;
+}
+
+function hexToRgb(hex: string): number {
+  if (hex.startsWith('#')) {
+    hex = hex.slice(1);
+  }
+  if (hex.length === 3) {
+    const r = parseInt(hex[0] + hex[0], 16);
+    const g = parseInt(hex[1] + hex[1], 16);
+    const b = parseInt(hex[2] + hex[2], 16);
+    return (r << 24) | (g << 16) | (b << 8) | 255;
+  } else if (hex.length == 6) {
+    const r = parseInt(hex.slice(0, 2), 16);
+    const g = parseInt(hex.slice(2, 4), 16);
+    const b = parseInt(hex.slice(4, 6), 16);
+    return (r << 24) | (g << 16) | (b << 8) | 255;
+  } else {
+    throw new Error('Invalid hex color');
+  }
 }
 
 document.addEventListener('DOMContentLoaded', async (e) => {

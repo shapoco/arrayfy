@@ -34,10 +34,10 @@
     }
   </script>
 
-  <link rel="stylesheet" href="./style.css?20250829055300" type="text/css">
+  <link rel="stylesheet" href="./style.css?20250830212300" type="text/css">
 
-  <link href="https://www.shapoco.net/navi/style.css?20250829055300" rel="stylesheet" type="text/css">
-  <script src="https://www.shapoco.net/navi/navi.js?20250829055300"></script>
+  <link href="https://www.shapoco.net/navi/style.css?20250830212300" rel="stylesheet" type="text/css">
+  <script src="https://www.shapoco.net/navi/navi.js?20250830212300"></script>
 
   <title>Arrayfy: 画像を配列に変換君 | シャポ庫</title>
 </head>
@@ -53,7 +53,7 @@
       <h1>Arrayfy: 画像を配列に変換君</h1>
 
       <div id="shpcstamp_wrap" style="text-align: center;"></div>
-      <script async src="./stamp/v1/widget.js?20250829055300"></script>
+      <script async src="./stamp/v1/widget.js?20250830212300"></script>
 
       <h2>概要</h2>
 
@@ -78,7 +78,7 @@
 
       <h2>はじめる</h2>
       <div id="arrayfyContainer"></div>
-      <script src="./arrayfy.js?20250829055300"></script>
+      <script src="./arrayfy.js?20250830212300"></script>
 
       <h2>利用規約・免責事項</h2>
       <ul>
@@ -94,54 +94,64 @@
       <h2>実機確認実績</h2>
       <table>
         <tr>
-          <th class="nowrap" style="text-align: center;">形式</th>
-          <th class="nowrap" style="text-align: center;">確認状況</th>
+          <th class="nowrap">形式</th>
+          <th class="nowrap" style="text-align: center;">確認 Ver.</th>
           <th>確認環境</th>
         </tr>
         <tr>
-          <td class="nowrap" style="text-align: center;">RGB888</td>
-          <td class="nowrap" style="text-align: center;">✔</td>
-          <td>LovyanGFX + GC9A01</td>
+          <td class="nowrap">ARGB8888</td>
+          <td class="nowrap" style="text-align: center;">1.3</td>
+          <td>LovyanGFX + ST7789</td>
         </tr>
         <tr>
-          <td class="nowrap" style="text-align: center;">RGB666</td>
-          <td class="nowrap" style="text-align: center;">✔</td>
-          <td>LovyanGFX + GC9A01</td>
+          <td class="nowrap">RGB888</td>
+          <td class="nowrap" style="text-align: center;">1.3</td>
+          <td>LovyanGFX + ST7789</td>
         </tr>
         <tr>
-          <td class="nowrap" style="text-align: center;">RGB565</td>
-          <td class="nowrap" style="text-align: center;">✔</td>
-          <td>LovyanGFX + GC9A01</td>
+          <td class="nowrap">RGB666</td>
+          <td class="nowrap" style="text-align: center;">1.3</td>
+          <td>LovyanGFX + ST7789</td>
         </tr>
         <tr>
-          <td class="nowrap" style="text-align: center;">RGB555</td>
+          <td class="nowrap">RGB565</td>
+          <td class="nowrap" style="text-align: center;">1.3</td>
+          <td>LovyanGFX + ST7789</td>
+        </tr>
+        <tr>
+          <td class="nowrap">RGB555</td>
           <td class="nowrap" style="text-align: center;"></td>
           <td></td>
         </tr>
         <tr>
-          <td class="nowrap" style="text-align: center;">RGB332</td>
-          <td class="nowrap" style="text-align: center;">✔</td>
-          <td>LovyanGFX + GC9A01</td>
+          <td class="nowrap">RGB332</td>
+          <td class="nowrap" style="text-align: center;">1.3</td>
+          <td>LovyanGFX + ST7789</td>
         </tr>
         <tr>
-          <td class="nowrap" style="text-align: center;">RGB111</td>
+          <td class="nowrap">RGB111</td>
           <td class="nowrap" style="text-align: center;"></td>
           <td></td>
         </tr>
         <tr>
-          <td class="nowrap" style="text-align: center;">Gray4</td>
-          <td class="nowrap" style="text-align: center;">✔</td>
-          <td>LovyanGFX + GC9A01</td>
+          <td class="nowrap">Gray4</td>
+          <td class="nowrap" style="text-align: center;">1.3</td>
+          <td>LovyanGFX + ST7789</td>
         </tr>
         <tr>
-          <td class="nowrap" style="text-align: center;">Gray2</td>
-          <td class="nowrap" style="text-align: center;">✔</td>
-          <td>LovyanGFX + GC9A01</td>
+          <td class="nowrap">Gray2</td>
+          <td class="nowrap" style="text-align: center;">1.3</td>
+          <td>LovyanGFX + ST7789</td>
         </tr>
         <tr>
-          <td class="nowrap" style="text-align: center;">B/W</td>
-          <td class="nowrap" style="text-align: center;">✔</td>
-          <td>LovyanGFX + GC9A01<br>自作コード + SSD1306</td>
+          <td class="nowrap">B/W 横スキャン</td>
+          <td class="nowrap" style="text-align: center;">1.3</td>
+          <td>LovyanGFX + ST7789</td>
+        </tr>
+        <tr>
+          <td class="nowrap">B/W 縦パック</td>
+          <td class="nowrap" style="text-align: center;">1.2</td>
+          <td>自作コード + SSD1306</td>
         </tr>
       </table>
 
@@ -166,6 +176,11 @@
           <td class="nowrap" style="text-align: center;">1.2</td>
           <td class="nowrap" style="text-align: center;">2025/08/28</td>
           <td class="nowrap">RGB666 と RGB888 に対応</td>
+        </tr>
+        <tr>
+          <td class="nowrap" style="text-align: center;">1.3</td>
+          <td class="nowrap" style="text-align: center;">2025/08/30</td>
+          <td class="nowrap">ARGB8888 に対応</td>
         </tr>
       </table>
 
