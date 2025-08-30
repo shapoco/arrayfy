@@ -1933,9 +1933,9 @@ function generateCode() {
             var rowH = 30;
             var tableW = numCols * colW;
             var tableH = numRows * rowH;
-            var pad = 10;
-            structCanvas.width = tableW + pad * 2;
-            structCanvas.height = tableH + pad * 2;
+            var pad = 0;
+            structCanvas.width = tableW + 1 + pad * 2;
+            structCanvas.height = tableH + 1 + pad * 2;
             var ctx = structCanvas.getContext('2d');
             ctx.fillStyle = '#FFF';
             ctx.fillRect(0, 0, structCanvas.width, structCanvas.height);

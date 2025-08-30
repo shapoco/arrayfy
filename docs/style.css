@@ -154,24 +154,12 @@ button {
 }
 
 .propertySection {
-  border: solid 1px #ccc;
+  background: #f0f4f8;
+  border: solid 1px #cde;
   border-radius: 5px;
   margin: 10px 0px;
   padding: 0px;
   overflow: hidden;
-}
-
-.propertySection>span,
-.propertySection>h3 {
-  display: inline;
-  height: 40px;
-  line-height: 40px;
-  margin: 0;
-  padding: 0;
-  border: solid 1px red;
-  box-sizing: border-box;
-  white-space: nowrap;
-  vertical-align: 50%;
 }
 
 .propertySection ul {
@@ -200,6 +188,7 @@ button {
   margin: 0 10px 0 -5px;
   padding: 0px;
   background: #cde;
+  border-radius: 0 0 5px 0;
   text-align: center;
   font-weight: bold;
 }

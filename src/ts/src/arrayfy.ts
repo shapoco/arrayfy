@@ -2046,10 +2046,10 @@ function generateCode(): void {
       const tableW = numCols * colW;
       const tableH = numRows * rowH;
 
-      const pad = 10;
+      const pad = 0;
 
-      structCanvas.width = tableW + pad * 2;
-      structCanvas.height = tableH + pad * 2;
+      structCanvas.width = tableW + 1 + pad * 2;
+      structCanvas.height = tableH + 1 + pad * 2;
       const ctx = structCanvas.getContext('2d');
 
       ctx.fillStyle = '#FFF';
