@@ -199,7 +199,7 @@ button {
   width: 100px;
   margin: 0 10px 0 -5px;
   padding: 0px;
-  background: #def;
+  background: #cde;
   text-align: center;
   font-weight: bold;
 }
@@ -249,4 +249,8 @@ button {
 .presetButton img {
   height: 50px;
   width: auto
+}
+
+.hidden {
+  display: none;
 }

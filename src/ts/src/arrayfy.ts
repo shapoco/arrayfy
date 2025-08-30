@@ -480,25 +480,6 @@ function makeNowrap(children: any = []): HTMLSpanElement {
   return span;
 }
 
-function tip(children: any, text: string): HTMLElement {
-  let target: HTMLElement;
-  if (children instanceof HTMLElement) {
-    target = children;
-  } else {
-    target = makeSpan(children);
-  }
-  if (text) target.title = text;
-  return target;
-}
-
-function parentLiOf(child: HTMLElement): HTMLLIElement {
-  let parent = child;
-  while (parent && parent.tagName !== 'LI') {
-    parent = parent.parentElement;
-  }
-  return parent as HTMLLIElement;
-}
-
 function makeHeader(text: string): HTMLSpanElement {
   const span = document.createElement('span');
   span.classList.add('sectionHeader');
@@ -570,6 +551,49 @@ function makePresetButton(id: string, preset: Preset): HTMLButtonElement {
   button.title = preset.description;
   button.addEventListener('click', () => loadPreset(preset));
   return button;
+}
+
+function basic(elem: HTMLElement): HTMLElement {
+  elem.classList.add('basic');
+  return elem;
+}
+
+function pro(elem: HTMLElement): HTMLElement {
+  elem.classList.add('professional');
+  return elem;
+}
+
+function show(elem: HTMLElement): HTMLElement {
+  elem.classList.remove('hidden');
+  return elem;
+}
+
+function hide(elem: HTMLElement): HTMLElement {
+  elem.classList.add('hidden');
+  return elem;
+}
+
+function setVisible(elem: HTMLElement, visible: boolean): HTMLElement {
+  return visible ? show(elem) : hide(elem);
+}
+
+function tip(children: any, text: string): HTMLElement {
+  let target: HTMLElement;
+  if (children instanceof HTMLElement) {
+    target = children;
+  } else {
+    target = makeSpan(children);
+  }
+  if (text) target.title = text;
+  return target;
+}
+
+function parentLiOf(child: HTMLElement): HTMLLIElement {
+  let parent = child;
+  while (parent && parent.tagName !== 'LI') {
+    parent = parent.parentElement;
+  }
+  return parent as HTMLLIElement;
 }
 
 const dropTarget = document.createElement('div');
@@ -804,6 +828,25 @@ async function main() {
   }
 
   {
+    const showProButton = document.createElement('a');
+    const hideProButton = document.createElement('a');
+
+    showProButton.textContent = '上級者向け設定を表示する';
+    showProButton.href = '#detail';
+
+    hideProButton.textContent = '上級者向け設定を隠す';
+    hideProButton.href = '#';
+
+    showProButton.addEventListener('click', showPro);
+    hideProButton.addEventListener('click', hidePro);
+
+    const section = makeSection([basic(showProButton), pro(hideProButton)]);
+    section.style.textAlign = 'center';
+    section.style.padding = '5px 0';
+    container.appendChild(section);
+  }
+
+  {
     trimCanvas.style.width = '100%';
     trimCanvas.style.height = '400px';
     trimCanvas.style.boxSizing = 'border-box';
@@ -813,17 +856,17 @@ async function main() {
     const pCanvas = makeParagraph(trimCanvas);
     pCanvas.style.textAlign = 'center';
 
-    container.appendChild(makeSection([
+    container.appendChild(pro(makeSection([
       makeFloatList([
         makeHeader('トリミング'),
         tip(resetTrimButton, 'トリミングしていない状態に戻します。'),
       ]),
       pCanvas,
-    ]));
+    ])));
   }
 
   {
-    const section = makeSection(makeFloatList(([
+    const section = pro(makeSection(makeFloatList(([
       makeHeader('透過色'),
       tip(['透過色の扱い: ', alphaProcBox],
           '入力画像に対する透過色の取り扱いを指定します。'),
@@ -833,7 +876,7 @@ async function main() {
       tip(['許容誤差: ', keyToleranceBox],
           'キーカラーからの許容誤差を指定します。'),
       tip(['閾値: ', alphaThreshBox], '透明にするかどうかの閾値を指定します。'),
-    ])));
+    ]))));
     container.appendChild(section);
 
     function updateVisibility() {
@@ -871,7 +914,7 @@ async function main() {
   }
 
   {
-    const p = makeSection(makeFloatList([
+    const section = pro(makeSection(makeFloatList([
       makeHeader('色調補正'),
       tip(['ガンマ: ', gammaBox],
           'デフォルトは 1.0 です。\n空欄にすると、輝度 50% を中心にバランスが取れるように自動調整します。'),
@@ -880,10 +923,10 @@ async function main() {
       tip(['コントラスト: ', contrastBox, '%'],
           'デフォルトは 100% です。\n空欄にすると、階調が失われない範囲でダイナミックレンジが最大となるように自動調整します。'),
       tip([invertBox.parentNode], '各チャネルの値を大小反転します。'),
-    ]));
-    container.appendChild(p);
+    ])));
+    container.appendChild(section);
 
-    p.querySelectorAll('input, select').forEach((el) => {
+    section.querySelectorAll('input, select').forEach((el) => {
       el.addEventListener('change', () => {
         requestQuantize();
       });
@@ -929,14 +972,17 @@ async function main() {
     const section = makeSection([
       makeFloatList([
         makeHeader('量子化'),
-        tip(['フォーマット: ', pixelFormatBox],
-            'ピクセルフォーマットを指定します。'),
-        tip(['丸め方法: ', roundMethodBox],
-            'パレットから色を選択する際の戦略を指定します。\nディザリングを行う場合はあまり関係ありません。'),
-        tip(['色のディザ: ', colorDitherBox],
+        pro(
+            tip(['フォーマット: ', pixelFormatBox],
+                'ピクセルフォーマットを指定します。')),
+        pro(tip(
+            ['丸め方法: ', roundMethodBox],
+            'パレットから色を選択する際の戦略を指定します。\nディザリングを行う場合はあまり関係ありません。')),
+        tip(['ディザリング: ', colorDitherBox],
             'あえてノイズを加えることでできるだけ元画像の色を再現します。'),
-        tip(['透明度のディザ: ', alphaDitherBox],
-            'あえてノイズを加えることでできるだけ元画像の透明度を再現します。'),
+        pro(tip(
+            ['透明度のディザ: ', alphaDitherBox],
+            'あえてノイズを加えることでできるだけ元画像の透明度を再現します。')),
       ]),
       pCanvas,
     ]);
@@ -964,24 +1010,33 @@ async function main() {
     const section = makeSection([
       makeFloatList([
         makeHeader('エンコード'),
-        tip(['パッキング単位: ', packUnitBox],
-            'パッキングの単位を指定します。'),
-        tip(['パッキング方向: ', packDirBox],
+        basic(makeSpan('このフォーマットで生成されます:')),
+        pro(
+            tip(['パッキング単位: ', packUnitBox],
+                'パッキングの単位を指定します。')),
+        pro(tip(
+            ['パッキング方向: ', packDirBox],
             '複数ピクセルをパッキングする場合に、どの方向にパッキングするかを指定します。\n' +
                 '多くの場合横ですが、SSD1306/1309 などの一部の白黒ディスプレイに\n' +
-                '直接転送可能なデータを生成する場合は縦を指定してください。'),
-        tip(['アドレス方向: ', addressingBox],
-            'アドレスのインクリメント方向を指定します。\n通常は水平です。'),
-        tip(['チャネル順: ', channelOrderBox],
-            'RGB のチャネルを並べる順序を指定します。'),
-        tip(['ピクセル順: ', pixelOrderBox],
-            'バイト内のピクセルの順序を指定します。'),
-        tip(['アライメント境界: ', alignBoundaryBox],
-            'アライメントの境界を指定します。'),
-        tip(['アライメント方向: ', alignDirBox],
-            'アライメントの方向を指定します。'),
-        tip(['バイト順: ', byteOrderBox],
-            'ピクセル内のバイトの順序を指定します。'),
+                '直接転送可能なデータを生成する場合は縦を指定してください。')),
+        pro(tip(
+            ['アドレス方向: ', addressingBox],
+            'アドレスのインクリメント方向を指定します。\n通常は水平です。')),
+        pro(
+            tip(['チャネル順: ', channelOrderBox],
+                'RGB のチャネルを並べる順序を指定します。')),
+        pro(
+            tip(['ピクセル順: ', pixelOrderBox],
+                'バイト内のピクセルの順序を指定します。')),
+        pro(
+            tip(['アライメント境界: ', alignBoundaryBox],
+                'アライメントの境界を指定します。')),
+        pro(
+            tip(['アライメント方向: ', alignDirBox],
+                'アライメントの方向を指定します。')),
+        pro(
+            tip(['バイト順: ', byteOrderBox],
+                'ピクセル内のバイトの順序を指定します。')),
       ]),
       pCanvas,
     ]);
@@ -1164,9 +1219,34 @@ async function main() {
     navigator.clipboard.writeText(codeBox.textContent);
   });
 
+  if (window.location.hash === '#detail') {
+    showPro();
+  } else {
+    hidePro();
+  }
+
   // サンプルのロード
   await loadFromString('./img/sample/gradient.png');
 }  // main
+
+function showPro() {
+  document.querySelectorAll('.professional').forEach((el) => {
+    show(el as HTMLElement);
+  });
+  document.querySelectorAll('.basic').forEach((el) => {
+    hide(el as HTMLElement);
+  });
+  updateTrimCanvas();
+}
+
+function hidePro() {
+  document.querySelectorAll('.professional').forEach((el) => {
+    hide(el as HTMLElement);
+  });
+  document.querySelectorAll('.basic').forEach((el) => {
+    show(el as HTMLElement);
+  });
+}
 
 async function loadFromFile(file: File): Promise<void> {
   return new Promise<void>((resolve, reject) => {
@@ -1373,22 +1453,22 @@ function quantize(): void {
     if (widthBox.value && heightBox.value) {
       outW = parseInt(widthBox.value);
       outH = parseInt(heightBox.value);
-      scalingMethodBox.disabled = false;
+      show(parentLiOf(scalingMethodBox));
     } else if (widthBox.value) {
       outW = parseInt(widthBox.value);
       outH = Math.ceil(srcH * (outW / srcW));
-      scalingMethodBox.disabled = true;
+      hide(parentLiOf(scalingMethodBox));
     } else if (heightBox.value) {
       outH = parseInt(heightBox.value);
       outW = Math.ceil(srcW * (outH / srcH));
-      scalingMethodBox.disabled = true;
+      hide(parentLiOf(scalingMethodBox));
     } else {
       if (outW > 256 || outH > 256) {
         const scale = Math.min(256 / outW, 256 / outH);
         outW = Math.floor(outW * scale);
         outH = Math.floor(outH * scale);
       }
-      scalingMethodBox.disabled = true;
+      hide(parentLiOf(scalingMethodBox));
     }
 
     if (outW * outH > 1024 * 1024) {
@@ -1504,11 +1584,11 @@ function quantize(): void {
       }
     }
     if (maxChannelDepth > 1) {
-      roundMethodBox.disabled = false;
+      show(parentLiOf(roundMethodBox));
       roundMethod = parseInt(roundMethodBox.value);
     } else {
       // 均等割りはチャンネル深度が2以上でないと意味がないので無効化
-      roundMethodBox.disabled = true;
+      hide(parentLiOf(roundMethodBox));
     }
 
     const norm = new NormalizedImage(outW, outH, fmt.colorBits.length);
@@ -1640,8 +1720,8 @@ function quantize(): void {
           colReduce ? parseInt(colorDitherBox.value) : DitherMethod.NONE;
       const alpDither: DitherMethod =
           alpReduce ? parseInt(alphaDitherBox.value) : DitherMethod.NONE;
-      colorDitherBox.disabled = !colReduce;
-      alphaDitherBox.disabled = !alpReduce;
+      setVisible(parentLiOf(colorDitherBox), colReduce);
+      setVisible(parentLiOf(alphaDitherBox), alpReduce);
 
       // 量子化
       const colErrDiffuse = colReduce && colDither === DitherMethod.DIFFUSION;
@@ -1950,11 +2030,11 @@ function generateCode(): void {
       }
     }
 
-    alignDirBox.disabled = !alignRequired;
-    channelOrderBox.disabled = numCh <= 1;
-    pixelOrderBox.disabled = pixelsPerFrag <= 1;
-    packDirBox.disabled = pixelsPerFrag <= 1;
-    byteOrderBox.disabled = bytesPerFrag <= 1;
+    setVisible(parentLiOf(alignDirBox), alignRequired);
+    setVisible(parentLiOf(channelOrderBox), numCh > 1);
+    setVisible(parentLiOf(pixelOrderBox), pixelsPerFrag > 1);
+    setVisible(parentLiOf(packDirBox), pixelsPerFrag > 1);
+    setVisible(parentLiOf(byteOrderBox), bytesPerFrag > 1);
 
     // 構造体の図を描画
     {
