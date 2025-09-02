@@ -77,6 +77,21 @@ var __read = (this && this.__read) || function (o, n) {
     return ar;
 };
 var _this = this;
+var StopWatch = /** @class */ (function () {
+    function StopWatch(report) {
+        this.report = report;
+        this.lastTime = performance.now();
+        this.report = report;
+    }
+    StopWatch.prototype.lap = function (label) {
+        var now = performance.now();
+        if (this.report) {
+            console.log("".concat((now - this.lastTime).toFixed(1), " ms: ").concat(label));
+        }
+        this.lastTime = now;
+    };
+    return StopWatch;
+}());
 var ArrayfyError = /** @class */ (function (_super) {
     __extends(ArrayfyError, _super);
     function ArrayfyError(element, message) {
@@ -670,7 +685,24 @@ var indentBox = makeSelectBox([
     { value: 0 /* Indent.TAB */, label: 'タブ' },
 ], 1 /* Indent.SPACE_X2 */);
 var codeBox = document.createElement('pre');
+var showCodeLink = document.createElement('a');
+showCodeLink.href = '#';
+showCodeLink.textContent = '表示する';
+var codeHiddenBox = makeParagraph([
+    '生成されたコードが非常に長いので非表示になっています',
+    document.createElement('br'),
+    showCodeLink,
+]);
+codeHiddenBox.classList.add('codeHiddenBox');
+codeHiddenBox.style.textAlign = 'center';
+showCodeLink.addEventListener('click', function (e) {
+    e.preventDefault();
+    show(codeBox);
+    hide(codeHiddenBox);
+});
 var codeErrorBox = makeParagraph();
+codeErrorBox.style.textAlign = 'center';
+codeErrorBox.style.color = 'red';
 var copyButton = makeButton('コードをコピー');
 var container = null;
 var updateTrimCanvasTimeoutId = -1;
@@ -681,24 +713,28 @@ var trimL = 0, trimT = 0, trimR = 1, trimB = 1;
 var trimUiState = 0 /* TrimState.IDLE */;
 var imageCacheFormat = new PixelFormatInfo(3 /* PixelFormat.RGB565 */);
 var imageCacheData = [null, null, null, null];
+var trimCanvasWidth = 800;
+var trimCanvasHeight = 400;
+var previewCanvasWidth = 800;
+var previewCanvasHeight = 400;
 function main() {
     return __awaiter(this, void 0, void 0, function () {
         function updateVisibility() {
-            parentLiOf(bgColorBox).style.display = 'none';
-            parentLiOf(keyColorBox).style.display = 'none';
-            parentLiOf(keyToleranceBox).style.display = 'none';
-            parentLiOf(alphaThreshBox).style.display = 'none';
+            hide(parentLiOf(bgColorBox));
+            hide(parentLiOf(keyColorBox));
+            hide(parentLiOf(keyToleranceBox));
+            hide(parentLiOf(alphaThreshBox));
             var alphaProc = parseInt(alphaProcBox.value);
             switch (alphaProc) {
                 case 1 /* AlphaProc.FILL */:
-                    parentLiOf(bgColorBox).style.display = 'inline-block';
+                    show(parentLiOf(bgColorBox));
                     break;
                 case 3 /* AlphaProc.SET_KEY_COLOR */:
-                    parentLiOf(keyColorBox).style.display = 'inline-block';
-                    parentLiOf(keyToleranceBox).style.display = 'inline-block';
+                    show(parentLiOf(keyColorBox));
+                    show(parentLiOf(keyToleranceBox));
                     break;
                 case 2 /* AlphaProc.BINARIZE */:
-                    parentLiOf(alphaThreshBox).style.display = 'inline-block';
+                    show(parentLiOf(alphaThreshBox));
                     break;
             }
         }
@@ -775,11 +811,19 @@ function main() {
                         showProButton = document.createElement('a');
                         hideProButton = document.createElement('a');
                         showProButton.textContent = '上級者向け設定を表示する';
-                        showProButton.href = '#detail';
+                        showProButton.href = '#';
                         hideProButton.textContent = '上級者向け設定を隠す';
                         hideProButton.href = '#';
-                        showProButton.addEventListener('click', showPro);
-                        hideProButton.addEventListener('click', hidePro);
+                        showProButton.addEventListener('click', function (e) {
+                            e.preventDefault();
+                            showPro();
+                            history.replaceState(null, '', '#detail');
+                        });
+                        hideProButton.addEventListener('click', function (e) {
+                            e.preventDefault();
+                            hidePro();
+                            history.replaceState(null, '', '#');
+                        });
                         section = makeSection([basic(showProButton), pro(hideProButton)]);
                         section.style.textAlign = 'center';
                         section.style.padding = '5px 0';
@@ -860,9 +904,9 @@ function main() {
                     }
                     {
                         previewCanvas.style.backgroundImage = 'url(./img/checker.png)';
-                        previewCanvas.style.display = 'none';
                         quantizeErrorBox.style.color = 'red';
-                        quantizeErrorBox.style.display = 'none';
+                        hide(previewCanvas);
+                        hide(quantizeErrorBox);
                         pCanvas = makeParagraph([previewCanvas, quantizeErrorBox]);
                         pCanvas.style.height = '400px';
                         pCanvas.style.background = '#444';
@@ -893,7 +937,7 @@ function main() {
                         structCanvas.style.maxWidth = '100%';
                         structErrorBox.style.textAlign = 'center';
                         structErrorBox.style.color = 'red';
-                        structErrorBox.style.display = 'none';
+                        hide(structErrorBox);
                         pCanvas = makeParagraph([structCanvas, structErrorBox]);
                         pCanvas.style.textAlign = 'center';
                         section = makeSection([
@@ -924,11 +968,8 @@ function main() {
                         });
                     }
                     {
-                        codeBox.id = 'arrayCode';
-                        codeBox.classList.add('lang_cpp');
-                        codeErrorBox.style.textAlign = 'center';
-                        codeErrorBox.style.color = 'red';
-                        codeErrorBox.style.display = 'none';
+                        hide(codeHiddenBox);
+                        hide(codeErrorBox);
                         section = makeSection([
                             makeFloatList([
                                 makeHeader('コード生成'),
@@ -938,6 +979,7 @@ function main() {
                                 copyButton,
                             ]),
                             codeBox,
+                            codeHiddenBox,
                             codeErrorBox,
                         ]);
                         container.appendChild(section);
@@ -980,7 +1022,7 @@ function main() {
                             for (var items_2 = __values(items), items_2_1 = items_2.next(); !items_2_1.done; items_2_1 = items_2.next()) {
                                 var item = items_2_1.value;
                                 if (item.kind === 'file') {
-                                    dropTarget.style.display = 'block';
+                                    show(dropTarget);
                                     break;
                                 }
                             }
@@ -996,7 +1038,7 @@ function main() {
                     dropTarget.addEventListener('dragleave', function (e) {
                         e.preventDefault();
                         e.stopPropagation();
-                        dropTarget.style.display = 'none';
+                        hide(dropTarget);
                     });
                     dropTarget.addEventListener('drop', function (e) { return __awaiter(_this, void 0, void 0, function () {
                         var items, items_3, items_3_1, item, e_4_1;
@@ -1006,7 +1048,7 @@ function main() {
                                 case 0:
                                     e.preventDefault();
                                     e.stopPropagation();
-                                    dropTarget.style.display = 'none';
+                                    hide(dropTarget);
                                     items = e.dataTransfer.items;
                                     _b.label = 1;
                                 case 1:
@@ -1170,6 +1212,7 @@ function main() {
                 case 1:
                     // サンプルのロード
                     _a.sent();
+                    onRelayout();
                     return [2 /*return*/];
             }
         });
@@ -1178,9 +1221,11 @@ function main() {
 function showPro() {
     document.querySelectorAll('.professional').forEach(function (el) {
         show(el);
+        onRelayout();
     });
     document.querySelectorAll('.basic').forEach(function (el) {
         hide(el);
+        onRelayout();
     });
     updateTrimCanvas();
 }
@@ -1310,9 +1355,8 @@ function updateTrimCanvas() {
     }
     // キャンバスの論理サイズを見かけ上のサイズに合わせる
     // ただし枠線は含めない
-    var rect = trimCanvas.getBoundingClientRect();
-    trimCanvas.width = rect.width - 2;
-    trimCanvas.height = rect.height - 2;
+    trimCanvas.width = trimCanvasWidth - 2;
+    trimCanvas.height = trimCanvasHeight - 2;
     var canvasW = trimCanvas.width;
     var canvasH = trimCanvas.height;
     var origW = origCanvas.width;
@@ -1381,7 +1425,7 @@ function requestQuantize() {
         return;
     quantizeTimeoutId = setTimeout(function () {
         quantize();
-    }, 300);
+    }, 100);
 }
 function quantize() {
     var e_6, _a, e_7, _b;
@@ -1389,6 +1433,7 @@ function quantize() {
         clearTimeout(quantizeTimeoutId);
         quantizeTimeoutId = -1;
     }
+    var swDetail = new StopWatch(false);
     try {
         var origCtx = origCanvas.getContext('2d', { willReadFrequently: true });
         var srcW = Math.round(trimR - trimL);
@@ -1419,8 +1464,11 @@ function quantize() {
             }
             hide(parentLiOf(scalingMethodBox));
         }
+        if (outW < 1 || outH < 1) {
+            throw new Error('サイズは正の値で指定してください');
+        }
         if (outW * outH > 1024 * 1024) {
-            throw new Error('Too large image.');
+            throw new Error('画像が大きすぎます');
         }
         widthBox.placeholder = '(' + outW + ')';
         heightBox.placeholder = '(' + outH + ')';
@@ -1462,6 +1510,7 @@ function quantize() {
             modCtx.clearRect(0, 0, preModCanvas.width, preModCanvas.height);
             modCtx.drawImage(origCanvas, 0, 0);
         }
+        swDetail.lap('Key Color Process');
         // トリミング + リサイズの適用
         {
             var outCtx = previewCanvas.getContext('2d', { willReadFrequently: true });
@@ -1510,6 +1559,7 @@ function quantize() {
                 outCtx.drawImage(preModCanvas, trimL, trimT, srcW, srcH, dx, dy, dw, dh);
             }
         }
+        swDetail.lap('Trimming and Resize');
         var fmt = new PixelFormatInfo(parseInt(pixelFormatBox.value));
         var maxChannelDepth = 0;
         var roundMethod = 0 /* RoundMethod.NEAREST */;
@@ -1550,6 +1600,7 @@ function quantize() {
             for (var i = 0; i < numAllCh; i++) {
                 outData.push(new Uint8Array(numPixels));
             }
+            swDetail.lap('Prepare Buffers');
             // 正規化 + 自動ガンマ補正用の値収集
             var HISTOGRAM_SIZE = 16;
             var histogram = new Uint32Array(HISTOGRAM_SIZE);
@@ -1574,6 +1625,7 @@ function quantize() {
                 }
                 norm.alpha[i] = a;
             }
+            swDetail.lap('Normalization');
             // ガンマ補正
             {
                 var gamma = 1;
@@ -1593,6 +1645,7 @@ function quantize() {
                     }
                 }
             }
+            swDetail.lap('Gamma Correction');
             // 輝度補正
             {
                 var brightness = 0;
@@ -1612,6 +1665,7 @@ function quantize() {
                     }
                 }
             }
+            swDetail.lap('Brightness Correction');
             // コントラスト補正
             {
                 var contrast = 1;
@@ -1637,12 +1691,14 @@ function quantize() {
                     }
                 }
             }
+            swDetail.lap('Contrast Correction');
             // 階調反転
             if (invertBox.checked) {
                 for (var i = 0; i < norm.color.length; i++) {
                     norm.color[i] = 1 - norm.color[i];
                 }
             }
+            swDetail.lap('Inversion');
             // プレビューのアルファチャンネルを初期化
             for (var i = 0; i < numPixels; i++) {
                 previewData[i * 4 + 3] = 255;
@@ -1670,86 +1726,90 @@ function quantize() {
             setVisible(parentLiOf(colorDitherBox), colReduce);
             setVisible(parentLiOf(alphaDitherBox), alpReduce);
             // 量子化
-            var colErrDiffuse = colReduce && colDither === 1 /* DitherMethod.DIFFUSION */;
-            var alpErrDiffuse = alpReduce && alpDither === 1 /* DitherMethod.DIFFUSION */;
-            var colPalette = new Palette(fmt.colorBits, roundMethod);
-            var alpOutMax = (1 << fmt.alphaBits) - 1;
-            var colOut = new Uint8Array(numColCh);
-            var colErr = new Float32Array(numColCh);
-            var alpErr = new Float32Array(1);
-            for (var y = 0; y < outH; y++) {
-                for (var ix = 0; ix < outW; ix++) {
-                    // 誤差拡散をジグザグに行うため
-                    // ライン毎にスキャン方向を変える
-                    var fwd = y % 2 == 0;
-                    var x = fwd ? ix : (outW - 1 - ix);
-                    var iPix = (y * outW + x);
-                    // アルファチャンネルの値を算出
-                    var transparent = false;
-                    var alpOut = alpOutMax;
-                    if (fmt.hasAlpha) {
-                        var alpNormIn = norm.alpha[iPix];
-                        if (alphaProc == 2 /* AlphaProc.BINARIZE */) {
-                            alpOut = alpNormIn < alphaThresh ? 0 : alpOutMax;
-                            alpErr[0] = 0;
+            {
+                var colErrDiffuse = colReduce && colDither === 1 /* DitherMethod.DIFFUSION */;
+                var alpErrDiffuse = alpReduce && alpDither === 1 /* DitherMethod.DIFFUSION */;
+                var colPalette = new Palette(fmt.colorBits, roundMethod);
+                var alpOutMax = (1 << fmt.alphaBits) - 1;
+                var colOut = new Uint8Array(numColCh);
+                var colErr = new Float32Array(numColCh);
+                var alpErr = new Float32Array(1);
+                for (var y = 0; y < outH; y++) {
+                    for (var ix = 0; ix < outW; ix++) {
+                        // 誤差拡散をジグザグに行うため
+                        // ライン毎にスキャン方向を変える
+                        var fwd = y % 2 == 0;
+                        var x = fwd ? ix : (outW - 1 - ix);
+                        var iPix = (y * outW + x);
+                        // アルファチャンネルの値を算出
+                        var transparent = false;
+                        var alpOut = alpOutMax;
+                        if (fmt.hasAlpha) {
+                            var alpNormIn = norm.alpha[iPix];
+                            if (alphaProc == 2 /* AlphaProc.BINARIZE */) {
+                                alpOut = alpNormIn < alphaThresh ? 0 : alpOutMax;
+                                alpErr[0] = 0;
+                            }
+                            else {
+                                alpOut = Math.round(alpNormIn * alpOutMax);
+                                var alpNormOut = alpOut / alpOutMax;
+                                alpErr[0] = alpNormIn - alpNormOut;
+                            }
+                            transparent = alpOut == 0;
+                        }
+                        // パレットから最も近い色を選択
+                        colPalette.nearest(norm.color, iPix * numColCh, colOut, 0, colErr);
+                        // 出力
+                        for (var ch = 0; ch < numColCh; ch++) {
+                            outData[ch][iPix] = colOut[ch];
+                        }
+                        if (fmt.hasAlpha) {
+                            outData[numColCh][iPix] = alpOut;
+                        }
+                        // プレビュー用の色生成
+                        if (fmt.colorSpace === 0 /* ColorSpace.GRAYSCALE */) {
+                            var gray = Math.round(colOut[0] * 255 / colPalette.outMax[0]);
+                            for (var ch = 0; ch < 3; ch++) {
+                                previewData[iPix * 4 + ch] = gray;
+                            }
                         }
                         else {
-                            alpOut = Math.round(alpNormIn * alpOutMax);
-                            var alpNormOut = alpOut / alpOutMax;
-                            alpErr[0] = alpNormIn - alpNormOut;
+                            for (var ch = 0; ch < 3; ch++) {
+                                var outMax = colPalette.outMax[ch];
+                                previewData[iPix * 4 + ch] =
+                                    Math.round(colOut[ch] * 255 / outMax);
+                            }
                         }
-                        transparent = alpOut == 0;
-                    }
-                    // パレットから最も近い色を選択
-                    colPalette.nearest(norm.color, iPix * numColCh, colOut, 0, colErr);
-                    // 出力
-                    for (var ch = 0; ch < numColCh; ch++) {
-                        outData[ch][iPix] = colOut[ch];
-                    }
-                    if (fmt.hasAlpha) {
-                        outData[numColCh][iPix] = alpOut;
-                    }
-                    // プレビュー用の色生成
-                    if (fmt.colorSpace === 0 /* ColorSpace.GRAYSCALE */) {
-                        var gray = Math.round(colOut[0] * 255 / colPalette.outMax[0]);
-                        for (var ch = 0; ch < 3; ch++) {
-                            previewData[iPix * 4 + ch] = gray;
+                        // プレビュー用のアルファ生成
+                        if (fmt.hasAlpha) {
+                            previewData[iPix * 4 + 3] = Math.round(alpOut * 255 / alpOutMax);
                         }
-                    }
-                    else {
-                        for (var ch = 0; ch < 3; ch++) {
-                            var outMax = colPalette.outMax[ch];
-                            previewData[iPix * 4 + ch] =
-                                Math.round(colOut[ch] * 255 / outMax);
+                        if (alpErrDiffuse && fmt.hasAlpha) {
+                            norm.diffuseAlphaError(alpErr, x, y, fwd);
                         }
-                    }
-                    // プレビュー用のアルファ生成
-                    if (fmt.hasAlpha) {
-                        previewData[iPix * 4 + 3] = Math.round(alpOut * 255 / alpOutMax);
-                    }
-                    if (alpErrDiffuse && fmt.hasAlpha) {
-                        norm.diffuseAlphaError(alpErr, x, y, fwd);
-                    }
-                    if (colErrDiffuse && !transparent) {
-                        // 誤差拡散
-                        norm.diffuseColorError(colErr, x, y, fwd);
-                    }
-                } // for ix
-            } // for y
+                        if (colErrDiffuse && !transparent) {
+                            // 誤差拡散
+                            norm.diffuseColorError(colErr, x, y, fwd);
+                        }
+                    } // for ix
+                } // for y
+            }
+            swDetail.lap('Quantization');
             imageCacheFormat = fmt;
             imageCacheData = outData;
             previewImageData.data.set(previewData);
             previewCtx.putImageData(previewImageData, 0, 0);
-            previewCanvas.style.display = 'inline-block';
-            quantizeErrorBox.style.display = 'none';
+            show(previewCanvas);
+            hide(quantizeErrorBox);
+            swDetail.lap('Update Preview');
             generateCode();
+            swDetail.lap('Entire Code Generation');
         }
         // 小さい画像はプレビューを大きく表示
         {
             var borderWidth = 1;
-            var rect = previewCanvas.parentElement.getBoundingClientRect();
-            var viewW = rect.width - (borderWidth * 2);
-            var viewH = rect.height - (borderWidth * 2);
+            var viewW = previewCanvasWidth - (borderWidth * 2);
+            var viewH = previewCanvasHeight - (borderWidth * 2);
             var zoom_1 = Math.min(viewW / outW, viewH / outH);
             if (zoom_1 >= 1) {
                 zoom_1 = Math.max(1, Math.floor(zoom_1));
@@ -1761,11 +1821,13 @@ function quantize() {
             previewCanvas.style.marginTop = "".concat(Math.floor((viewH - canvasH) / 2), "px");
             previewCanvas.style.imageRendering = 'pixelated';
         }
+        swDetail.lap('Fix Preview Size');
     }
     catch (error) {
-        previewCanvas.style.display = 'none';
-        codeBox.style.display = 'none';
-        quantizeErrorBox.style.display = 'inline';
+        hide(previewCanvas);
+        hide(codeBox);
+        hide(codeHiddenBox);
+        show(quantizeErrorBox);
         quantizeErrorBox.textContent = error.message;
     }
 }
@@ -1802,13 +1864,16 @@ function requestGenerateCode() {
     generateCodeTimeoutId = setTimeout(function () {
         generateCode();
         generateCodeTimeoutId = -1;
-    }, 300);
+    }, 100);
 }
 function generateCode() {
+    var e_8, _a;
+    var swDetail = new StopWatch(false);
     if (!imageCacheData) {
         codeBox.textContent = '';
-        codeBox.style.display = 'block';
-        codeErrorBox.style.display = 'none';
+        show(codeBox);
+        hide(codeHiddenBox);
+        hide(codeErrorBox);
         return;
     }
     try {
@@ -1823,6 +1888,7 @@ function generateCode() {
         var alignLeft = parseInt(alignDirBox.value) == 0 /* AlignDir.HIGHER */;
         var vertAddr = parseInt(addressingBox.value) == 1 /* ScanDir.VERTICAL */;
         var numCh = fmt.numTotalChannels;
+        swDetail.lap('Channel Order Determination');
         // チャネル順序の決定
         var chMap = void 0;
         switch (fmt.colorSpace) {
@@ -1880,6 +1946,7 @@ function generateCode() {
                 chBits[i] = tmp[chMap[i]];
             }
         }
+        swDetail.lap('Channel Bit Depth Determination');
         // 構造体の構造を決定
         var chPos = new Uint8Array(numCh); // チャネル毎のビット位置
         var pixelStride = 0; // ピクセルあたりのビット数 (パディング含む)
@@ -1950,11 +2017,13 @@ function generateCode() {
                     throw new Error('Unsupported PackUnit');
             }
         }
+        swDetail.lap('Fragment Structure Determination');
         setVisible(parentLiOf(alignDirBox), alignRequired);
         setVisible(parentLiOf(channelOrderBox), numCh > 1);
         setVisible(parentLiOf(pixelOrderBox), pixelsPerFrag > 1);
         setVisible(parentLiOf(packDirBox), pixelsPerFrag > 1);
         setVisible(parentLiOf(byteOrderBox), bytesPerFrag > 1);
+        swDetail.lap('UI Update');
         // 構造体の図を描画
         {
             var numCols = bytesPerFrag * 8;
@@ -2046,6 +2115,7 @@ function generateCode() {
                 }
             }
         }
+        swDetail.lap('Table Draw');
         // エンコードパラメータ
         var fragWidth = vertPack ? 1 : pixelsPerFrag;
         var fragHeight = vertPack ? pixelsPerFrag : 1;
@@ -2100,6 +2170,7 @@ function generateCode() {
                 }
             }
         } // for packIndex
+        swDetail.lap('Array Generation');
         try {
             // 列数決定
             var arrayCols = parseInt(codeColsBox.value);
@@ -2120,16 +2191,16 @@ function generateCode() {
             }
             var codeUnit = parseInt(codeUnitBox.value);
             // コード生成
-            var code = '';
+            var codeBuff = [];
             if (codeUnit >= 2 /* CodeUnit.FILE */) {
-                code += "#pragma once\n";
-                code += "\n";
-                code += "#include <stdint.h>\n";
-                code += "\n";
+                codeBuff.push("#pragma once\n");
+                codeBuff.push("\n");
+                codeBuff.push("#include <stdint.h>\n");
+                codeBuff.push("\n");
             }
             if (codeUnit >= 1 /* CodeUnit.ARRAY_DEF */) {
-                code += "// ".concat(width, "x").concat(height, "px, ").concat(imageCacheFormat.toString(), "\n");
-                code += "// ";
+                codeBuff.push("// ".concat(width, "x").concat(height, "px, ").concat(imageCacheFormat.toString(), "\n"));
+                codeBuff.push("// ");
                 if (numCh > 1) {
                     var chOrderStr = '';
                     for (var i = 0; i < numCh; i++) {
@@ -2137,53 +2208,85 @@ function generateCode() {
                             chOrderStr += ':';
                         chOrderStr += fmt.channelName(chMap[numCh - 1 - i]);
                     }
-                    code += chOrderStr + ', ';
+                    codeBuff.push(chOrderStr + ', ');
                 }
                 if (pixelsPerFrag > 1) {
-                    code += (msb1st ? 'MSB' : 'LSB') + ' First, ';
-                    code += (vertPack ? 'Vertical' : 'Horizontal') + ' Packing, ';
+                    codeBuff.push((msb1st ? 'MSB' : 'LSB') + ' First, ');
+                    codeBuff.push((vertPack ? 'Vertical' : 'Horizontal') + ' Packing, ');
                 }
                 if (bytesPerFrag > 1) {
-                    code += (bigEndian ? 'Big' : 'Little') + ' Endian, ';
+                    codeBuff.push((bigEndian ? 'Big' : 'Little') + ' Endian, ');
                 }
-                code += "".concat(vertAddr ? 'Vertical' : 'Horizontal', " Adressing\n");
-                code += "// ".concat(arrayData.length, " Bytes\n");
-                code += 'const uint8_t imageArray[] = {\n';
+                codeBuff.push("".concat(vertAddr ? 'Vertical' : 'Horizontal', " Adressing\n"));
+                codeBuff.push("// ".concat(arrayData.length, " Bytes\n"));
+                codeBuff.push('const uint8_t imageArray[] = {\n');
+            }
+            swDetail.lap('Code Generation (Before Array Elements)');
+            var hexTable = [];
+            for (var i = 0; i < 256; i++) {
+                hexTable.push('0x' + i.toString(16).padStart(2, '0') + ',');
             }
             for (var i = 0; i < arrayData.length; i++) {
                 if (i % arrayCols == 0)
-                    code += indent;
-                code += '0x' + arrayData[i].toString(16).padStart(2, '0') + ',';
+                    codeBuff.push(indent);
+                codeBuff.push(hexTable[arrayData[i]]);
                 if ((i + 1) % arrayCols == 0 || i + 1 == arrayData.length) {
-                    code += '\n';
+                    codeBuff.push('\n');
                 }
                 else {
-                    code += ' ';
+                    codeBuff.push(' ');
                 }
             }
             if (codeUnit >= 1 /* CodeUnit.ARRAY_DEF */) {
-                code += '};\n';
+                codeBuff.push('};\n');
             }
-            codeBox.textContent = code;
-            codeBox.style.display = 'block';
-            codeErrorBox.style.display = 'none';
+            swDetail.lap('Code Generation (After Array Elements)');
+            var numLines = 0;
+            try {
+                for (var codeBuff_1 = __values(codeBuff), codeBuff_1_1 = codeBuff_1.next(); !codeBuff_1_1.done; codeBuff_1_1 = codeBuff_1.next()) {
+                    var s = codeBuff_1_1.value;
+                    if (s.endsWith('\n'))
+                        numLines++;
+                }
+            }
+            catch (e_8_1) { e_8 = { error: e_8_1 }; }
+            finally {
+                try {
+                    if (codeBuff_1_1 && !codeBuff_1_1.done && (_a = codeBuff_1.return)) _a.call(codeBuff_1);
+                }
+                finally { if (e_8) throw e_8.error; }
+            }
+            codeBox.textContent = codeBuff.join('');
+            if (numLines < 1000) {
+                show(codeBox);
+                hide(codeHiddenBox);
+            }
+            else {
+                showCodeLink.textContent =
+                    "\u8868\u793A\u3059\u308B (".concat(numLines, " \u884C)");
+                hide(codeBox);
+                show(codeHiddenBox);
+            }
+            hide(codeErrorBox);
         }
         catch (error) {
-            codeBox.style.display = 'none';
             codeErrorBox.textContent = error.message;
-            codeErrorBox.style.display = 'block';
+            hide(codeBox);
+            hide(codeHiddenBox);
+            show(codeErrorBox);
         }
-        structCanvas.style.display = 'inline-block';
-        structErrorBox.style.display = 'none';
+        show(structCanvas);
+        hide(structErrorBox);
     }
     catch (error) {
         codeBox.textContent = '';
-        codeBox.style.display = 'block';
-        codeErrorBox.style.display = 'none';
-        structCanvas.style.display = 'none';
         structErrorBox.textContent = error.message;
-        structErrorBox.style.display = 'block';
+        show(codeBox);
+        hide(codeHiddenBox);
+        hide(codeErrorBox);
+        show(structErrorBox);
     }
+    swDetail.lap('UI Update');
 }
 function clip(min, max, val) {
     if (val < min)
@@ -2222,6 +2325,17 @@ document.addEventListener('DOMContentLoaded', function (e) { return __awaiter(_t
         }
     });
 }); });
-window.addEventListener('resize', function (e) {
+function onRelayout() {
+    {
+        var rect = trimCanvas.getBoundingClientRect();
+        trimCanvasWidth = rect.width;
+        trimCanvasHeight = rect.height;
+    }
+    {
+        var rect = previewCanvas.parentElement.getBoundingClientRect();
+        previewCanvasWidth = rect.width;
+        previewCanvasHeight = rect.height;
+    }
     requestUpdateTrimCanvas();
-});
+}
+window.addEventListener('resize', function (e) { return onRelayout(); });

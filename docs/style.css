@@ -123,11 +123,15 @@ code {
   font-family: Consolas, 'Courier New', Courier, monospace;
 }
 
-pre {
+pre,
+.codeHiddenBox {
   border: solid 1px #ccc;
   box-sizing: border-box;
   padding: 1ex 1em;
   background: #f8f8f8;
+}
+
+pre {
   max-height: 50vh;
   min-height: 100px;
   overflow: scroll;

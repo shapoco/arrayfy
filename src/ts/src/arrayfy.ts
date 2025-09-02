@@ -115,6 +115,22 @@ type Rect = {
   height: number,
 };
 
+class StopWatch {
+  lastTime: number;
+  constructor(public report: boolean) {
+    this.lastTime = performance.now();
+    this.report = report;
+  }
+
+  lap(label: string) {
+    const now = performance.now();
+    if (this.report) {
+      console.log(`${(now - this.lastTime).toFixed(1)} ms: ${label}`);
+    }
+    this.lastTime = now;
+  }
+}
+
 class ArrayfyError extends Error {
   constructor(public element: HTMLElement, message: string) {
     super(message);
@@ -782,8 +798,31 @@ const indentBox = makeSelectBox(
       {value: Indent.TAB, label: 'タブ'},
     ],
     Indent.SPACE_X2);
+
 const codeBox = document.createElement('pre');
+
+const showCodeLink = document.createElement('a');
+showCodeLink.href = '#';
+showCodeLink.textContent = '表示する';
+
+const codeHiddenBox = makeParagraph([
+  '生成されたコードが非常に長いので非表示になっています',
+  document.createElement('br'),
+  showCodeLink,
+]);
+codeHiddenBox.classList.add('codeHiddenBox');
+codeHiddenBox.style.textAlign = 'center';
+
+showCodeLink.addEventListener('click', (e) => {
+  e.preventDefault();
+  show(codeBox);
+  hide(codeHiddenBox);
+});
+
 const codeErrorBox = makeParagraph();
+codeErrorBox.style.textAlign = 'center';
+codeErrorBox.style.color = 'red';
+
 const copyButton = makeButton('コードをコピー');
 
 let container: HTMLDivElement = null;
@@ -799,6 +838,12 @@ let trimUiState = TrimState.IDLE;
 
 let imageCacheFormat = new PixelFormatInfo(PixelFormat.RGB565);
 let imageCacheData: Uint8Array[] = [null, null, null, null];
+
+let trimCanvasWidth = 800;
+let trimCanvasHeight = 400;
+
+let previewCanvasWidth = 800;
+let previewCanvasHeight = 400;
 
 async function main() {
   container = document.querySelector('#arrayfyContainer');
@@ -878,13 +923,21 @@ async function main() {
     const hideProButton = document.createElement('a');
 
     showProButton.textContent = '上級者向け設定を表示する';
-    showProButton.href = '#detail';
+    showProButton.href = '#';
 
     hideProButton.textContent = '上級者向け設定を隠す';
     hideProButton.href = '#';
 
-    showProButton.addEventListener('click', showPro);
-    hideProButton.addEventListener('click', hidePro);
+    showProButton.addEventListener('click', (e) => {
+      e.preventDefault();
+      showPro();
+      history.replaceState(null, '', '#detail');
+    });
+    hideProButton.addEventListener('click', (e) => {
+      e.preventDefault();
+      hidePro();
+      history.replaceState(null, '', '#');
+    });
 
     const section = makeSection([basic(showProButton), pro(hideProButton)]);
     section.style.textAlign = 'center';
@@ -926,21 +979,21 @@ async function main() {
     container.appendChild(section);
 
     function updateVisibility() {
-      parentLiOf(bgColorBox).style.display = 'none';
-      parentLiOf(keyColorBox).style.display = 'none';
-      parentLiOf(keyToleranceBox).style.display = 'none';
-      parentLiOf(alphaThreshBox).style.display = 'none';
+      hide(parentLiOf(bgColorBox));
+      hide(parentLiOf(keyColorBox));
+      hide(parentLiOf(keyToleranceBox));
+      hide(parentLiOf(alphaThreshBox));
       const alphaProc: AlphaProc = parseInt(alphaProcBox.value);
       switch (alphaProc) {
         case AlphaProc.FILL:
-          parentLiOf(bgColorBox).style.display = 'inline-block';
+          show(parentLiOf(bgColorBox));
           break;
         case AlphaProc.SET_KEY_COLOR:
-          parentLiOf(keyColorBox).style.display = 'inline-block';
-          parentLiOf(keyToleranceBox).style.display = 'inline-block';
+          show(parentLiOf(keyColorBox));
+          show(parentLiOf(keyToleranceBox));
           break;
         case AlphaProc.BINARIZE:
-          parentLiOf(alphaThreshBox).style.display = 'inline-block';
+          show(parentLiOf(alphaThreshBox));
           break;
       }
     }
@@ -1004,9 +1057,9 @@ async function main() {
 
   {
     previewCanvas.style.backgroundImage = 'url(./img/checker.png)';
-    previewCanvas.style.display = 'none';
     quantizeErrorBox.style.color = 'red';
-    quantizeErrorBox.style.display = 'none';
+    hide(previewCanvas);
+    hide(quantizeErrorBox);
 
     const pCanvas = makeParagraph([previewCanvas, quantizeErrorBox]);
     pCanvas.style.height = '400px';
@@ -1048,7 +1101,7 @@ async function main() {
     structCanvas.style.maxWidth = '100%';
     structErrorBox.style.textAlign = 'center';
     structErrorBox.style.color = 'red';
-    structErrorBox.style.display = 'none';
+    hide(structErrorBox);
 
     const pCanvas = makeParagraph([structCanvas, structErrorBox]);
     pCanvas.style.textAlign = 'center';
@@ -1100,11 +1153,8 @@ async function main() {
   }
 
   {
-    codeBox.id = 'arrayCode';
-    codeBox.classList.add('lang_cpp');
-    codeErrorBox.style.textAlign = 'center';
-    codeErrorBox.style.color = 'red';
-    codeErrorBox.style.display = 'none';
+    hide(codeHiddenBox);
+    hide(codeErrorBox);
 
     const section = makeSection([
       makeFloatList([
@@ -1116,6 +1166,7 @@ async function main() {
         copyButton,
       ]),
       codeBox,
+      codeHiddenBox,
       codeErrorBox,
     ]);
 
@@ -1150,7 +1201,7 @@ async function main() {
     const items = e.dataTransfer.items;
     for (const item of items) {
       if (item.kind === 'file') {
-        dropTarget.style.display = 'block';
+        show(dropTarget);
         break;
       }
     }
@@ -1158,12 +1209,12 @@ async function main() {
   dropTarget.addEventListener('dragleave', (e) => {
     e.preventDefault();
     e.stopPropagation();
-    dropTarget.style.display = 'none';
+    hide(dropTarget);
   });
   dropTarget.addEventListener('drop', async (e) => {
     e.preventDefault();
     e.stopPropagation();
-    dropTarget.style.display = 'none';
+    hide(dropTarget);
     const items = e.dataTransfer.items;
     for (const item of items) {
       if (item.kind === 'file') {
@@ -1273,19 +1324,23 @@ async function main() {
 
   // サンプルのロード
   await loadFromString('./img/sample/gradient.png');
+
+  onRelayout();
 }  // main
 
-function showPro() {
+function showPro(): void {
   document.querySelectorAll('.professional').forEach((el) => {
     show(el as HTMLElement);
+    onRelayout();
   });
   document.querySelectorAll('.basic').forEach((el) => {
     hide(el as HTMLElement);
+    onRelayout();
   });
   updateTrimCanvas();
 }
 
-function hidePro() {
+function hidePro(): void {
   document.querySelectorAll('.professional').forEach((el) => {
     hide(el as HTMLElement);
   });
@@ -1399,9 +1454,8 @@ function updateTrimCanvas(): void {
 
   // キャンバスの論理サイズを見かけ上のサイズに合わせる
   // ただし枠線は含めない
-  const rect = trimCanvas.getBoundingClientRect();
-  trimCanvas.width = rect.width - 2;
-  trimCanvas.height = rect.height - 2;
+  trimCanvas.width = trimCanvasWidth - 2;
+  trimCanvas.height = trimCanvasHeight - 2;
 
   const canvasW = trimCanvas.width;
   const canvasH = trimCanvas.height;
@@ -1478,7 +1532,7 @@ function requestQuantize(): void {
   if (quantizeTimeoutId >= 0) return;
   quantizeTimeoutId = setTimeout(() => {
     quantize();
-  }, 300);
+  }, 100);
 }
 
 function quantize(): void {
@@ -1486,6 +1540,8 @@ function quantize(): void {
     clearTimeout(quantizeTimeoutId);
     quantizeTimeoutId = -1;
   }
+
+  const swDetail = new StopWatch(false);
 
   try {
     const origCtx = origCanvas.getContext('2d', {willReadFrequently: true});
@@ -1517,8 +1573,11 @@ function quantize(): void {
       hide(parentLiOf(scalingMethodBox));
     }
 
+    if (outW < 1 || outH < 1) {
+      throw new Error('サイズは正の値で指定してください');
+    }
     if (outW * outH > 1024 * 1024) {
-      throw new Error('Too large image.');
+      throw new Error('画像が大きすぎます');
     }
 
     widthBox.placeholder = '(' + outW + ')';
@@ -1570,6 +1629,8 @@ function quantize(): void {
       modCtx.drawImage(origCanvas, 0, 0);
     }
 
+    swDetail.lap('Key Color Process');
+
     // トリミング + リサイズの適用
     {
       const outCtx = previewCanvas.getContext('2d', {willReadFrequently: true});
@@ -1620,6 +1681,8 @@ function quantize(): void {
       }
     }
 
+    swDetail.lap('Trimming and Resize');
+
     const fmt = new PixelFormatInfo(parseInt(pixelFormatBox.value));
 
     let maxChannelDepth = 0;
@@ -1656,6 +1719,8 @@ function quantize(): void {
         outData.push(new Uint8Array(numPixels));
       }
 
+      swDetail.lap('Prepare Buffers');
+
       // 正規化 + 自動ガンマ補正用の値収集
       const HISTOGRAM_SIZE = 16;
       const histogram = new Uint32Array(HISTOGRAM_SIZE);
@@ -1681,6 +1746,8 @@ function quantize(): void {
         norm.alpha[i] = a;
       }
 
+      swDetail.lap('Normalization');
+
       // ガンマ補正
       {
         let gamma = 1;
@@ -1700,6 +1767,8 @@ function quantize(): void {
         }
       }
 
+      swDetail.lap('Gamma Correction');
+
       // 輝度補正
       {
         let brightness = 0;
@@ -1718,6 +1787,8 @@ function quantize(): void {
           }
         }
       }
+
+      swDetail.lap('Brightness Correction');
 
       // コントラスト補正
       {
@@ -1743,12 +1814,16 @@ function quantize(): void {
         }
       }
 
+      swDetail.lap('Contrast Correction');
+
       // 階調反転
       if (invertBox.checked) {
         for (let i = 0; i < norm.color.length; i++) {
           norm.color[i] = 1 - norm.color[i];
         }
       }
+
+      swDetail.lap('Inversion');
 
       // プレビューのアルファチャンネルを初期化
       for (let i = 0; i < numPixels; i++) {
@@ -1770,77 +1845,81 @@ function quantize(): void {
       setVisible(parentLiOf(alphaDitherBox), alpReduce);
 
       // 量子化
-      const colErrDiffuse = colReduce && colDither === DitherMethod.DIFFUSION;
-      const alpErrDiffuse = alpReduce && alpDither === DitherMethod.DIFFUSION;
-      const colPalette = new Palette(fmt.colorBits, roundMethod);
-      const alpOutMax = (1 << fmt.alphaBits) - 1;
-      const colOut = new Uint8Array(numColCh);
-      const colErr = new Float32Array(numColCh);
-      const alpErr = new Float32Array(1);
-      for (let y = 0; y < outH; y++) {
-        for (let ix = 0; ix < outW; ix++) {
-          // 誤差拡散をジグザグに行うため
-          // ライン毎にスキャン方向を変える
-          const fwd = y % 2 == 0;
-          const x = fwd ? ix : (outW - 1 - ix);
-          const iPix = (y * outW + x);
+      {
+        const colErrDiffuse = colReduce && colDither === DitherMethod.DIFFUSION;
+        const alpErrDiffuse = alpReduce && alpDither === DitherMethod.DIFFUSION;
+        const colPalette = new Palette(fmt.colorBits, roundMethod);
+        const alpOutMax = (1 << fmt.alphaBits) - 1;
+        const colOut = new Uint8Array(numColCh);
+        const colErr = new Float32Array(numColCh);
+        const alpErr = new Float32Array(1);
+        for (let y = 0; y < outH; y++) {
+          for (let ix = 0; ix < outW; ix++) {
+            // 誤差拡散をジグザグに行うため
+            // ライン毎にスキャン方向を変える
+            const fwd = y % 2 == 0;
+            const x = fwd ? ix : (outW - 1 - ix);
+            const iPix = (y * outW + x);
 
-          // アルファチャンネルの値を算出
-          let transparent = false;
-          let alpOut = alpOutMax;
-          if (fmt.hasAlpha) {
-            const alpNormIn = norm.alpha[iPix];
-            if (alphaProc == AlphaProc.BINARIZE) {
-              alpOut = alpNormIn < alphaThresh ? 0 : alpOutMax;
-              alpErr[0] = 0;
+            // アルファチャンネルの値を算出
+            let transparent = false;
+            let alpOut = alpOutMax;
+            if (fmt.hasAlpha) {
+              const alpNormIn = norm.alpha[iPix];
+              if (alphaProc == AlphaProc.BINARIZE) {
+                alpOut = alpNormIn < alphaThresh ? 0 : alpOutMax;
+                alpErr[0] = 0;
+              } else {
+                alpOut = Math.round(alpNormIn * alpOutMax);
+                const alpNormOut = alpOut / alpOutMax;
+                alpErr[0] = alpNormIn - alpNormOut;
+              }
+              transparent = alpOut == 0;
+            }
+
+            // パレットから最も近い色を選択
+            colPalette.nearest(norm.color, iPix * numColCh, colOut, 0, colErr);
+
+            // 出力
+            for (let ch = 0; ch < numColCh; ch++) {
+              outData[ch][iPix] = colOut[ch];
+            }
+            if (fmt.hasAlpha) {
+              outData[numColCh][iPix] = alpOut;
+            }
+
+            // プレビュー用の色生成
+            if (fmt.colorSpace === ColorSpace.GRAYSCALE) {
+              const gray = Math.round(colOut[0] * 255 / colPalette.outMax[0]);
+              for (let ch = 0; ch < 3; ch++) {
+                previewData[iPix * 4 + ch] = gray;
+              }
             } else {
-              alpOut = Math.round(alpNormIn * alpOutMax);
-              const alpNormOut = alpOut / alpOutMax;
-              alpErr[0] = alpNormIn - alpNormOut;
+              for (let ch = 0; ch < 3; ch++) {
+                const outMax = colPalette.outMax[ch];
+                previewData[iPix * 4 + ch] =
+                    Math.round(colOut[ch] * 255 / outMax);
+              }
             }
-            transparent = alpOut == 0;
-          }
 
-          // パレットから最も近い色を選択
-          colPalette.nearest(norm.color, iPix * numColCh, colOut, 0, colErr);
-
-          // 出力
-          for (let ch = 0; ch < numColCh; ch++) {
-            outData[ch][iPix] = colOut[ch];
-          }
-          if (fmt.hasAlpha) {
-            outData[numColCh][iPix] = alpOut;
-          }
-
-          // プレビュー用の色生成
-          if (fmt.colorSpace === ColorSpace.GRAYSCALE) {
-            const gray = Math.round(colOut[0] * 255 / colPalette.outMax[0]);
-            for (let ch = 0; ch < 3; ch++) {
-              previewData[iPix * 4 + ch] = gray;
+            // プレビュー用のアルファ生成
+            if (fmt.hasAlpha) {
+              previewData[iPix * 4 + 3] = Math.round(alpOut * 255 / alpOutMax);
             }
-          } else {
-            for (let ch = 0; ch < 3; ch++) {
-              const outMax = colPalette.outMax[ch];
-              previewData[iPix * 4 + ch] =
-                  Math.round(colOut[ch] * 255 / outMax);
+
+            if (alpErrDiffuse && fmt.hasAlpha) {
+              norm.diffuseAlphaError(alpErr, x, y, fwd);
             }
-          }
 
-          // プレビュー用のアルファ生成
-          if (fmt.hasAlpha) {
-            previewData[iPix * 4 + 3] = Math.round(alpOut * 255 / alpOutMax);
-          }
+            if (colErrDiffuse && !transparent) {
+              // 誤差拡散
+              norm.diffuseColorError(colErr, x, y, fwd);
+            }
+          }  // for ix
+        }  // for y
+      }
 
-          if (alpErrDiffuse && fmt.hasAlpha) {
-            norm.diffuseAlphaError(alpErr, x, y, fwd);
-          }
-
-          if (colErrDiffuse && !transparent) {
-            // 誤差拡散
-            norm.diffuseColorError(colErr, x, y, fwd);
-          }
-        }  // for ix
-      }  // for y
+      swDetail.lap('Quantization');
 
       imageCacheFormat = fmt;
       imageCacheData = outData;
@@ -1848,18 +1927,21 @@ function quantize(): void {
       previewImageData.data.set(previewData);
       previewCtx.putImageData(previewImageData, 0, 0);
 
-      previewCanvas.style.display = 'inline-block';
-      quantizeErrorBox.style.display = 'none';
+      show(previewCanvas);
+      hide(quantizeErrorBox);
+
+      swDetail.lap('Update Preview');
 
       generateCode();
+
+      swDetail.lap('Entire Code Generation');
     }
 
     // 小さい画像はプレビューを大きく表示
     {
       const borderWidth = 1;
-      const rect = previewCanvas.parentElement.getBoundingClientRect();
-      const viewW = rect.width - (borderWidth * 2);
-      const viewH = rect.height - (borderWidth * 2);
+      const viewW = previewCanvasWidth - (borderWidth * 2);
+      const viewH = previewCanvasHeight - (borderWidth * 2);
       let zoom = Math.min(viewW / outW, viewH / outH);
       if (zoom >= 1) {
         zoom = Math.max(1, Math.floor(zoom));
@@ -1871,10 +1953,14 @@ function quantize(): void {
       previewCanvas.style.marginTop = `${Math.floor((viewH - canvasH) / 2)}px`;
       previewCanvas.style.imageRendering = 'pixelated';
     }
+
+    swDetail.lap('Fix Preview Size');
+
   } catch (error) {
-    previewCanvas.style.display = 'none';
-    codeBox.style.display = 'none';
-    quantizeErrorBox.style.display = 'inline';
+    hide(previewCanvas);
+    hide(codeBox);
+    hide(codeHiddenBox);
+    show(quantizeErrorBox);
     quantizeErrorBox.textContent = error.message;
   }
 }
@@ -1913,14 +1999,17 @@ function requestGenerateCode(): void {
   generateCodeTimeoutId = setTimeout(() => {
     generateCode();
     generateCodeTimeoutId = -1;
-  }, 300);
+  }, 100);
 }
 
 function generateCode(): void {
+  const swDetail = new StopWatch(false);
+
   if (!imageCacheData) {
     codeBox.textContent = '';
-    codeBox.style.display = 'block';
-    codeErrorBox.style.display = 'none';
+    show(codeBox);
+    hide(codeHiddenBox);
+    hide(codeErrorBox);
     return;
   }
 
@@ -1938,6 +2027,7 @@ function generateCode(): void {
     const vertAddr = parseInt(addressingBox.value) == ScanDir.VERTICAL;
 
     const numCh = fmt.numTotalChannels;
+    swDetail.lap('Channel Order Determination');
 
     // チャネル順序の決定
     let chMap: Int32Array;
@@ -1996,6 +2086,7 @@ function generateCode(): void {
         chBits[i] = tmp[chMap[i]];
       }
     }
+    swDetail.lap('Channel Bit Depth Determination');
 
     // 構造体の構造を決定
     let chPos = new Uint8Array(numCh);  // チャネル毎のビット位置
@@ -2078,12 +2169,15 @@ function generateCode(): void {
           throw new Error('Unsupported PackUnit');
       }
     }
+    swDetail.lap('Fragment Structure Determination');
 
     setVisible(parentLiOf(alignDirBox), alignRequired);
     setVisible(parentLiOf(channelOrderBox), numCh > 1);
     setVisible(parentLiOf(pixelOrderBox), pixelsPerFrag > 1);
     setVisible(parentLiOf(packDirBox), pixelsPerFrag > 1);
     setVisible(parentLiOf(byteOrderBox), bytesPerFrag > 1);
+
+    swDetail.lap('UI Update');
 
     // 構造体の図を描画
     {
@@ -2188,6 +2282,7 @@ function generateCode(): void {
         }
       }
     }
+    swDetail.lap('Table Draw');
 
     // エンコードパラメータ
     const fragWidth = vertPack ? 1 : pixelsPerFrag;
@@ -2247,6 +2342,7 @@ function generateCode(): void {
         }
       }
     }  // for packIndex
+    swDetail.lap('Array Generation');
 
     try {
       // 列数決定
@@ -2271,70 +2367,93 @@ function generateCode(): void {
       const codeUnit: CodeUnit = parseInt(codeUnitBox.value);
 
       // コード生成
-      let code = '';
+      let codeBuff: string[] = [];
       if (codeUnit >= CodeUnit.FILE) {
-        code += `#pragma once\n`;
-        code += `\n`;
-        code += `#include <stdint.h>\n`;
-        code += `\n`;
+        codeBuff.push(`#pragma once\n`);
+        codeBuff.push(`\n`);
+        codeBuff.push(`#include <stdint.h>\n`);
+        codeBuff.push(`\n`);
       }
 
       if (codeUnit >= CodeUnit.ARRAY_DEF) {
-        code += `// ${width}x${height}px, ${imageCacheFormat.toString()}\n`;
-        code += `// `;
+        codeBuff.push(
+            `// ${width}x${height}px, ${imageCacheFormat.toString()}\n`);
+        codeBuff.push(`// `);
         if (numCh > 1) {
           let chOrderStr = '';
           for (let i = 0; i < numCh; i++) {
             if (i > 0) chOrderStr += ':';
             chOrderStr += fmt.channelName(chMap[numCh - 1 - i]);
           }
-          code += chOrderStr + ', ';
+          codeBuff.push(chOrderStr + ', ');
         }
         if (pixelsPerFrag > 1) {
-          code += (msb1st ? 'MSB' : 'LSB') + ' First, ';
-          code += (vertPack ? 'Vertical' : 'Horizontal') + ' Packing, ';
+          codeBuff.push((msb1st ? 'MSB' : 'LSB') + ' First, ');
+          codeBuff.push((vertPack ? 'Vertical' : 'Horizontal') + ' Packing, ');
         }
         if (bytesPerFrag > 1) {
-          code += (bigEndian ? 'Big' : 'Little') + ' Endian, ';
+          codeBuff.push((bigEndian ? 'Big' : 'Little') + ' Endian, ');
         }
-        code += `${vertAddr ? 'Vertical' : 'Horizontal'} Adressing\n`;
-        code += `// ${arrayData.length} Bytes\n`;
-        code += 'const uint8_t imageArray[] = {\n';
+        codeBuff.push(`${vertAddr ? 'Vertical' : 'Horizontal'} Adressing\n`);
+        codeBuff.push(`// ${arrayData.length} Bytes\n`);
+        codeBuff.push('const uint8_t imageArray[] = {\n');
       }
 
+      swDetail.lap('Code Generation (Before Array Elements)');
+      let hexTable: string[] = [];
+      for (let i = 0; i < 256; i++) {
+        hexTable.push('0x' + i.toString(16).padStart(2, '0') + ',');
+      }
       for (let i = 0; i < arrayData.length; i++) {
-        if (i % arrayCols == 0) code += indent;
-        code += '0x' + arrayData[i].toString(16).padStart(2, '0') + ',';
+        if (i % arrayCols == 0) codeBuff.push(indent);
+        codeBuff.push(hexTable[arrayData[i]]);
         if ((i + 1) % arrayCols == 0 || i + 1 == arrayData.length) {
-          code += '\n';
+          codeBuff.push('\n');
         } else {
-          code += ' ';
+          codeBuff.push(' ');
         }
       }
 
       if (codeUnit >= CodeUnit.ARRAY_DEF) {
-        code += '};\n';
+        codeBuff.push('};\n');
+      }
+      swDetail.lap('Code Generation (After Array Elements)');
+
+      let numLines = 0;
+      for (let s of codeBuff) {
+        if (s.endsWith('\n')) numLines++;
       }
 
-      codeBox.textContent = code;
-      codeBox.style.display = 'block';
-      codeErrorBox.style.display = 'none';
+      codeBox.textContent = codeBuff.join('');
+      if (numLines < 1000) {
+        show(codeBox);
+        hide(codeHiddenBox);
+      } else {
+        showCodeLink.textContent =
+            `表示する (${numLines} 行)`;
+        hide(codeBox);
+        show(codeHiddenBox);
+      }
+      hide(codeErrorBox);
     } catch (error) {
-      codeBox.style.display = 'none';
       codeErrorBox.textContent = error.message;
-      codeErrorBox.style.display = 'block';
+      hide(codeBox);
+      hide(codeHiddenBox);
+      show(codeErrorBox);
     }
 
-    structCanvas.style.display = 'inline-block';
-    structErrorBox.style.display = 'none';
+    show(structCanvas);
+    hide(structErrorBox);
   } catch (error) {
     codeBox.textContent = '';
-    codeBox.style.display = 'block';
-    codeErrorBox.style.display = 'none';
-    structCanvas.style.display = 'none';
     structErrorBox.textContent = error.message;
-    structErrorBox.style.display = 'block';
+    show(codeBox);
+    hide(codeHiddenBox);
+    hide(codeErrorBox);
+    show(structErrorBox);
   }
+
+  swDetail.lap('UI Update');
 }
 
 function clip(min: number, max: number, val: number): number {
@@ -2366,6 +2485,18 @@ document.addEventListener('DOMContentLoaded', async (e) => {
   await main();
 });
 
-window.addEventListener('resize', (e) => {
+function onRelayout() {
+  {
+    const rect = trimCanvas.getBoundingClientRect();
+    trimCanvasWidth = rect.width;
+    trimCanvasHeight = rect.height;
+  }
+  {
+    const rect = previewCanvas.parentElement.getBoundingClientRect();
+    previewCanvasWidth = rect.width;
+    previewCanvasHeight = rect.height;
+  }
   requestUpdateTrimCanvas();
-});
+}
+
+window.addEventListener('resize', (e) => onRelayout());
