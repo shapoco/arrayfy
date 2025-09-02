@@ -26,6 +26,7 @@ const enum PixelFormat {
   RGB666,
   RGB565,
   RGB555,
+  RGB444,
   RGB332,
   RGB111,
   GRAY4,
@@ -34,14 +35,17 @@ const enum PixelFormat {
 }
 
 const enum PackUnit {
-  MULTI_PIXEL,
-  PIXEL,
   UNPACKED,
+  PIXEL,
+  ALIGNMENT,
 }
 
 const enum AlignBoundary {
   NIBBLE = 4,
-  BYTE = 8,
+  BYTE_1 = 8,
+  BYTE_2 = 16,
+  BYTE_3 = 24,
+  BYTE_4 = 32,
 }
 
 const enum AlignDir {
@@ -124,7 +128,7 @@ class Preset {
   public byteOrder: ByteOrder = ByteOrder.BIG_ENDIAN;
   public packUnit: PackUnit = PackUnit.PIXEL;
   public packDir: ScanDir = ScanDir.HORIZONTAL;
-  public alignUnit: AlignBoundary = AlignBoundary.BYTE;
+  public alignBoundary: AlignBoundary = AlignBoundary.BYTE_1;
   public alignDir: AlignDir = AlignDir.LOWER;
   public addrDir: ScanDir = ScanDir.HORIZONTAL;
   constructor(
@@ -159,12 +163,24 @@ let presets: Record<string, Preset> = {
       },
       ),
   rgb666_be_ra: new Preset(
-      'RGB666-BE',
-      '各バイトにチャネルを右詰で配置した RGB666。LovyanGFX 用。',
+      'RGB666-BE-RA',
+      '各バイトにチャネルを下位詰めで配置した RGB666。LovyanGFX 用。',
       PixelFormat.RGB666,
       {
         channelOrder: ChannelOrder.ARGB,
         packUnit: PackUnit.UNPACKED,
+        alignDir: AlignDir.LOWER,
+        byteOrder: ByteOrder.BIG_ENDIAN,
+      },
+      ),
+  rgb666_be_la: new Preset(
+      'RGB666-BE-LA',
+      '各バイトにチャネルを上位詰めで配置した RGB666。LovyanGFX 用。',
+      PixelFormat.RGB666,
+      {
+        channelOrder: ChannelOrder.ARGB,
+        packUnit: PackUnit.UNPACKED,
+        alignDir: AlignDir.HIGHER,
         byteOrder: ByteOrder.BIG_ENDIAN,
       },
       ),
@@ -176,17 +192,38 @@ let presets: Record<string, Preset> = {
         byteOrder: ByteOrder.BIG_ENDIAN,
       },
       ),
+  rgb444_be: new Preset(
+      'RGB444-BE',
+      'ST7789 の 12bit モード用の形式。',
+      PixelFormat.RGB444,
+      {
+        packUnit: PackUnit.ALIGNMENT,
+        pixelOrder: PixelOrder.FAR_FIRST,
+        byteOrder: ByteOrder.BIG_ENDIAN,
+        alignBoundary: AlignBoundary.BYTE_3,
+      },
+      ),
   rgb332: new Preset(
       'RGB332',
       '各種 GFX ライブラリ用。',
       PixelFormat.RGB332,
+      ),
+  rgb111_ra: new Preset(
+      'RGB111',
+      'ILI9488 の 8 色モード用。',
+      PixelFormat.RGB111,
+      {
+        packUnit: PackUnit.ALIGNMENT,
+        pixelOrder: PixelOrder.FAR_FIRST,
+        packDir: ScanDir.HORIZONTAL,
+      },
       ),
   bw_hscan: new Preset(
       '白黒 横スキャン',
       '各種 GFX ライブラリ用。',
       PixelFormat.BW,
       {
-        packUnit: PackUnit.MULTI_PIXEL,
+        packUnit: PackUnit.ALIGNMENT,
         pixelOrder: PixelOrder.FAR_FIRST,
         packDir: ScanDir.HORIZONTAL,
       },
@@ -196,7 +233,7 @@ let presets: Record<string, Preset> = {
       'SPI/I2C ドライバを使用して\nSSD1306/1309 等の白黒ディスプレイに直接転送するための形式。',
       PixelFormat.BW,
       {
-        packUnit: PackUnit.MULTI_PIXEL,
+        packUnit: PackUnit.ALIGNMENT,
         pixelOrder: PixelOrder.NEAR_FIRST,
         packDir: ScanDir.VERTICAL,
       },
@@ -235,6 +272,10 @@ class PixelFormatInfo {
       case PixelFormat.RGB555:
         this.colorSpace = ColorSpace.RGB;
         this.colorBits = [5, 5, 5];
+        break;
+      case PixelFormat.RGB444:
+        this.colorSpace = ColorSpace.RGB;
+        this.colorBits = [4, 4, 4];
         break;
       case PixelFormat.RGB332:
         this.colorSpace = ColorSpace.RGB;
@@ -627,6 +668,7 @@ const pixelFormatBox = makeSelectBox(
       {value: PixelFormat.RGB666, label: 'RGB666'},
       {value: PixelFormat.RGB565, label: 'RGB565'},
       {value: PixelFormat.RGB555, label: 'RGB555'},
+      {value: PixelFormat.RGB444, label: 'RGB444'},
       {value: PixelFormat.RGB332, label: 'RGB332'},
       {value: PixelFormat.RGB111, label: 'RGB111'},
       {value: PixelFormat.GRAY4, label: 'Gray4'},
@@ -687,7 +729,7 @@ const packUnitBox = makeSelectBox(
     [
       {value: PackUnit.UNPACKED, label: 'アンパックド'},
       {value: PackUnit.PIXEL, label: '1 ピクセル'},
-      {value: PackUnit.MULTI_PIXEL, label: '複数ピクセル'},
+      {value: PackUnit.ALIGNMENT, label: 'アライメント境界'},
     ],
     PackUnit.PIXEL);
 const packDirBox = makeSelectBox(
@@ -698,10 +740,13 @@ const packDirBox = makeSelectBox(
     ScanDir.HORIZONTAL);
 const alignBoundaryBox = makeSelectBox(
     [
-      {value: AlignBoundary.BYTE, label: 'バイト'},
       {value: AlignBoundary.NIBBLE, label: 'ニブル'},
+      {value: AlignBoundary.BYTE_1, label: '1 バイト'},
+      {value: AlignBoundary.BYTE_2, label: '2 バイト'},
+      {value: AlignBoundary.BYTE_3, label: '3 バイト'},
+      {value: AlignBoundary.BYTE_4, label: '4 バイト'},
     ],
-    AlignBoundary.BYTE);
+    AlignBoundary.BYTE_1);
 const alignDirBox = makeSelectBox(
     [
       {value: AlignDir.HIGHER, label: '上位詰め'},
@@ -1423,7 +1468,7 @@ function loadPreset(preset: Preset): void {
   byteOrderBox.value = preset.byteOrder.toString();
   packUnitBox.value = preset.packUnit.toString();
   packDirBox.value = preset.packDir.toString();
-  alignBoundaryBox.value = preset.alignUnit.toString();
+  alignBoundaryBox.value = preset.alignBoundary.toString();
   alignDirBox.value = preset.alignDir.toString();
   addressingBox.value = preset.addrDir.toString();
   requestQuantize();
@@ -1894,6 +1939,7 @@ function generateCode(): void {
 
     const numCh = fmt.numTotalChannels;
 
+    // チャネル順序の決定
     let chMap: Int32Array;
     switch (fmt.colorSpace) {
       case ColorSpace.GRAYSCALE:
@@ -1936,6 +1982,7 @@ function generateCode(): void {
         throw new Error('Unsupported color space');
     }
 
+    // チャネル毎のビット数
     const chBits = new Int32Array(numCh);
     {
       const tmp = new Int32Array(numCh);
@@ -1950,6 +1997,7 @@ function generateCode(): void {
       }
     }
 
+    // 構造体の構造を決定
     let chPos = new Uint8Array(numCh);  // チャネル毎のビット位置
     let pixelStride = 0;  // ピクセルあたりのビット数 (パディング含む)
     let pixelsPerFrag = 0;  // フラグメントあたりのピクセル数
@@ -2001,7 +2049,7 @@ function generateCode(): void {
           }
           break;
 
-        case PackUnit.MULTI_PIXEL:
+        case PackUnit.ALIGNMENT:
           // 複数ピクセルをパッキングする場合
           if (pixBits > alignBoundary / 2) {
             throw new ArrayfyError(
@@ -2010,7 +2058,7 @@ function generateCode(): void {
             );
           }
           pixelStride = pixBits;
-          pixelsPerFrag = Math.floor(8 / pixBits);
+          pixelsPerFrag = Math.floor(alignBoundary / pixBits);
 
           const fragBits = pixBits * pixelsPerFrag;
           const fragStride =

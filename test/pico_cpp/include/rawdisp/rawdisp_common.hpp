@@ -11,6 +11,7 @@ namespace rawdisp {
 
 enum class PixelFormat {
   RGB111,
+  RGB444,
   RGB565,
   RGB666,
 };

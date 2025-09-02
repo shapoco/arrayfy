@@ -99,7 +99,7 @@ var Preset = /** @class */ (function () {
         this.byteOrder = 1 /* ByteOrder.BIG_ENDIAN */;
         this.packUnit = 1 /* PackUnit.PIXEL */;
         this.packDir = 0 /* ScanDir.HORIZONTAL */;
-        this.alignUnit = 8 /* AlignBoundary.BYTE */;
+        this.alignBoundary = 8 /* AlignBoundary.BYTE_1 */;
         this.alignDir = 1 /* AlignDir.LOWER */;
         this.addrDir = 0 /* ScanDir.HORIZONTAL */;
         try {
@@ -130,22 +130,40 @@ var presets = {
         channelOrder: 2 /* ChannelOrder.ARGB */,
         byteOrder: 1 /* ByteOrder.BIG_ENDIAN */,
     }),
-    rgb666_be_ra: new Preset('RGB666-BE', '各バイトにチャネルを右詰で配置した RGB666。LovyanGFX 用。', 2 /* PixelFormat.RGB666 */, {
+    rgb666_be_ra: new Preset('RGB666-BE-RA', '各バイトにチャネルを下位詰めで配置した RGB666。LovyanGFX 用。', 2 /* PixelFormat.RGB666 */, {
         channelOrder: 2 /* ChannelOrder.ARGB */,
-        packUnit: 2 /* PackUnit.UNPACKED */,
+        packUnit: 0 /* PackUnit.UNPACKED */,
+        alignDir: 1 /* AlignDir.LOWER */,
+        byteOrder: 1 /* ByteOrder.BIG_ENDIAN */,
+    }),
+    rgb666_be_la: new Preset('RGB666-BE-LA', '各バイトにチャネルを上位詰めで配置した RGB666。LovyanGFX 用。', 2 /* PixelFormat.RGB666 */, {
+        channelOrder: 2 /* ChannelOrder.ARGB */,
+        packUnit: 0 /* PackUnit.UNPACKED */,
+        alignDir: 0 /* AlignDir.HIGHER */,
         byteOrder: 1 /* ByteOrder.BIG_ENDIAN */,
     }),
     rgb565_be: new Preset('RGB565-BE', 'ハイカラー。\n各種 GFX ライブラリでの使用を含め、\n組み込み用途で一般的な形式。', 3 /* PixelFormat.RGB565 */, {
         byteOrder: 1 /* ByteOrder.BIG_ENDIAN */,
     }),
-    rgb332: new Preset('RGB332', '各種 GFX ライブラリ用。', 5 /* PixelFormat.RGB332 */),
-    bw_hscan: new Preset('白黒 横スキャン', '各種 GFX ライブラリ用。', 9 /* PixelFormat.BW */, {
-        packUnit: 0 /* PackUnit.MULTI_PIXEL */,
+    rgb444_be: new Preset('RGB444-BE', 'ST7789 の 12bit モード用の形式。', 5 /* PixelFormat.RGB444 */, {
+        packUnit: 2 /* PackUnit.ALIGNMENT */,
+        pixelOrder: 1 /* PixelOrder.FAR_FIRST */,
+        byteOrder: 1 /* ByteOrder.BIG_ENDIAN */,
+        alignBoundary: 24 /* AlignBoundary.BYTE_3 */,
+    }),
+    rgb332: new Preset('RGB332', '各種 GFX ライブラリ用。', 6 /* PixelFormat.RGB332 */),
+    rgb111_ra: new Preset('RGB111', 'ILI9488 の 8 色モード用。', 7 /* PixelFormat.RGB111 */, {
+        packUnit: 2 /* PackUnit.ALIGNMENT */,
         pixelOrder: 1 /* PixelOrder.FAR_FIRST */,
         packDir: 0 /* ScanDir.HORIZONTAL */,
     }),
-    bw_vpack: new Preset('白黒 縦パッキング', 'SPI/I2C ドライバを使用して\nSSD1306/1309 等の白黒ディスプレイに直接転送するための形式。', 9 /* PixelFormat.BW */, {
-        packUnit: 0 /* PackUnit.MULTI_PIXEL */,
+    bw_hscan: new Preset('白黒 横スキャン', '各種 GFX ライブラリ用。', 10 /* PixelFormat.BW */, {
+        packUnit: 2 /* PackUnit.ALIGNMENT */,
+        pixelOrder: 1 /* PixelOrder.FAR_FIRST */,
+        packDir: 0 /* ScanDir.HORIZONTAL */,
+    }),
+    bw_vpack: new Preset('白黒 縦パッキング', 'SPI/I2C ドライバを使用して\nSSD1306/1309 等の白黒ディスプレイに直接転送するための形式。', 10 /* PixelFormat.BW */, {
+        packUnit: 2 /* PackUnit.ALIGNMENT */,
         pixelOrder: 0 /* PixelOrder.NEAR_FIRST */,
         packDir: 1 /* ScanDir.VERTICAL */,
     }),
@@ -180,23 +198,27 @@ var PixelFormatInfo = /** @class */ (function () {
                 this.colorSpace = 1 /* ColorSpace.RGB */;
                 this.colorBits = [5, 5, 5];
                 break;
-            case 5 /* PixelFormat.RGB332 */:
+            case 5 /* PixelFormat.RGB444 */:
+                this.colorSpace = 1 /* ColorSpace.RGB */;
+                this.colorBits = [4, 4, 4];
+                break;
+            case 6 /* PixelFormat.RGB332 */:
                 this.colorSpace = 1 /* ColorSpace.RGB */;
                 this.colorBits = [3, 3, 2];
                 break;
-            case 6 /* PixelFormat.RGB111 */:
+            case 7 /* PixelFormat.RGB111 */:
                 this.colorSpace = 1 /* ColorSpace.RGB */;
                 this.colorBits = [1, 1, 1];
                 break;
-            case 7 /* PixelFormat.GRAY4 */:
+            case 8 /* PixelFormat.GRAY4 */:
                 this.colorSpace = 0 /* ColorSpace.GRAYSCALE */;
                 this.colorBits = [4];
                 break;
-            case 8 /* PixelFormat.GRAY2 */:
+            case 9 /* PixelFormat.GRAY2 */:
                 this.colorSpace = 0 /* ColorSpace.GRAYSCALE */;
                 this.colorBits = [2];
                 break;
-            case 9 /* PixelFormat.BW */:
+            case 10 /* PixelFormat.BW */:
                 this.colorSpace = 0 /* ColorSpace.GRAYSCALE */;
                 this.colorBits = [1];
                 break;
@@ -564,11 +586,12 @@ var pixelFormatBox = makeSelectBox([
     { value: 2 /* PixelFormat.RGB666 */, label: 'RGB666' },
     { value: 3 /* PixelFormat.RGB565 */, label: 'RGB565' },
     { value: 4 /* PixelFormat.RGB555 */, label: 'RGB555' },
-    { value: 5 /* PixelFormat.RGB332 */, label: 'RGB332' },
-    { value: 6 /* PixelFormat.RGB111 */, label: 'RGB111' },
-    { value: 7 /* PixelFormat.GRAY4 */, label: 'Gray4' },
-    { value: 8 /* PixelFormat.GRAY2 */, label: 'Gray2' },
-    { value: 9 /* PixelFormat.BW */, label: 'B/W' },
+    { value: 5 /* PixelFormat.RGB444 */, label: 'RGB444' },
+    { value: 6 /* PixelFormat.RGB332 */, label: 'RGB332' },
+    { value: 7 /* PixelFormat.RGB111 */, label: 'RGB111' },
+    { value: 8 /* PixelFormat.GRAY4 */, label: 'Gray4' },
+    { value: 9 /* PixelFormat.GRAY2 */, label: 'Gray2' },
+    { value: 10 /* PixelFormat.BW */, label: 'B/W' },
 ], 3 /* PixelFormat.RGB565 */);
 var widthBox = makeTextBox('', '(auto)', 4);
 var heightBox = makeTextBox('', '(auto)', 4);
@@ -606,18 +629,21 @@ var byteOrderBox = makeSelectBox([
     { value: 1 /* ByteOrder.BIG_ENDIAN */, label: 'Big Endian' },
 ], 1 /* ByteOrder.BIG_ENDIAN */);
 var packUnitBox = makeSelectBox([
-    { value: 2 /* PackUnit.UNPACKED */, label: 'アンパックド' },
+    { value: 0 /* PackUnit.UNPACKED */, label: 'アンパックド' },
     { value: 1 /* PackUnit.PIXEL */, label: '1 ピクセル' },
-    { value: 0 /* PackUnit.MULTI_PIXEL */, label: '複数ピクセル' },
+    { value: 2 /* PackUnit.ALIGNMENT */, label: 'アライメント境界' },
 ], 1 /* PackUnit.PIXEL */);
 var packDirBox = makeSelectBox([
     { value: 0 /* ScanDir.HORIZONTAL */, label: '横' },
     { value: 1 /* ScanDir.VERTICAL */, label: '縦' },
 ], 0 /* ScanDir.HORIZONTAL */);
 var alignBoundaryBox = makeSelectBox([
-    { value: 8 /* AlignBoundary.BYTE */, label: 'バイト' },
     { value: 4 /* AlignBoundary.NIBBLE */, label: 'ニブル' },
-], 8 /* AlignBoundary.BYTE */);
+    { value: 8 /* AlignBoundary.BYTE_1 */, label: '1 バイト' },
+    { value: 16 /* AlignBoundary.BYTE_2 */, label: '2 バイト' },
+    { value: 24 /* AlignBoundary.BYTE_3 */, label: '3 バイト' },
+    { value: 32 /* AlignBoundary.BYTE_4 */, label: '4 バイト' },
+], 8 /* AlignBoundary.BYTE_1 */);
 var alignDirBox = makeSelectBox([
     { value: 0 /* AlignDir.HIGHER */, label: '上位詰め' },
     { value: 1 /* AlignDir.LOWER */, label: '下位詰め' },
@@ -1345,7 +1371,7 @@ function loadPreset(preset) {
     byteOrderBox.value = preset.byteOrder.toString();
     packUnitBox.value = preset.packUnit.toString();
     packDirBox.value = preset.packDir.toString();
-    alignBoundaryBox.value = preset.alignUnit.toString();
+    alignBoundaryBox.value = preset.alignBoundary.toString();
     alignDirBox.value = preset.alignDir.toString();
     addressingBox.value = preset.addrDir.toString();
     requestQuantize();
@@ -1797,6 +1823,7 @@ function generateCode() {
         var alignLeft = parseInt(alignDirBox.value) == 0 /* AlignDir.HIGHER */;
         var vertAddr = parseInt(addressingBox.value) == 1 /* ScanDir.VERTICAL */;
         var numCh = fmt.numTotalChannels;
+        // チャネル順序の決定
         var chMap = void 0;
         switch (fmt.colorSpace) {
             case 0 /* ColorSpace.GRAYSCALE */:
@@ -1839,6 +1866,7 @@ function generateCode() {
             default:
                 throw new Error('Unsupported color space');
         }
+        // チャネル毎のビット数
         var chBits = new Int32Array(numCh);
         {
             var tmp = new Int32Array(numCh);
@@ -1852,12 +1880,13 @@ function generateCode() {
                 chBits[i] = tmp[chMap[i]];
             }
         }
+        // 構造体の構造を決定
         var chPos = new Uint8Array(numCh); // チャネル毎のビット位置
         var pixelStride = 0; // ピクセルあたりのビット数 (パディング含む)
         var pixelsPerFrag = 0; // フラグメントあたりのピクセル数
         var bytesPerFrag = 0; // フラグメントあたりのバイト数
         var alignRequired = false;
-        if (packUnit == 2 /* PackUnit.UNPACKED */) {
+        if (packUnit == 0 /* PackUnit.UNPACKED */) {
             // 一番幅の広いチャネルに合わせてチャネル毎の幅を決定
             var maxChBits = 0;
             for (var i = 0; i < numCh; i++) {
@@ -1899,13 +1928,13 @@ function generateCode() {
                         }
                     }
                     break;
-                case 0 /* PackUnit.MULTI_PIXEL */:
+                case 2 /* PackUnit.ALIGNMENT */:
                     // 複数ピクセルをパッキングする場合
                     if (pixBits > alignBoundary / 2) {
                         throw new ArrayfyError(packUnitBox, 'アライメント境界の半分より大きなピクセルを複数パッキングできません。');
                     }
                     pixelStride = pixBits;
-                    pixelsPerFrag = Math.floor(8 / pixBits);
+                    pixelsPerFrag = Math.floor(alignBoundary / pixBits);
                     var fragBits = pixBits * pixelsPerFrag;
                     var fragStride = Math.ceil(fragBits / alignBoundary) * alignBoundary;
                     bytesPerFrag = Math.ceil(fragStride / 8);

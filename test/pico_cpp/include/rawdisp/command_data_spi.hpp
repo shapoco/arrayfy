@@ -12,10 +12,9 @@ class CommandDataSpi : public CommandDataBus {
   spi_inst_t *spi;
   const int CS_PORT;
   const int DC_PORT;
-  const uint32_t SPI_FREQ;
 
-  CommandDataSpi(spi_inst_t *spi, int csPort, int dcPort, uint32_t freq)
-      : spi(spi), CS_PORT(csPort), DC_PORT(dcPort), SPI_FREQ(freq) {}
+  CommandDataSpi(spi_inst_t *spi, int csPort, int dcPort)
+      : spi(spi), CS_PORT(csPort), DC_PORT(dcPort) {}
 
   void init() override {
     gpio::initMulti((1 << CS_PORT) | (1 << DC_PORT));
