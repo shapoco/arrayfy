@@ -2,4 +2,8 @@
 tmp.*
 tmp.*/
 .build/
+build/
+bin/
 *Zone.Identifier*
+settings.json
+*.o

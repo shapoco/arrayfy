@@ -719,7 +719,8 @@ function main() {
                                 '（サンプル: ',
                                 makeSampleImageButton('./img/sample/gradient.png'),
                                 makeSampleImageButton('./img/sample/forest-path.jpg'),
-                                makeSampleImageButton('./img/sample/anime-girl.png'),
+                                makeSampleImageButton('./img/sample/rgb-chan.png'),
+                                makeSampleImageButton('./img/sample/rgb-chan-tp.png'),
                                 '）',
                             ]),
                         ], false)));
