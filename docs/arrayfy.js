@@ -136,7 +136,7 @@ var presets = {
         alignDir: 1 /* AlignDir.LOWER */,
         byteOrder: 1 /* ByteOrder.BIG_ENDIAN */,
     }),
-    rgb666_be_la: new Preset('RGB666-BE-LA', '各バイトにチャネルを上位詰めで配置した RGB666。LovyanGFX 用。', 2 /* PixelFormat.RGB666 */, {
+    rgb666_be_la: new Preset('RGB666-BE-LA', '各バイトにチャネルを上位詰めで配置した RGB666。低レベル API の 18bit モード用。', 2 /* PixelFormat.RGB666 */, {
         channelOrder: 2 /* ChannelOrder.ARGB */,
         packUnit: 0 /* PackUnit.UNPACKED */,
         alignDir: 0 /* AlignDir.HIGHER */,

@@ -175,7 +175,7 @@ let presets: Record<string, Preset> = {
       ),
   rgb666_be_la: new Preset(
       'RGB666-BE-LA',
-      '各バイトにチャネルを上位詰めで配置した RGB666。LovyanGFX 用。',
+      '各バイトにチャネルを上位詰めで配置した RGB666。低レベル API の 18bit モード用。',
       PixelFormat.RGB666,
       {
         channelOrder: ChannelOrder.ARGB,
