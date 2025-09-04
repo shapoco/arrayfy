@@ -76,7 +76,8 @@ var __read = (this && this.__read) || function (o, n) {
     }
     return ar;
 };
-var _this = this;
+import { FixedPalette } from './Palettes';
+import { clip } from './Utils';
 var StopWatch = /** @class */ (function () {
     function StopWatch(report) {
         this.report = report;
@@ -293,33 +294,6 @@ var PixelFormatInfo = /** @class */ (function () {
         }
     };
     return PixelFormatInfo;
-}());
-var Palette = /** @class */ (function () {
-    function Palette(channelBits, roundMethod) {
-        this.channelBits = channelBits;
-        this.roundMethod = roundMethod;
-        this.inMin = new Float32Array(channelBits.length);
-        this.inMax = new Float32Array(channelBits.length);
-        this.outMax = new Uint8Array(channelBits.length);
-        var equDiv = roundMethod == 1 /* RoundMethod.EQUAL_DIVISION */;
-        for (var ch = 0; ch < channelBits.length; ch++) {
-            var numLevel = 1 << channelBits[ch];
-            this.inMin[ch] = equDiv ? (1 / (numLevel * 2)) : 0;
-            this.inMax[ch] = equDiv ? ((numLevel * 2 - 1) / (numLevel * 2)) : 1;
-            this.outMax[ch] = numLevel - 1;
-        }
-    }
-    Palette.prototype.nearest = function (src, srcOffset, dest, destOffset, error) {
-        for (var ch = 0; ch < this.channelBits.length; ch++) {
-            var inNorm = src[srcOffset + ch];
-            var inMod = clip(0, 1, (inNorm - this.inMin[ch]) / (this.inMax[ch] - this.inMin[ch]));
-            var out = Math.round(this.outMax[ch] * inMod);
-            dest[destOffset + ch] = out;
-            var outNorm = out / this.outMax[ch];
-            error[ch] = inNorm - outNorm;
-        }
-    };
-    return Palette;
 }());
 var NormalizedImage = /** @class */ (function () {
     function NormalizedImage(width, height, numColorChannels) {
@@ -719,25 +693,6 @@ var previewCanvasWidth = 800;
 var previewCanvasHeight = 400;
 function main() {
     return __awaiter(this, void 0, void 0, function () {
-        function updateVisibility() {
-            hide(parentLiOf(bgColorBox));
-            hide(parentLiOf(keyColorBox));
-            hide(parentLiOf(keyToleranceBox));
-            hide(parentLiOf(alphaThreshBox));
-            var alphaProc = parseInt(alphaProcBox.value);
-            switch (alphaProc) {
-                case 1 /* AlphaProc.FILL */:
-                    show(parentLiOf(bgColorBox));
-                    break;
-                case 3 /* AlphaProc.SET_KEY_COLOR */:
-                    show(parentLiOf(keyColorBox));
-                    show(parentLiOf(keyToleranceBox));
-                    break;
-                case 2 /* AlphaProc.BINARIZE */:
-                    show(parentLiOf(alphaThreshBox));
-                    break;
-            }
-        }
         var fileBrowseButton, pPresetButtons, id, pNote, showProButton, hideProButton, section, pCanvas, section, section, section, pCanvas, section, pCanvas, section, section;
         var _this = this;
         return __generator(this, function (_a) {
@@ -855,8 +810,8 @@ function main() {
                             tip(['閾値: ', alphaThreshBox], '透明にするかどうかの閾値を指定します。'),
                         ]))));
                         container.appendChild(section);
-                        alphaProcBox.addEventListener('change', updateVisibility);
-                        updateVisibility();
+                        alphaProcBox.addEventListener('change', onAlphaProcChanged);
+                        onAlphaProcChanged();
                         section.querySelectorAll('input, select').forEach(function (el) {
                             el.addEventListener('change', function () {
                                 requestUpdateTrimCanvas();
@@ -1218,6 +1173,25 @@ function main() {
         });
     });
 } // main
+function onAlphaProcChanged() {
+    hide(parentLiOf(bgColorBox));
+    hide(parentLiOf(keyColorBox));
+    hide(parentLiOf(keyToleranceBox));
+    hide(parentLiOf(alphaThreshBox));
+    var alphaProc = parseInt(alphaProcBox.value);
+    switch (alphaProc) {
+        case 1 /* AlphaProc.FILL */:
+            show(parentLiOf(bgColorBox));
+            break;
+        case 3 /* AlphaProc.SET_KEY_COLOR */:
+            show(parentLiOf(keyColorBox));
+            show(parentLiOf(keyToleranceBox));
+            break;
+        case 2 /* AlphaProc.BINARIZE */:
+            show(parentLiOf(alphaThreshBox));
+            break;
+    }
+}
 function showPro() {
     document.querySelectorAll('.professional').forEach(function (el) {
         show(el);
@@ -1729,7 +1703,7 @@ function quantize() {
             {
                 var colErrDiffuse = colReduce && colDither === 1 /* DitherMethod.DIFFUSION */;
                 var alpErrDiffuse = alpReduce && alpDither === 1 /* DitherMethod.DIFFUSION */;
-                var colPalette = new Palette(fmt.colorBits, roundMethod);
+                var colPalette = new FixedPalette(fmt.colorBits, roundMethod);
                 var alpOutMax = (1 << fmt.alphaBits) - 1;
                 var colOut = new Uint8Array(numColCh);
                 var colErr = new Float32Array(numColCh);
@@ -2262,8 +2236,7 @@ function generateCode() {
                 hide(codeHiddenBox);
             }
             else {
-                showCodeLink.textContent =
-                    "\u8868\u793A\u3059\u308B (".concat(numLines, " \u884C)");
+                showCodeLink.textContent = "\u8868\u793A\u3059\u308B (".concat(numLines, " \u884C)");
                 hide(codeBox);
                 show(codeHiddenBox);
             }
@@ -2288,13 +2261,6 @@ function generateCode() {
     }
     swDetail.lap('UI Update');
 }
-function clip(min, max, val) {
-    if (val < min)
-        return min;
-    if (val > max)
-        return max;
-    return val;
-}
 function hexToRgb(hex) {
     if (hex.startsWith('#')) {
         hex = hex.slice(1);
@@ -2315,7 +2281,7 @@ function hexToRgb(hex) {
         throw new Error('Invalid hex color');
     }
 }
-document.addEventListener('DOMContentLoaded', function (e) { return __awaiter(_this, void 0, void 0, function () {
+document.addEventListener('DOMContentLoaded', function (e) { return __awaiter(void 0, void 0, void 0, function () {
     return __generator(this, function (_a) {
         switch (_a.label) {
             case 0: return [4 /*yield*/, main()];
