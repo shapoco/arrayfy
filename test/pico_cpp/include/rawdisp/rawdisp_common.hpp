@@ -14,6 +14,8 @@ enum class PixelFormat {
   RGB444,
   RGB565,
   RGB666,
+  KR11,
+  BW,
 };
 
 static RAWDISP_INLINE void clipCoord(int *x, int *w, int max) {
@@ -42,14 +44,19 @@ static RAWDISP_INLINE int memBitsPerPixel(PixelFormat fmt) {
       return 16;
     case PixelFormat::RGB666:
       return 24;
+    case PixelFormat::RGB444:
+      return 12;
+    case PixelFormat::KR11:
+      return 2;
+    case PixelFormat::BW:
+      return 1;
+    default:
+      return -1;
   }
-  return -1;
 }
 
 static RAWDISP_INLINE int pixelsPerTrans(PixelFormat fmt, size_t buffSize) {
   return buffSize * 8 / memBitsPerPixel(fmt);
 }
-
-
 
 }  // namespace rawdisp

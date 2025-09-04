@@ -4,6 +4,7 @@
 #include "display.hpp"
 
 namespace rawdisp {
+
 class CommandDataDisplay : public Display {
  public:
   CommandDataBus &bus;
@@ -11,9 +12,7 @@ class CommandDataDisplay : public Display {
   CommandDataDisplay(CommandDataBus &bus, const DisplayConfig &cfg)
       : Display(cfg), bus(bus) {}
 
-  void init() override {
-    Display::init();
-  }
+  void init() override { Display::init(); }
 
 };
 }  // namespace rawdisp

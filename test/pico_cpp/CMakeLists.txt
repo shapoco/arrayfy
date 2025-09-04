@@ -23,6 +23,7 @@ add_subdirectory(${LGFX_DIR} lgfx)
 
 file(GLOB CPP_FILES
     ${APP_SRC_DIR}/*.cpp
+    ${APP_SRC_DIR}/*.c
 )
 
 target_sources(${APP_NAME} PRIVATE 

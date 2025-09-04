@@ -16,30 +16,30 @@ struct DisplayConfig {
 
 class Display {
  public:
-  const int WIDTH;
-  const int HEIGHT;
-  const PixelFormat FORMAT;
-  const int RESET_PORT;
+  const int width;
+  const int height;
+  const PixelFormat format;
+  const int resetPort;
 
   Display(const DisplayConfig &cfg)
-      : WIDTH(cfg.width),
-        HEIGHT(cfg.height),
-        FORMAT(cfg.format),
-        RESET_PORT(cfg.resetPort) {}
+      : width(cfg.width),
+        height(cfg.height),
+        format(cfg.format),
+        resetPort(cfg.resetPort) {}
 
   virtual void init() {
-    if (RESET_PORT >= 0) {
-      gpio::init(RESET_PORT);
-      gpio::setDir(RESET_PORT, true);
+    if (resetPort >= 0) {
+      gpio::init(resetPort);
+      gpio::setDir(resetPort, true);
     }
   }
 
   virtual void setWindow(int x, int y, int w, int h) = 0;
-  virtual void writePixels(const void *data, size_t length) = 0;
+  virtual void writePixels(const void *data, size_t length, int plane = 0) = 0;
 
   inline void clipRect(int *x, int *y, int *w, int *h) {
-    clipCoord(x, w, WIDTH);
-    clipCoord(y, h, HEIGHT);
+    clipCoord(x, w, width);
+    clipCoord(y, h, height);
   }
 };
 

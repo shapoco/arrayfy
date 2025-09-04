@@ -18,11 +18,13 @@ APP_INC_DIR = include
 APP_SRC_DIR = src
 APP_HPP_LIST = \
 	$(wildcard $(APP_INC_DIR)/*.hpp) \
+	$(wildcard $(APP_INC_DIR)/*.h) \
 	$(wildcard $(APP_INC_DIR)/bmp/*.hpp) \
 	$(wildcard $(APP_INC_DIR)/lgfx/*.hpp) \
 	$(wildcard $(APP_INC_DIR)/rawdisp/*.hpp)
 APP_CPP_LIST = \
-	$(wildcard $(APP_SRC_DIR)/*.cpp)
+	$(wildcard $(APP_SRC_DIR)/*.cpp) \
+	$(wildcard $(APP_SRC_DIR)/*.c)
 
 DEPENDENCY_LIST = \
 	$(APP_HPP_LIST) \

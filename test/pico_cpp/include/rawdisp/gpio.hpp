@@ -23,4 +23,6 @@ static inline void writeMulti(uint32_t mask, uint32_t value) {
 
 static inline void write(int port, bool value) { gpio_put(port, value); }
 
+static inline bool read(int port) { return gpio_get(port); }
+
 }  // namespace rawdisp::gpio

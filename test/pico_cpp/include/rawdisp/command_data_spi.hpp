@@ -17,6 +17,7 @@ class CommandDataSpi : public CommandDataBus {
       : spi(spi), CS_PORT(csPort), DC_PORT(dcPort) {}
 
   void init() override {
+    CommandDataBus::init();
     gpio::initMulti((1 << CS_PORT) | (1 << DC_PORT));
     gpio::writeMulti((1 << CS_PORT) | (1 << DC_PORT), ~0);
     gpio::setDirMulti((1 << CS_PORT) | (1 << DC_PORT), true);
@@ -26,14 +27,25 @@ class CommandDataSpi : public CommandDataBus {
     spi_write_blocking(spi, data, length);
   }
 
-  void commandStart(uint8_t cmd) override {
-    gpio::writeMulti((1 << CS_PORT) | (1 << DC_PORT), 0);
-    spi_write_blocking(spi, &cmd, 1);
-    gpio::write(DC_PORT, true);
+  void writeStart(bool command) override {
+    if (command) {
+      gpio::write(DC_PORT, false);
+    } else {
+      gpio::write(DC_PORT, true);
+    }
+    gpio::write(CS_PORT, false);
   }
 
-  void commandEnd() override {
+  void writeEnd() override {
     gpio::writeMulti((1 << CS_PORT) | (1 << DC_PORT), ~0);
+  }
+
+  void writeCommand(uint8_t cmd, const uint8_t *params, size_t size) override {
+    writeStart(true);
+    writeBytes(&cmd, 1);
+    writeStart(false);
+    writeBytes(params, size);
+    writeEnd();
   }
 };
 

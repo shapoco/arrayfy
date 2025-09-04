@@ -113,25 +113,39 @@ class ST7789 : public CommandDataDisplay {
   ST7789(const DisplayConfig& cfg, CommandDataSpi& bus)
       : CommandDataDisplay(bus, cfg) {}
 
-  inline void writeCommand(Command cmd) {
-    bus.writeCommand(static_cast<uint8_t>(cmd));
-  }
-
-  inline void writeCommand(Command cmd, uint8_t param0) {
-    bus.writeCommand(static_cast<uint8_t>(cmd), param0);
-  }
-
   inline void writeCommand(Command cmd, const uint8_t* data, size_t size) {
     bus.writeCommand(static_cast<uint8_t>(cmd), data, size);
+  }
+
+  inline void writeCommand(Command cmd) { writeCommand(cmd, nullptr, 0); }
+
+  inline void writeCommand(Command cmd, uint8_t p0) {
+    writeCommand(cmd, &p0, 1);
+  }
+
+  inline void writeCommand(Command cmd, uint8_t p0, uint8_t p1) {
+    uint8_t params[] = {p0, p1};
+    writeCommand(cmd, params, sizeof(params));
+  }
+
+  inline void writeCommand(Command cmd, uint8_t p0, uint8_t p1, uint8_t p2) {
+    uint8_t params[] = {p0, p1, p2};
+    writeCommand(cmd, params, sizeof(params));
+  }
+
+  inline void writeCommand(Command cmd, uint8_t p0, uint8_t p1, uint8_t p2,
+                           uint8_t p3) {
+    uint8_t params[] = {p0, p1, p2, p3};
+    writeCommand(cmd, params, sizeof(params));
   }
 
   void init() override {
     CommandDataDisplay::init();
 
-    if (RESET_PORT >= 0) {
-      gpio::write(RESET_PORT, false);
+    if (resetPort >= 0) {
+      gpio::write(resetPort, false);
       sleep_ms(5);
-      gpio::write(RESET_PORT, true);
+      gpio::write(resetPort, true);
       sleep_ms(5);
     }
 
@@ -141,7 +155,7 @@ class ST7789 : public CommandDataDisplay {
     writeCommand(Command::SLEEP_OUT);
     sleep_ms(200);
 
-    switch (FORMAT) {
+    switch (format) {
       case PixelFormat::RGB444:
         writeCommand(Command::INTERFACE_PIXEL_FORMAT, 0x53);
         break;
@@ -182,10 +196,13 @@ class ST7789 : public CommandDataDisplay {
     writeCommand(Command::PAGE_ADDRESS_SET, tmp, 4);
   }
 
-  void writePixels(const void* data, size_t length) override {
-    bus.commandStart(static_cast<uint8_t>(Command::MEMORY_WRITE));
+  void writePixels(const void* data, size_t length, int plane = 0) override {
+    bus.writeStart(true);
+    uint8_t cmd = static_cast<uint8_t>(Command::MEMORY_WRITE);
+    bus.writeBytes(&cmd, 1);
+    bus.writeStart(false);
     bus.writeBytes(static_cast<const uint8_t*>(data), length);
-    bus.commandEnd();
+    bus.writeEnd();
   }
 };
 
