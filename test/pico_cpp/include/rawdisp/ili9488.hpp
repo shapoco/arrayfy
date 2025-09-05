@@ -132,7 +132,7 @@ class ILI9488 : public CommandDataDisplay {
       gpio::write(resetPort, false);
       sleep_ms(5);
       gpio::write(resetPort, true);
-      sleep_ms(5);
+      sleep_ms(100);
     }
 
     writeCommand(Command::SOFTWARE_RESET);
@@ -154,7 +154,6 @@ class ILI9488 : public CommandDataDisplay {
 #if 0
     writeCommand(Command::MEMORY_ACCESS_CONTROL, 0x48);
 #else
-    // writeCommand(Command::MEMORY_ACCESS_CONTROL, 0xE8);
     writeCommand(Command::MEMORY_ACCESS_CONTROL, 0x28);
 #endif
 

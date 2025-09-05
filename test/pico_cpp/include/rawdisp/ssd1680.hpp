@@ -192,8 +192,7 @@ class SSD1680 : public CommandDataDisplay {
     uint8_t yeh = (yEnd >> 8) & 0x01;
 
     writeCommand(Command::SET_RAM_X_ADDR_START_END, xs, xe);
-    uint8_t params[] = {ysl, ysh, yel, yeh};
-    writeCommand(Command::SET_RAM_Y_ADDR_START_END, params, 4);
+    writeCommand(Command::SET_RAM_Y_ADDR_START_END, ysl, ysh, yel, yeh);
     writeCommand(Command::SET_RAM_X_ADDR_COUNTER, xs);
     writeCommand(Command::SET_RAM_Y_ADDR_COUNTER, ysl, ysh);
   }

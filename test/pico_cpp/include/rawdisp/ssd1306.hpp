@@ -69,55 +69,6 @@ class SSD1306 : public CommandDataDisplay {
 
   void init() override {
     CommandDataDisplay::init();
-    /*
-
-            CMD_SETCLKDIV          , 0x80,
-            CMD_SETMULTIPLEX       , 0x3F,
-            CMD_SETOFFSET          , 0x00,
-            CMD_SETSTARTLINE       ,
-            CMD_MEMORYMODE         , 0x00,
-            CMD_SEGREMAP           ,
-            CMD_COMSCANINC         ,
-            CMD_SETVCOMDETECT      , 0x10,
-            CMD_DISPLAYALLON_RESUME,
-            CMD_DEACTIVATE_SCROLL  ,
-            CMD_CHARGEPUMP         , 0x14,
-            CMD_DISP_ON            ,
-            CMD_SETCONTRAST        , 0x00,
-            CMD_SETPRECHARGE       , 0x11,
-            */
-
-#if 0
-    writeCommand(Command::SET_DISP_CLK_DIV, 0x80);
-    writeCommand(Command::SET_MUX_RATIO, 63);
-    writeCommand(Command::SET_DISP_OFFSET, 0);
-    writeCommand(Command::SET_DISP_START_LINE);
-    writeCommand(Command::SET_MEM_MODE, 0x00);
-    if (rotation == 0) {
-      writeCommand(Command::SET_SEG_REMAP);
-      writeCommand(Command::SET_COM_OUT_DIR);
-    } else {
-      writeCommand(commandOr(Command::SET_SEG_REMAP, 0x01));
-      writeCommand(commandOr(Command::SET_COM_OUT_DIR, 0x08));
-    }
-    writeCommand(Command::SET_VCOM_DESEL, 0x10);
-    writeCommand(Command::SET_ALL_ON_RESUME);
-    writeCommand(Command::SET_SCROLL);
-
-    writeCommand(Command::SET_CONTRAST, 0xFF);
-    writeCommand(Command::SET_PRECHARGE, 0x11);
-
-    writeCommand(Command::SET_NORM_DISP);
-
-    if (width == 128 && height == 64) {
-      writeCommand(Command::SET_COM_PIN_CFG, 0x12);
-    } else {
-      writeCommand(Command::SET_COM_PIN_CFG, 0x02);
-    }
-
-    writeCommand(commandOr(Command::SET_DISP, 0x01));
-
-#else
 
     writeCommand(Command::SET_DISP);
     writeCommand(Command::SET_MUX_RATIO, height - 1);
@@ -147,7 +98,6 @@ class SSD1306 : public CommandDataDisplay {
     writeCommand(Command::SET_CHARGE_PUMP, 0x14);
 
     writeCommand(commandOr(Command::SET_DISP, 0x01));
-#endif
   }
 
   void setWindow(int x, int y, int w, int h) override {

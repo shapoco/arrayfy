@@ -146,7 +146,7 @@ class ST7789 : public CommandDataDisplay {
       gpio::write(resetPort, false);
       sleep_ms(5);
       gpio::write(resetPort, true);
-      sleep_ms(5);
+      sleep_ms(100);
     }
 
     writeCommand(Command::SOFTWARE_RESET);
