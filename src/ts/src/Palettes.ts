@@ -6,10 +6,19 @@ export const enum RoundMethod {
   EQUAL_DIVISION,
 }
 
+export const enum DitherMethod {
+  NONE,
+  DIFFUSION,
+}
+
 export abstract class Palette {
-  abstract nearest(
+  abstract reduce(
       src: Float32Array, srcOffset: number, dest: Uint8Array,
       destOffset: number, error: Float32Array): void;
+
+  abstract extract(
+      src: Uint8Array, srcOffset: number, dest: Uint8Array,
+      destOffset: number): void;
 }
 
 export class FixedPalette extends Palette {
@@ -30,7 +39,7 @@ export class FixedPalette extends Palette {
     }
   }
 
-  nearest(
+  reduce(
       src: Float32Array, srcOffset: number, dest: Uint8Array,
       destOffset: number, error: Float32Array): void {
     for (let ch = 0; ch < this.channelBits.length; ch++) {
@@ -41,6 +50,30 @@ export class FixedPalette extends Palette {
       dest[destOffset + ch] = out;
       const outNorm = out / this.outMax[ch];
       error[ch] = inNorm - outNorm;
+    }
+  }
+
+  extract(
+      src: Uint8Array, srcOffset: number, dest: Uint8Array,
+      destOffset: number): void {
+    // プレビュー用の色生成
+    switch (this.channelBits.length) {
+      case 1:
+        // グレースケール
+        const gray = Math.round(src[srcOffset] * 255 / this.outMax[0]);
+        for (let ch = 0; ch < 3; ch++) {
+          dest[destOffset + ch] = gray;
+        }
+        break;
+      case 3:
+        // RGB
+        for (let ch = 0; ch < 3; ch++) {
+          dest[destOffset + ch] =
+              Math.round(src[srcOffset + ch] * 255 / this.outMax[ch]);
+        }
+        break;
+      default:
+        throw new Error('Invalid channel number');
     }
   }
 }

@@ -151,6 +151,32 @@ var NormalizedImage = class {
 		this.alpha = new Float32Array(width * height);
 	}
 };
+var QuantizedImage = class {
+	data;
+	tmp;
+	constructor(width, height, format, palette) {
+		this.width = width;
+		this.height = height;
+		this.format = format;
+		this.palette = palette;
+		const numPixels = width * height;
+		const numAllCh = format.numTotalChannels;
+		this.data = [];
+		for (let i = 0; i < numAllCh; i++) this.data.push(new Uint8Array(numPixels));
+		this.tmp = new Uint8Array(format.numTotalChannels);
+	}
+	getPreviewImage(dest) {
+		const numAllCh = this.format.numTotalChannels;
+		const numColCh = this.format.numColorChannels;
+		const alpOutMax = this.format.hasAlpha ? (1 << this.format.alphaBits) - 1 : 1;
+		for (let i = 0; i < this.width * this.height; i++) {
+			for (let ch = 0; ch < numAllCh; ch++) this.tmp[ch] = this.data[ch][i];
+			this.palette.extract(this.tmp, 0, dest, i * 4);
+			if (this.format.hasAlpha) dest[i * 4 + 3] = Math.round(this.tmp[numColCh] * 255 / alpOutMax);
+			else dest[i * 4 + 3] = 255;
+		}
+	}
+};
 
 //#endregion
 //#region src/Utils.ts
@@ -166,6 +192,11 @@ let RoundMethod = /* @__PURE__ */ function(RoundMethod$1) {
 	RoundMethod$1[RoundMethod$1["NEAREST"] = 0] = "NEAREST";
 	RoundMethod$1[RoundMethod$1["EQUAL_DIVISION"] = 1] = "EQUAL_DIVISION";
 	return RoundMethod$1;
+}({});
+let DitherMethod = /* @__PURE__ */ function(DitherMethod$1) {
+	DitherMethod$1[DitherMethod$1["NONE"] = 0] = "NONE";
+	DitherMethod$1[DitherMethod$1["DIFFUSION"] = 1] = "DIFFUSION";
+	return DitherMethod$1;
 }({});
 var Palette = class {};
 var FixedPalette = class extends Palette {
@@ -187,7 +218,7 @@ var FixedPalette = class extends Palette {
 			this.outMax[ch] = numLevel - 1;
 		}
 	}
-	nearest(src, srcOffset, dest, destOffset, error) {
+	reduce(src, srcOffset, dest, destOffset, error) {
 		for (let ch = 0; ch < this.channelBits.length; ch++) {
 			const inNorm = src[srcOffset + ch];
 			const inMod = clip(0, 1, (inNorm - this.inMin[ch]) / (this.inMax[ch] - this.inMin[ch]));
@@ -197,10 +228,22 @@ var FixedPalette = class extends Palette {
 			error[ch] = inNorm - outNorm;
 		}
 	}
+	extract(src, srcOffset, dest, destOffset) {
+		switch (this.channelBits.length) {
+			case 1:
+				const gray = Math.round(src[srcOffset] * 255 / this.outMax[0]);
+				for (let ch = 0; ch < 3; ch++) dest[destOffset + ch] = gray;
+				break;
+			case 3:
+				for (let ch = 0; ch < 3; ch++) dest[destOffset + ch] = Math.round(src[srcOffset + ch] * 255 / this.outMax[ch]);
+				break;
+			default: throw new Error("Invalid channel number");
+		}
+	}
 };
 
 //#endregion
-//#region src/Preproc.ts
+//#region src/Preprocessor.ts
 let AlphaProc = /* @__PURE__ */ function(AlphaProc$1) {
 	AlphaProc$1[AlphaProc$1["KEEP"] = 0] = "KEEP";
 	AlphaProc$1[AlphaProc$1["FILL"] = 1] = "FILL";
@@ -362,7 +405,6 @@ function resize(src, srcSize, outSize) {
 	while (preW * 2 < srcW) preW *= 2;
 	const preStride = preW * 4;
 	const pre = new Uint8Array(preStride * srcH);
-	console.log(`preW=${preW}, preStride=${preStride}`);
 	for (let srcY = 0; srcY < srcH; srcY++) {
 		let iDest = srcY * preStride;
 		if (preW == srcW) {
@@ -433,12 +475,12 @@ function blend(src, si0, si1, dest, di, coeff1) {
 	const a0 = src[si0 + 3];
 	const a1 = src[si1 + 3];
 	const a = a0 * coeff0 + a1 * coeff1;
-	if (a0 == 0) {
-		coeff0 = 0;
-		coeff1 = 1;
-	} else if (a1 == 0) {
-		coeff0 = 1;
-		coeff1 = 0;
+	coeff0 *= a0 / 255;
+	coeff1 *= a1 / 255;
+	if (coeff0 + coeff1 > 0) {
+		const norm = 1 / (coeff0 + coeff1);
+		coeff0 *= norm;
+		coeff1 *= norm;
 	}
 	for (let c = 0; c < 3; c++) {
 		const m = src[si0++] * coeff0 + src[si1++] * coeff1;
@@ -480,7 +522,7 @@ function determineGammaValue(img) {
 	const histogram = makeHistogramF32(img, HISTOGRAM_SIZE);
 	let min = .5;
 	let max = 2;
-	let gamma;
+	let gamma = 1;
 	while (max - min > .01) {
 		gamma = (min + max) / 2;
 		let lo = 0, hi = 0;
@@ -582,6 +624,81 @@ function grayscaleArrayU8(data, offset) {
 }
 
 //#endregion
+//#region src/Reducer.ts
+var Arguments = class {
+	src;
+	colorDitherMethod = DitherMethod.NONE;
+	alphaDitherMethod = DitherMethod.NONE;
+	palette;
+	format;
+	output;
+};
+function reduce(args) {
+	const norm = args.src;
+	const outW = norm.width;
+	const outH = norm.height;
+	outW * outH;
+	const fmt = args.format;
+	fmt.numTotalChannels;
+	const numColCh = fmt.numColorChannels;
+	const palette = args.palette;
+	args.output = new QuantizedImage(outW, outH, fmt, palette);
+	const outData = args.output.data;
+	const alpErrDiffuse = args.alphaDitherMethod == DitherMethod.DIFFUSION;
+	const colErrDiffuse = args.colorDitherMethod == DitherMethod.DIFFUSION;
+	const alpOutMax = (1 << fmt.alphaBits) - 1;
+	const colOut = new Uint8Array(numColCh);
+	const colErr = new Float32Array(numColCh);
+	const alpErr = new Float32Array(1);
+	for (let y = 0; y < outH; y++) for (let ix = 0; ix < outW; ix++) {
+		const fwd = y % 2 == 0;
+		const x = fwd ? ix : outW - 1 - ix;
+		const iPix = y * outW + x;
+		let transparent = false;
+		let alpOut = alpOutMax;
+		if (fmt.hasAlpha) {
+			const alpNormIn = norm.alpha[iPix];
+			alpOut = Math.round(alpNormIn * alpOutMax);
+			const alpNormOut = alpOut / alpOutMax;
+			alpErr[0] = alpNormIn - alpNormOut;
+			transparent = alpOut == 0;
+		}
+		palette.reduce(norm.color, iPix * numColCh, colOut, 0, colErr);
+		for (let ch = 0; ch < numColCh; ch++) outData[ch][iPix] = colOut[ch];
+		if (fmt.hasAlpha) outData[numColCh][iPix] = alpOut;
+		if (alpErrDiffuse && fmt.hasAlpha) diffuseError(norm, true, alpErr, x, y, fwd);
+		if (colErrDiffuse && !transparent) diffuseError(norm, false, colErr, x, y, fwd);
+	}
+}
+function diffuseError(img, alpha, error, x, y, forward) {
+	const target = alpha ? img.alpha : img.color;
+	const numCh = alpha ? 1 : img.numColorChannels;
+	const w = img.width;
+	const h = img.height;
+	const stride = img.width * numCh;
+	for (let ch = 0; ch < numCh; ch++) {
+		const i = y * stride + x * numCh + ch;
+		const e = error[ch];
+		if (e == 0) continue;
+		if (forward) {
+			if (x < w - 1) target[i + numCh] += e * 7 / 16;
+			if (y < h - 1) {
+				if (x > 0) target[i + stride - numCh] += e * 3 / 16;
+				target[i + stride] += e * 5 / 16;
+				if (x < w - 1) target[i + stride + numCh] += e * 1 / 16;
+			}
+		} else {
+			if (x > 0) target[i - numCh] += e * 7 / 16;
+			if (y < h - 1) {
+				if (x < w - 1) target[i + stride + numCh] += e * 3 / 16;
+				target[i + stride] += e * 5 / 16;
+				if (x > 0) target[i + stride - numCh] += e * 1 / 16;
+			}
+		}
+	}
+}
+
+//#endregion
 //#region src/main.ts
 var TrimState = /* @__PURE__ */ function(TrimState$1) {
 	TrimState$1[TrimState$1["IDLE"] = 0] = "IDLE";
@@ -610,11 +727,6 @@ var AlignDir = /* @__PURE__ */ function(AlignDir$1) {
 	AlignDir$1[AlignDir$1["LOWER"] = 1] = "LOWER";
 	return AlignDir$1;
 }(AlignDir || {});
-var DitherMethod = /* @__PURE__ */ function(DitherMethod$1) {
-	DitherMethod$1[DitherMethod$1["NONE"] = 0] = "NONE";
-	DitherMethod$1[DitherMethod$1["DIFFUSION"] = 1] = "DIFFUSION";
-	return DitherMethod$1;
-}(DitherMethod || {});
 var ChannelOrder = /* @__PURE__ */ function(ChannelOrder$1) {
 	ChannelOrder$1[ChannelOrder$1["RGBA"] = 0] = "RGBA";
 	ChannelOrder$1[ChannelOrder$1["BGRA"] = 1] = "BGRA";
@@ -733,33 +845,6 @@ let presets = {
 		packDir: ScanDir.VERTICAL
 	})
 };
-function diffuseError(img, alpha, error, x, y, forward) {
-	const target = alpha ? img.alpha : img.color;
-	const numCh = alpha ? 1 : img.numColorChannels;
-	const w = img.width;
-	const h = img.height;
-	const stride = img.width * numCh;
-	for (let ch = 0; ch < numCh; ch++) {
-		const i = y * stride + x * numCh + ch;
-		const e = error[ch];
-		if (e == 0) continue;
-		if (forward) {
-			if (x < w - 1) target[i + numCh] += e * 7 / 16;
-			if (y < h - 1) {
-				if (x > 0) target[i + stride - numCh] += e * 3 / 16;
-				target[i + stride] += e * 5 / 16;
-				if (x < w - 1) target[i + stride + numCh] += e * 1 / 16;
-			}
-		} else {
-			if (x > 0) target[i - numCh] += e * 7 / 16;
-			if (y < h - 1) {
-				if (x < w - 1) target[i + stride + numCh] += e * 3 / 16;
-				target[i + stride] += e * 5 / 16;
-				if (x > 0) target[i + stride - numCh] += e * 1 / 16;
-			}
-		}
-	}
-}
 function toElementArray(children) {
 	if (children == null) return [];
 	if (!Array.isArray(children)) children = [children];
@@ -811,9 +896,11 @@ function makeTextBox(value = "", placeholder = "", maxLength = 100) {
 	input.type = "text";
 	input.value = value;
 	input.placeholder = placeholder;
-	input.style.width = "50px";
+	input.style.width = "60px";
 	input.style.textAlign = "right";
 	input.maxLength = maxLength;
+	input.inputMode = "decimal";
+	input.addEventListener("focus", () => input.select());
 	return input;
 }
 function makeSelectBox(items, defaultValue) {
@@ -894,11 +981,54 @@ function parentLiOf(child) {
 	while (parent && parent.tagName !== "LI") parent = parent.parentElement;
 	return parent;
 }
+function upDown(elem, min, max, step) {
+	const upDownButton = makeButton("");
+	upDownButton.classList.add("upDown");
+	upDownButton.tabIndex = -1;
+	const textBox = elem;
+	upDownButton.addEventListener("pointermove", (e) => {
+		e.preventDefault();
+		if (upDownButton.dataset.dragStartY && upDownButton.dataset.dragStartVal) {
+			const y = e.offsetY;
+			const startY = parseFloat(upDownButton.dataset.dragStartY);
+			const startVal = parseFloat(upDownButton.dataset.dragStartVal);
+			const n = (max - min) / step;
+			let deltaY = Math.round((y - startY) * n / 512);
+			let val = clip(min, max, startVal - deltaY * step);
+			textBox.value = (Math.round(val * 100) / 100).toString();
+			textBox.dispatchEvent(new Event("change"));
+		}
+	});
+	upDownButton.addEventListener("pointerdown", (e) => {
+		e.preventDefault();
+		if (trimViewToNextState(e.offsetX, e.offsetY) != TrimState.IDLE) {
+			const y = e.offsetY;
+			let val;
+			if (textBox.value.trim()) val = parseFloat(textBox.value.trim());
+			else val = parseFloat(textBox.placeholder.replaceAll(/[\(\)]/g, "").trim());
+			val = Math.round(val / step) * step;
+			upDownButton.dataset.dragStartY = y.toString();
+			upDownButton.dataset.dragStartVal = val.toString();
+			upDownButton.style.cursor = "grabbing";
+			upDownButton.setPointerCapture(e.pointerId);
+		}
+	});
+	upDownButton.addEventListener("pointerup", (e) => {
+		e.preventDefault();
+		delete upDownButton.dataset.dragStartY;
+		delete upDownButton.dataset.dragStartVal;
+		upDownButton.style.cursor = "ns-resize";
+		upDownButton.releasePointerCapture(e.pointerId);
+	});
+	upDownButton.addEventListener("touchstart", (e) => e.preventDefault());
+	upDownButton.addEventListener("touchmove", (e) => e.preventDefault());
+	upDownButton.addEventListener("touchend", (e) => e.preventDefault());
+	return makeSpan([textBox, upDownButton]);
+}
 const dropTarget = document.createElement("div");
 const hiddenFileBox = document.createElement("input");
 const pasteTarget = document.createElement("input");
 const origCanvas = document.createElement("canvas");
-document.createElement("canvas");
 const resetTrimButton = makeButton("範囲をリセット");
 const alphaProcBox = makeSelectBox([
 	{
@@ -1165,20 +1295,14 @@ const codeErrorBox = makeParagraph();
 codeErrorBox.style.textAlign = "center";
 codeErrorBox.style.color = "red";
 const copyButton = makeButton("コードをコピー");
-let container = null;
+let container;
 let updateTrimCanvasTimeoutId = -1;
 let quantizeTimeoutId = -1;
 let generateCodeTimeoutId = -1;
 let worldX0 = 0, worldY0 = 0, zoom = 1;
 let trimL = 0, trimT = 0, trimR = 1, trimB = 1;
 let trimUiState = TrimState.IDLE;
-let imageCacheFormat = new PixelFormatInfo(PixelFormat.RGB565);
-let imageCacheData = [
-	null,
-	null,
-	null,
-	null
-];
+let quantizedImage = null;
 let trimCanvasWidth = 800;
 let trimCanvasHeight = 400;
 let previewCanvasWidth = 800;
@@ -1269,8 +1393,8 @@ async function onLoad() {
 			tip(["透過色の扱い: ", alphaProcBox], "入力画像に対する透過色の取り扱いを指定します。"),
 			tip(["背景色: ", backColorBox], "画像の透明部分をこの色で塗り潰して不透明化します。"),
 			tip(["キーカラー: ", keyColorBox], "透明にしたい色を指定します。"),
-			tip(["許容誤差: ", keyToleranceBox], "キーカラーからの許容誤差を指定します。"),
-			tip(["閾値: ", alphaThreshBox], "透明にするかどうかの閾値を指定します。")
+			tip(["許容誤差: ", upDown(keyToleranceBox, 0, 255, 1)], "キーカラーからの許容誤差を指定します。"),
+			tip(["閾値: ", upDown(alphaThreshBox, 0, 255, 1)], "透明にするかどうかの閾値を指定します。")
 		])));
 		container.appendChild(section);
 		alphaProcBox.addEventListener("change", onAlphaProcChanged);
@@ -1289,11 +1413,11 @@ async function onLoad() {
 	{
 		const section = pro(makeSection(makeFloatList([
 			makeHeader("色調補正"),
-			tip(["ガンマ: ", gammaBox], "デフォルトは 1.0 です。\n空欄にすると、輝度 50% を中心にバランスが取れるように自動調整します。"),
-			tip(["輝度オフセット: ", brightnessBox], "デフォルトは 0 です。\n空欄にすると、輝度 50% を中心にバランスが取れるように自動調整します。"),
+			tip(["ガンマ: ", upDown(gammaBox, .1, 2, .1)], "デフォルトは 1.0 です。\n空欄にすると、輝度 50% を中心にバランスが取れるように自動調整します。"),
+			tip(["輝度オフセット: ", upDown(brightnessBox, -255, 255, 1)], "デフォルトは 0 です。\n空欄にすると、輝度 50% を中心にバランスが取れるように自動調整します。"),
 			tip([
 				"コントラスト: ",
-				contrastBox,
+				upDown(contrastBox, 0, 200, 1),
 				"%"
 			], "デフォルトは 100% です。\n空欄にすると、階調が失われない範囲でダイナミックレンジが最大となるように自動調整します。"),
 			tip([invertBox.parentNode], "各チャネルの値を大小反転します。")
@@ -1312,9 +1436,9 @@ async function onLoad() {
 		const section = makeSection(makeFloatList([
 			makeHeader("出力サイズ"),
 			tip([
-				widthBox,
+				upDown(widthBox, 1, 1024, 1),
 				" x ",
-				heightBox,
+				upDown(heightBox, 1, 1024, 1),
 				" px"
 			], "片方を空欄にすると他方はアスペクト比に基づいて自動的に決定されます。"),
 			tip(["拡縮方法: ", scalingMethodBox], "トリミングサイズと出力サイズが異なる場合の拡縮方法を指定します。")
@@ -1341,7 +1465,7 @@ async function onLoad() {
 		pCanvas.style.textAlign = "center";
 		container.appendChild(pCanvas);
 		const section = makeSection([makeFloatList([
-			makeHeader("量子化"),
+			makeHeader("減色"),
 			pro(tip(["フォーマット: ", pixelFormatBox], "ピクセルフォーマットを指定します。")),
 			pro(tip(["丸め方法: ", roundMethodBox], "パレットから色を選択する際の戦略を指定します。\nディザリングを行う場合はあまり関係ありません。")),
 			tip(["ディザリング: ", colorDitherBox], "あえてノイズを加えることでできるだけ元画像の色を再現します。"),
@@ -1402,10 +1526,11 @@ async function onLoad() {
 			codeErrorBox
 		]);
 		container.appendChild(section);
-		copyButton.parentElement.style.float = "right";
-		copyButton.parentElement.style.marginRight = "0";
-		copyButton.parentElement.style.paddingRight = "0";
-		copyButton.parentElement.style.borderRight = "none";
+		const buttonParent = parentLiOf(copyButton);
+		buttonParent.style.float = "right";
+		buttonParent.style.marginRight = "0";
+		buttonParent.style.paddingRight = "0";
+		buttonParent.style.borderRight = "none";
 		section.querySelectorAll("input, select").forEach((el) => {
 			el.addEventListener("change", () => {
 				requestGenerateCode();
@@ -1420,12 +1545,11 @@ async function onLoad() {
 		if (input.files && input.files[0]) await loadFromFile(input.files[0]);
 	});
 	document.body.addEventListener("dragover", (e) => {
-		console.log("A");
-		e.preventDefault();
-		e.stopPropagation();
+		if (!e.dataTransfer) return;
 		const items = e.dataTransfer.items;
 		for (const item of items) if (item.kind === "file") {
-			console.log("B");
+			e.preventDefault();
+			e.stopPropagation();
 			show(dropTarget);
 			break;
 		}
@@ -1436,26 +1560,34 @@ async function onLoad() {
 		hide(dropTarget);
 	});
 	dropTarget.addEventListener("drop", async (e) => {
-		e.preventDefault();
-		e.stopPropagation();
+		if (!e.dataTransfer) return;
 		hide(dropTarget);
 		const items = e.dataTransfer.items;
 		for (const item of items) if (item.kind === "file") {
+			e.preventDefault();
+			e.stopPropagation();
 			await loadFromFile(item.getAsFile());
 			break;
 		}
 	});
 	pasteTarget.addEventListener("paste", async (e) => {
+		if (!e.clipboardData) return;
 		const items = e.clipboardData.items;
 		for (const item of items) if (item.kind === "file") {
+			e.preventDefault();
+			e.stopPropagation();
 			await loadFromFile(item.getAsFile());
 			break;
 		}
 	});
 	pasteTarget.addEventListener("input", (e) => {
+		e.preventDefault();
+		e.stopPropagation();
 		pasteTarget.value = "";
 	});
 	pasteTarget.addEventListener("change", (e) => {
+		e.preventDefault();
+		e.stopPropagation();
 		pasteTarget.value = "";
 	});
 	trimCanvas.addEventListener("pointermove", (e) => {
@@ -1577,7 +1709,7 @@ async function loadFromFile(file) {
 	return new Promise((resolve, reject) => {
 		const reader = new FileReader();
 		reader.onload = async (e) => {
-			if (typeof e.target.result === "string") await loadFromString(e.target.result);
+			if (e.target && typeof e.target.result === "string") await loadFromString(e.target.result);
 			else throw new Error("Invalid image data");
 			resolve();
 		};
@@ -1594,10 +1726,14 @@ async function loadFromString(s) {
 			origCanvas.width = img.width;
 			origCanvas.height = img.height;
 			const ctx = origCanvas.getContext("2d", { willReadFrequently: true });
+			if (!ctx) {
+				reject(/* @__PURE__ */ new Error("Failed to get canvas context"));
+				return;
+			}
 			ctx.clearRect(0, 0, img.width, img.height);
 			ctx.drawImage(img, 0, 0);
 			resetTrim();
-			quantize();
+			convert();
 			requestUpdateTrimCanvas();
 			resolve();
 		};
@@ -1688,6 +1824,7 @@ function updateTrimCanvas() {
 	const { x: trimViewL, y: trimViewT } = trimWorldToView(trimL, trimT);
 	const { x: trimViewR, y: trimViewB } = trimWorldToView(trimR, trimB);
 	const ctx = trimCanvas.getContext("2d", { willReadFrequently: true });
+	if (!ctx) throw new Error("Failed to get canvas context");
 	ctx.clearRect(0, 0, canvasW, canvasH);
 	{
 		const dx = view.x - worldX0 * zoom;
@@ -1725,15 +1862,16 @@ function loadPreset(preset) {
 function requestQuantize() {
 	if (quantizeTimeoutId >= 0) return;
 	quantizeTimeoutId = setTimeout(() => {
-		quantize();
+		convert();
 	}, 100);
 }
-function quantize() {
+function convert() {
+	quantizedImage = null;
 	if (quantizeTimeoutId >= 0) {
 		clearTimeout(quantizeTimeoutId);
 		quantizeTimeoutId = -1;
 	}
-	const swDetail = new StopWatch(true);
+	const swDetail = new StopWatch(false);
 	try {
 		let outW = -1, outH = -1;
 		let norm;
@@ -1747,6 +1885,7 @@ function quantize() {
 				args.srcSize.width = srcW;
 				args.srcSize.height = srcH;
 				const origCtx = origCanvas.getContext("2d", { willReadFrequently: true });
+				if (!origCtx) throw new Error("Failed to get canvas context");
 				const origImageData = origCtx.getImageData(0, 0, srcW, srcH);
 				const origData = new Uint8Array(srcW * srcH * 4);
 				for (let i = 0; i < origImageData.data.length; i++) origData[i] = origImageData.data[i];
@@ -1821,18 +1960,9 @@ function quantize() {
 				show(parentLiOf(roundMethodBox));
 				roundMethod = parseInt(roundMethodBox.value);
 			} else hide(parentLiOf(roundMethodBox));
-			previewCanvas.width = outW;
-			previewCanvas.height = outH;
-			const previewCtx = previewCanvas.getContext("2d", { willReadFrequently: true });
-			const previewImageData = previewCtx.getImageData(0, 0, outW, outH);
-			const srcRgbData = previewImageData.data;
 			const numPixels = outW * outH;
-			const numAllCh = fmt.numTotalChannels;
-			const numColCh = fmt.numColorChannels;
-			let outData = [];
-			for (let i = 0; i < numAllCh; i++) outData.push(new Uint8Array(numPixels));
-			const previewData = new Uint8Array(srcRgbData.length);
-			for (let i = 0; i < numPixels; i++) previewData[i * 4 + 3] = 255;
+			fmt.numTotalChannels;
+			fmt.numColorChannels;
 			let minColBits = 999;
 			for (const bits of fmt.colorBits) if (bits < minColBits) minColBits = bits;
 			const colReduce = minColBits < 8;
@@ -1841,47 +1971,27 @@ function quantize() {
 			const alpDither = alpReduce ? parseInt(alphaDitherBox.value) : DitherMethod.NONE;
 			setVisible(parentLiOf(colorDitherBox), colReduce);
 			setVisible(parentLiOf(alphaDitherBox), alpReduce);
-			{
-				const colErrDiffuse = colReduce && colDither === DitherMethod.DIFFUSION;
-				const alpErrDiffuse = alpReduce && alpDither === DitherMethod.DIFFUSION;
-				const colPalette = new FixedPalette(fmt.colorBits, roundMethod);
-				const alpOutMax = (1 << fmt.alphaBits) - 1;
-				const colOut = new Uint8Array(numColCh);
-				const colErr = new Float32Array(numColCh);
-				const alpErr = new Float32Array(1);
-				for (let y = 0; y < outH; y++) for (let ix = 0; ix < outW; ix++) {
-					const fwd = y % 2 == 0;
-					const x = fwd ? ix : outW - 1 - ix;
-					const iPix = y * outW + x;
-					let transparent = false;
-					let alpOut = alpOutMax;
-					if (fmt.hasAlpha) {
-						const alpNormIn = norm.alpha[iPix];
-						alpOut = Math.round(alpNormIn * alpOutMax);
-						const alpNormOut = alpOut / alpOutMax;
-						alpErr[0] = alpNormIn - alpNormOut;
-						transparent = alpOut == 0;
-					}
-					colPalette.nearest(norm.color, iPix * numColCh, colOut, 0, colErr);
-					for (let ch = 0; ch < numColCh; ch++) outData[ch][iPix] = colOut[ch];
-					if (fmt.hasAlpha) outData[numColCh][iPix] = alpOut;
-					if (fmt.colorSpace === ColorSpace.GRAYSCALE) {
-						const gray = Math.round(colOut[0] * 255 / colPalette.outMax[0]);
-						for (let ch = 0; ch < 3; ch++) previewData[iPix * 4 + ch] = gray;
-					} else for (let ch = 0; ch < 3; ch++) {
-						const outMax = colPalette.outMax[ch];
-						previewData[iPix * 4 + ch] = Math.round(colOut[ch] * 255 / outMax);
-					}
-					if (fmt.hasAlpha) previewData[iPix * 4 + 3] = Math.round(alpOut * 255 / alpOutMax);
-					if (alpErrDiffuse && fmt.hasAlpha) diffuseError(norm, true, alpErr, x, y, fwd);
-					if (colErrDiffuse && !transparent) diffuseError(norm, false, colErr, x, y, fwd);
-				}
-			}
+			const palette = new FixedPalette(fmt.colorBits, roundMethod);
+			const args = new Arguments();
+			args.src = norm;
+			args.format = fmt;
+			args.palette = palette;
+			args.colorDitherMethod = colDither;
+			args.alphaDitherMethod = alpDither;
+			reduce(args);
+			quantizedImage = args.output;
 			swDetail.lap("Quantization");
-			imageCacheFormat = fmt;
-			imageCacheData = outData;
-			previewImageData.data.set(previewData);
-			previewCtx.putImageData(previewImageData, 0, 0);
+			{
+				const previewData = new Uint8Array(numPixels * 4);
+				quantizedImage.getPreviewImage(previewData);
+				previewCanvas.width = outW;
+				previewCanvas.height = outH;
+				const ctx = previewCanvas.getContext("2d", { willReadFrequently: true });
+				if (!ctx) throw new Error("Failed to get canvas context");
+				const previewImageData = ctx.getImageData(0, 0, outW, outH);
+				previewImageData.data.set(previewData);
+				ctx.putImageData(previewImageData, 0, 0);
+			}
 			show(previewCanvas);
 			hide(quantizeErrorBox);
 			swDetail.lap("Update Preview");
@@ -1918,8 +2028,8 @@ function requestGenerateCode() {
 	}, 100);
 }
 function generateCode() {
-	const swDetail = new StopWatch(true);
-	if (!imageCacheData) {
+	const swDetail = new StopWatch(false);
+	if (!quantizedImage) {
 		codeBox.textContent = "";
 		show(codeBox);
 		hide(codeHiddenBox);
@@ -1927,8 +2037,8 @@ function generateCode() {
 		return;
 	}
 	try {
-		const channelData = imageCacheData;
-		const fmt = imageCacheFormat;
+		const channelData = quantizedImage.data;
+		const fmt = quantizedImage.format;
 		const chOrder = parseInt(channelOrderBox.value);
 		const msb1st = parseInt(pixelOrderBox.value) == PixelOrder.FAR_FIRST;
 		const bigEndian = parseInt(byteOrderBox.value) == ByteOrder.BIG_ENDIAN;
@@ -2072,6 +2182,7 @@ function generateCode() {
 			structCanvas.width = tableW + 1 + pad * 2;
 			structCanvas.height = tableH + 1 + pad * 2;
 			const ctx = structCanvas.getContext("2d");
+			if (!ctx) throw new Error("Failed to get canvas context");
 			ctx.fillStyle = "#FFF";
 			ctx.fillRect(0, 0, structCanvas.width, structCanvas.height);
 			ctx.font = "16px sans-serif";
@@ -2210,7 +2321,7 @@ function generateCode() {
 				codeBuff.push(`\n`);
 			}
 			if (codeUnit >= CodeUnit.ARRAY_DEF) {
-				codeBuff.push(`// ${width}x${height}px, ${imageCacheFormat.toString()}\n`);
+				codeBuff.push(`// ${width}x${height}px, ${fmt.toString()}\n`);
 				codeBuff.push(`// `);
 				if (numCh > 1) {
 					let chOrderStr = "";
@@ -2291,7 +2402,8 @@ function onRelayout() {
 		trimCanvasHeight = rect.height;
 	}
 	{
-		const rect = previewCanvas.parentElement.getBoundingClientRect();
+		const canvasParent = previewCanvas.parentElement;
+		const rect = canvasParent.getBoundingClientRect();
 		previewCanvasWidth = rect.width;
 		previewCanvasHeight = rect.height;
 	}

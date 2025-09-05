@@ -228,6 +228,18 @@ button {
   cursor: pointer;
 }
 
+.upDown {
+  display: inline-block;
+  width: 20px;
+  background-image: url('./img/updown.svg');
+  background-color: transparent;
+  background-repeat: no-repeat;
+  background-position: 50% 50%;
+  background-size: auto 25px;
+  border: none;
+  cursor: ns-resize;
+}
+
 .presetButton {
   display: inline-block;
   height: 80px;

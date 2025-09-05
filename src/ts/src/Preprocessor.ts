@@ -1,4 +1,4 @@
-import {Rect, Size} from './Geometry';
+import {Rect, Size} from './Geometries';
 import {ColorSpace, NormalizedImage} from './Images';
 import {clip} from './Utils';
 
@@ -195,8 +195,6 @@ function resize(src: Uint8Array, srcSize: Size, outSize: Size): Uint8Array {
   const preStride = preW * 4;
   const pre = new Uint8Array(preStride * srcH);
 
-  console.log(`preW=${preW}, preStride=${preStride}`);
-
   // 横方向の縮小
   {
     // 2 のべき乗でない端数は線形補間
@@ -302,12 +300,12 @@ function blend(
   const a0 = src[si0 + 3];
   const a1 = src[si1 + 3];
   const a = a0 * coeff0 + a1 * coeff1;
-  if (a0 == 0) {
-    coeff0 = 0;
-    coeff1 = 1;
-  } else if (a1 == 0) {
-    coeff0 = 1;
-    coeff1 = 0;
+  coeff0 *= a0 / 255;
+  coeff1 *= a1 / 255;
+  if (coeff0 + coeff1 > 0) {
+    const norm = 1 / (coeff0 + coeff1);
+    coeff0 *= norm;
+    coeff1 *= norm;
   }
   for (let c = 0; c < 3; c++) {
     const m = src[si0++] * coeff0 + src[si1++] * coeff1;
@@ -360,7 +358,7 @@ function determineGammaValue(img: NormalizedImage): number {
   let max = 2;
 
   // 輝度 50% を中心にバランスが取れるようなガンマ値を二分探索
-  let gamma: number;
+  let gamma = 1;
   while (max - min > 0.01) {
     gamma = (min + max) / 2;
     let lo = 0, hi = 0;

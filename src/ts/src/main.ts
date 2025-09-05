@@ -1,7 +1,8 @@
-import {Point, Rect, Size} from './Geometry';
-import {ColorSpace, NormalizedImage, PixelFormat, PixelFormatInfo} from './Images';
-import {FixedPalette, Palette, RoundMethod} from './Palettes'
-import * as Preproc from './Preproc'
+import {Point, Rect, Size} from './Geometries';
+import {ColorSpace, NormalizedImage, PixelFormat, PixelFormatInfo, QuantizedImage} from './Images';
+import {DitherMethod, FixedPalette, Palette, RoundMethod} from './Palettes'
+import * as Preproc from './Preprocessor'
+import * as Quantizer from './Reducer'
 import {clip} from './Utils'
 
 const enum TrimState {
@@ -31,10 +32,6 @@ const enum AlignDir {
   LOWER,
 }
 
-const enum DitherMethod {
-  NONE,
-  DIFFUSION,
-}
 
 const enum ChannelOrder {
   RGBA,
@@ -211,48 +208,6 @@ let presets: Record<string, Preset> = {
       ),
 };
 
-function diffuseError(
-    img: NormalizedImage, alpha: boolean, error: Float32Array, x: number,
-    y: number, forward: boolean) {
-  const target = alpha ? img.alpha : img.color;
-  const numCh = alpha ? 1 : img.numColorChannels;
-
-  const w = img.width;
-  const h = img.height;
-  const stride = img.width * numCh;
-  for (let ch = 0; ch < numCh; ch++) {
-    const i = y * stride + x * numCh + ch;
-    const e = error[ch];
-    if (e == 0) continue;
-    if (forward) {
-      if (x < w - 1) {
-        target[i + numCh] += e * 7 / 16;
-      }
-      if (y < h - 1) {
-        if (x > 0) {
-          target[i + stride - numCh] += e * 3 / 16;
-        }
-        target[i + stride] += e * 5 / 16;
-        if (x < w - 1) {
-          target[i + stride + numCh] += e * 1 / 16;
-        }
-      }
-    } else {
-      if (x > 0) {
-        target[i - numCh] += e * 7 / 16;
-      }
-      if (y < h - 1) {
-        if (x < w - 1) {
-          target[i + stride + numCh] += e * 3 / 16;
-        }
-        target[i + stride] += e * 5 / 16;
-        if (x > 0) {
-          target[i + stride - numCh] += e * 1 / 16;
-        }
-      }
-    }
-  }
-}
 function toElementArray(children: any): HTMLElement[] {
   if (children == null) {
     return [];
@@ -329,9 +284,11 @@ function makeTextBox(
   input.type = 'text';
   input.value = value;
   input.placeholder = placeholder;
-  input.style.width = '50px';
+  input.style.width = '60px';
   input.style.textAlign = 'right';
   input.maxLength = maxLength;
+  input.inputMode = 'decimal';
+  input.addEventListener('focus', () => input.select());
   return input;
 }
 
@@ -427,16 +384,69 @@ function tip(children: any, text: string): HTMLElement {
 function parentLiOf(child: HTMLElement): HTMLLIElement {
   let parent = child;
   while (parent && parent.tagName !== 'LI') {
-    parent = parent.parentElement;
+    parent = parent.parentElement as HTMLElement;
   }
   return parent as HTMLLIElement;
+}
+
+function upDown(
+    elem: HTMLElement, min: number, max: number, step: number): HTMLElement {
+  const upDownButton = makeButton('');
+  upDownButton.classList.add('upDown');
+  upDownButton.tabIndex = -1;
+
+  const textBox = elem as HTMLInputElement;
+
+  upDownButton.addEventListener('pointermove', (e) => {
+    e.preventDefault();
+    if (upDownButton.dataset.dragStartY && upDownButton.dataset.dragStartVal) {
+      const y = e.offsetY;
+      const startY = parseFloat(upDownButton.dataset.dragStartY);
+      const startVal = parseFloat(upDownButton.dataset.dragStartVal);
+
+      const n = (max - min) / step;
+      let deltaY = Math.round((y - startY) * n / 512);
+
+      let val = clip(min, max, startVal - deltaY * step);
+      textBox.value = (Math.round(val * 100) / 100).toString();
+      textBox.dispatchEvent(new Event('change'));
+    }
+  });
+  upDownButton.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    if (trimViewToNextState(e.offsetX, e.offsetY) != TrimState.IDLE) {
+      const y = e.offsetY;
+      let val: number;
+      if (textBox.value.trim()) {
+        val = parseFloat(textBox.value.trim());
+      } else {
+        val = parseFloat(textBox.placeholder.replaceAll(/[\(\)]/g, '').trim());
+      }
+      val = Math.round(val / step) * step;
+      upDownButton.dataset.dragStartY = y.toString();
+      upDownButton.dataset.dragStartVal = val.toString();
+      upDownButton.style.cursor = 'grabbing';
+      upDownButton.setPointerCapture(e.pointerId);
+    }
+  });
+  upDownButton.addEventListener('pointerup', (e) => {
+    e.preventDefault();
+    delete upDownButton.dataset.dragStartY;
+    delete upDownButton.dataset.dragStartVal;
+    upDownButton.style.cursor = 'ns-resize';
+    upDownButton.releasePointerCapture(e.pointerId);
+  });
+  upDownButton.addEventListener('touchstart', (e) => e.preventDefault());
+  upDownButton.addEventListener('touchmove', (e) => e.preventDefault());
+  upDownButton.addEventListener('touchend', (e) => e.preventDefault());
+
+  return makeSpan([textBox, upDownButton]);
 }
 
 const dropTarget = document.createElement('div');
 const hiddenFileBox = document.createElement('input');
 const pasteTarget = document.createElement('input');
 const origCanvas = document.createElement('canvas');
-const preModCanvas = document.createElement('canvas');
 const resetTrimButton = makeButton('範囲をリセット');
 const alphaProcBox = makeSelectBox(
     [
@@ -604,7 +614,7 @@ codeErrorBox.style.color = 'red';
 
 const copyButton = makeButton('コードをコピー');
 
-let container: HTMLDivElement = null;
+let container: HTMLDivElement;
 
 let updateTrimCanvasTimeoutId = -1;
 let quantizeTimeoutId = -1;
@@ -615,8 +625,7 @@ let trimL = 0, trimT = 0, trimR = 1, trimB = 1;
 
 let trimUiState = TrimState.IDLE;
 
-let imageCacheFormat = new PixelFormatInfo(PixelFormat.RGB565);
-let imageCacheData: Uint8Array[] = [null, null, null, null];
+let quantizedImage: QuantizedImage|null = null;
 
 let trimCanvasWidth = 800;
 let trimCanvasHeight = 400;
@@ -625,7 +634,7 @@ let previewCanvasWidth = 800;
 let previewCanvasHeight = 400;
 
 async function onLoad() {
-  container = document.querySelector('#arrayfyContainer');
+  container = document.querySelector('#arrayfyContainer') as HTMLDivElement;
 
   {
     dropTarget.classList.add('dropTarget');
@@ -740,9 +749,10 @@ async function onLoad() {
       tip(['背景色: ', backColorBox],
           '画像の透明部分をこの色で塗り潰して不透明化します。'),
       tip(['キーカラー: ', keyColorBox], '透明にしたい色を指定します。'),
-      tip(['許容誤差: ', keyToleranceBox],
+      tip(['許容誤差: ', upDown(keyToleranceBox, 0, 255, 1)],
           'キーカラーからの許容誤差を指定します。'),
-      tip(['閾値: ', alphaThreshBox], '透明にするかどうかの閾値を指定します。'),
+      tip(['閾値: ', upDown(alphaThreshBox, 0, 255, 1)],
+          '透明にするかどうかの閾値を指定します。'),
     ]))));
     container.appendChild(section);
 
@@ -764,11 +774,11 @@ async function onLoad() {
   {
     const section = pro(makeSection(makeFloatList([
       makeHeader('色調補正'),
-      tip(['ガンマ: ', gammaBox],
+      tip(['ガンマ: ', upDown(gammaBox, 0.1, 2, 0.1)],
           'デフォルトは 1.0 です。\n空欄にすると、輝度 50% を中心にバランスが取れるように自動調整します。'),
-      tip(['輝度オフセット: ', brightnessBox],
+      tip(['輝度オフセット: ', upDown(brightnessBox, -255, 255, 1)],
           'デフォルトは 0 です。\n空欄にすると、輝度 50% を中心にバランスが取れるように自動調整します。'),
-      tip(['コントラスト: ', contrastBox, '%'],
+      tip(['コントラスト: ', upDown(contrastBox, 0, 200, 1), '%'],
           'デフォルトは 100% です。\n空欄にすると、階調が失われない範囲でダイナミックレンジが最大となるように自動調整します。'),
       tip([invertBox.parentNode], '各チャネルの値を大小反転します。'),
     ])));
@@ -787,7 +797,13 @@ async function onLoad() {
   {
     const section = makeSection(makeFloatList([
       makeHeader('出力サイズ'),
-      tip([widthBox, ' x ', heightBox, ' px'],
+      tip(
+          [
+            upDown(widthBox, 1, 1024, 1),
+            ' x ',
+            upDown(heightBox, 1, 1024, 1),
+            ' px',
+          ],
           '片方を空欄にすると他方はアスペクト比に基づいて自動的に決定されます。'),
       tip(['拡縮方法: ', scalingMethodBox],
           'トリミングサイズと出力サイズが異なる場合の拡縮方法を指定します。'),
@@ -819,7 +835,7 @@ async function onLoad() {
 
     const section = makeSection([
       makeFloatList([
-        makeHeader('量子化'),
+        makeHeader('減色'),
         pro(
             tip(['フォーマット: ', pixelFormatBox],
                 'ピクセルフォーマットを指定します。')),
@@ -920,10 +936,11 @@ async function onLoad() {
     ]);
 
     container.appendChild(section);
-    copyButton.parentElement.style.float = 'right';
-    copyButton.parentElement.style.marginRight = '0';
-    copyButton.parentElement.style.paddingRight = '0';
-    copyButton.parentElement.style.borderRight = 'none';
+    const buttonParent = parentLiOf(copyButton);
+    buttonParent.style.float = 'right';
+    buttonParent.style.marginRight = '0';
+    buttonParent.style.paddingRight = '0';
+    buttonParent.style.borderRight = 'none';
 
     section.querySelectorAll('input, select').forEach((el) => {
       el.addEventListener('change', () => {
@@ -945,13 +962,12 @@ async function onLoad() {
 
   // ドラッグ & ドロップ
   document.body.addEventListener('dragover', (e) => {
-    console.log("A");
-    e.preventDefault();
-    e.stopPropagation();
+    if (!e.dataTransfer) return;
     const items = e.dataTransfer.items;
     for (const item of items) {
       if (item.kind === 'file') {
-    console.log("B");
+        e.preventDefault();
+        e.stopPropagation();
         show(dropTarget);
         break;
       }
@@ -963,13 +979,14 @@ async function onLoad() {
     hide(dropTarget);
   });
   dropTarget.addEventListener('drop', async (e) => {
-    e.preventDefault();
-    e.stopPropagation();
+    if (!e.dataTransfer) return;
     hide(dropTarget);
     const items = e.dataTransfer.items;
     for (const item of items) {
       if (item.kind === 'file') {
-        await loadFromFile(item.getAsFile());
+        e.preventDefault();
+        e.stopPropagation();
+        await loadFromFile(item.getAsFile() as File);
         break;
       }
     }
@@ -977,18 +994,25 @@ async function onLoad() {
 
   // 貼り付け
   pasteTarget.addEventListener('paste', async (e) => {
+    if (!e.clipboardData) return;
     const items = e.clipboardData.items;
     for (const item of items) {
       if (item.kind === 'file') {
-        await loadFromFile(item.getAsFile());
+        e.preventDefault();
+        e.stopPropagation();
+        await loadFromFile(item.getAsFile() as File);
         break;
       }
     }
   });
   pasteTarget.addEventListener('input', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
     pasteTarget.value = '';
   });
   pasteTarget.addEventListener('change', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
     pasteTarget.value = '';
   });
 
@@ -1126,7 +1150,7 @@ async function loadFromFile(file: File): Promise<void> {
   return new Promise<void>((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = async (e) => {
-      if (typeof e.target.result === 'string') {
+      if (e.target && typeof e.target.result === 'string') {
         await loadFromString(e.target.result);
       } else {
         throw new Error('Invalid image data');
@@ -1147,10 +1171,14 @@ async function loadFromString(s: string): Promise<void> {
       origCanvas.width = img.width;
       origCanvas.height = img.height;
       const ctx = origCanvas.getContext('2d', {willReadFrequently: true});
+      if (!ctx) {
+        reject(new Error('Failed to get canvas context'));
+        return;
+      }
       ctx.clearRect(0, 0, img.width, img.height);
       ctx.drawImage(img, 0, 0);
       resetTrim();
-      quantize();
+      convert();
       requestUpdateTrimCanvas();
       resolve();
     };
@@ -1261,6 +1289,9 @@ function updateTrimCanvas(): void {
   const {x: trimViewR, y: trimViewB} = trimWorldToView(trimR, trimB);
 
   const ctx = trimCanvas.getContext('2d', {willReadFrequently: true});
+  if (!ctx) {
+    throw new Error('Failed to get canvas context');
+  }
   ctx.clearRect(0, 0, canvasW, canvasH);
 
   // 画像描画
@@ -1304,17 +1335,19 @@ function loadPreset(preset: Preset): void {
 function requestQuantize(): void {
   if (quantizeTimeoutId >= 0) return;
   quantizeTimeoutId = setTimeout(() => {
-    quantize();
+    convert();
   }, 100);
 }
 
-function quantize(): void {
+function convert(): void {
+  quantizedImage = null;
+
   if (quantizeTimeoutId >= 0) {
     clearTimeout(quantizeTimeoutId);
     quantizeTimeoutId = -1;
   }
 
-  const swDetail = new StopWatch(true);
+  const swDetail = new StopWatch(false);
 
   try {
     let outW = -1, outH = -1;
@@ -1335,6 +1368,7 @@ function quantize(): void {
         args.srcSize.height = srcH;
 
         const origCtx = origCanvas.getContext('2d', {willReadFrequently: true});
+        if (!origCtx) throw new Error('Failed to get canvas context');
         const origImageData = origCtx.getImageData(0, 0, srcW, srcH);
 
         const origData = new Uint8Array(srcW * srcH * 4);
@@ -1433,7 +1467,7 @@ function quantize(): void {
       contrastBox.placeholder = `(${Math.round(args.contrast.value * 100)})`;
     }
 
-    // 量子化の適用
+    // 減色の適用
     {
       let maxChannelDepth = 0;
       let roundMethod: RoundMethod = RoundMethod.NEAREST;
@@ -1450,27 +1484,11 @@ function quantize(): void {
         hide(parentLiOf(roundMethodBox));
       }
 
-      previewCanvas.width = outW;
-      previewCanvas.height = outH;
-      const previewCtx =
-          previewCanvas.getContext('2d', {willReadFrequently: true});
-      const previewImageData = previewCtx.getImageData(0, 0, outW, outH);
-      const srcRgbData = previewImageData.data;
 
       const numPixels = outW * outH;
       const numAllCh = fmt.numTotalChannels;
       const numColCh = fmt.numColorChannels;
 
-      let outData = [];
-      for (let i = 0; i < numAllCh; i++) {
-        outData.push(new Uint8Array(numPixels));
-      }
-
-      // プレビューのアルファチャンネルを初期化
-      const previewData = new Uint8Array(srcRgbData.length);
-      for (let i = 0; i < numPixels; i++) {
-        previewData[i * 4 + 3] = 255;
-      }
 
       // 減色方法の決定
       let minColBits = 999;
@@ -1486,84 +1504,35 @@ function quantize(): void {
       setVisible(parentLiOf(colorDitherBox), colReduce);
       setVisible(parentLiOf(alphaDitherBox), alpReduce);
 
-      // 量子化
-      {
-        const colErrDiffuse = colReduce && colDither === DitherMethod.DIFFUSION;
-        const alpErrDiffuse = alpReduce && alpDither === DitherMethod.DIFFUSION;
-        const colPalette = new FixedPalette(fmt.colorBits, roundMethod);
-        const alpOutMax = (1 << fmt.alphaBits) - 1;
-        const colOut = new Uint8Array(numColCh);
-        const colErr = new Float32Array(numColCh);
-        const alpErr = new Float32Array(1);
-        for (let y = 0; y < outH; y++) {
-          for (let ix = 0; ix < outW; ix++) {
-            // 誤差拡散をジグザグに行うため
-            // ライン毎にスキャン方向を変える
-            const fwd = y % 2 == 0;
-            const x = fwd ? ix : (outW - 1 - ix);
-            const iPix = (y * outW + x);
+      const palette = new FixedPalette(fmt.colorBits, roundMethod);
 
-            // アルファチャンネルの値を算出
-            let transparent = false;
-            let alpOut = alpOutMax;
-            if (fmt.hasAlpha) {
-              const alpNormIn = norm.alpha[iPix];
-              alpOut = Math.round(alpNormIn * alpOutMax);
-              const alpNormOut = alpOut / alpOutMax;
-              alpErr[0] = alpNormIn - alpNormOut;
-              transparent = alpOut == 0;
-            }
+      // 減色
+      const args = new Quantizer.Arguments();
+      args.src = norm;
+      args.format = fmt;
+      args.palette = palette;
+      args.colorDitherMethod = colDither;
+      args.alphaDitherMethod = alpDither;
 
-            // パレットから最も近い色を選択
-            colPalette.nearest(norm.color, iPix * numColCh, colOut, 0, colErr);
+      Quantizer.reduce(args);
 
-            // 出力
-            for (let ch = 0; ch < numColCh; ch++) {
-              outData[ch][iPix] = colOut[ch];
-            }
-            if (fmt.hasAlpha) {
-              outData[numColCh][iPix] = alpOut;
-            }
-
-            // プレビュー用の色生成
-            if (fmt.colorSpace === ColorSpace.GRAYSCALE) {
-              const gray = Math.round(colOut[0] * 255 / colPalette.outMax[0]);
-              for (let ch = 0; ch < 3; ch++) {
-                previewData[iPix * 4 + ch] = gray;
-              }
-            } else {
-              for (let ch = 0; ch < 3; ch++) {
-                const outMax = colPalette.outMax[ch];
-                previewData[iPix * 4 + ch] =
-                    Math.round(colOut[ch] * 255 / outMax);
-              }
-            }
-
-            // プレビュー用のアルファ生成
-            if (fmt.hasAlpha) {
-              previewData[iPix * 4 + 3] = Math.round(alpOut * 255 / alpOutMax);
-            }
-
-            if (alpErrDiffuse && fmt.hasAlpha) {
-              // アルファチャンネルの誤差拡散
-              diffuseError(norm, true, alpErr, x, y, fwd);
-            }
-
-            if (colErrDiffuse && !transparent) {
-              // カラーチャンネルの誤差拡散
-              diffuseError(norm, false, colErr, x, y, fwd);
-            }
-          }  // for ix
-        }  // for y
-      }
+      quantizedImage = args.output;
 
       swDetail.lap('Quantization');
 
-      imageCacheFormat = fmt;
-      imageCacheData = outData;
+      // プレビューの作成
+      {
+        const previewData = new Uint8Array(numPixels * 4);
+        quantizedImage.getPreviewImage(previewData);
 
-      previewImageData.data.set(previewData);
-      previewCtx.putImageData(previewImageData, 0, 0);
+        previewCanvas.width = outW;
+        previewCanvas.height = outH;
+        const ctx = previewCanvas.getContext('2d', {willReadFrequently: true});
+        if (!ctx) throw new Error('Failed to get canvas context');
+        const previewImageData = ctx.getImageData(0, 0, outW, outH);
+        previewImageData.data.set(previewData);
+        ctx.putImageData(previewImageData, 0, 0);
+      }
 
       show(previewCanvas);
       hide(quantizeErrorBox);
@@ -1605,33 +1574,6 @@ function quantize(): void {
   }
 }
 
-function correctGamma(histogram: Uint32Array): number {
-  const N = histogram.length;
-  let min = 0.5;
-  let max = 2;
-
-  let gamma: number;
-  while (max - min > 0.01) {
-    gamma = (min + max) / 2;
-    let lo = 0, hi = 0;
-    for (let i = 0; i < N; i++) {
-      const val = Math.pow(i / (N - 1), 1 / gamma);
-      if (val < 0.5) {
-        lo += histogram[i];
-      } else {
-        hi += histogram[i];
-      }
-    }
-    if (lo > hi) {
-      min = gamma;
-    } else {
-      max = gamma;
-    }
-  }
-  return gamma;
-}
-
-
 function requestGenerateCode(): void {
   if (generateCodeTimeoutId !== -1) {
     clearTimeout(generateCodeTimeoutId);
@@ -1643,9 +1585,9 @@ function requestGenerateCode(): void {
 }
 
 function generateCode(): void {
-  const swDetail = new StopWatch(true);
+  const swDetail = new StopWatch(false);
 
-  if (!imageCacheData) {
+  if (!quantizedImage) {
     codeBox.textContent = '';
     show(codeBox);
     hide(codeHiddenBox);
@@ -1654,8 +1596,8 @@ function generateCode(): void {
   }
 
   try {
-    const channelData = imageCacheData;
-    const fmt = imageCacheFormat;
+    const channelData = quantizedImage.data;
+    const fmt = quantizedImage.format;
 
     const chOrder: ChannelOrder = parseInt(channelOrderBox.value);
     const msb1st = parseInt(pixelOrderBox.value) == PixelOrder.FAR_FIRST;
@@ -1834,6 +1776,7 @@ function generateCode(): void {
       structCanvas.width = tableW + 1 + pad * 2;
       structCanvas.height = tableH + 1 + pad * 2;
       const ctx = structCanvas.getContext('2d');
+      if (!ctx) throw new Error('Failed to get canvas context');
 
       ctx.fillStyle = '#FFF';
       ctx.fillRect(0, 0, structCanvas.width, structCanvas.height);
@@ -2016,8 +1959,7 @@ function generateCode(): void {
       }
 
       if (codeUnit >= CodeUnit.ARRAY_DEF) {
-        codeBuff.push(
-            `// ${width}x${height}px, ${imageCacheFormat.toString()}\n`);
+        codeBuff.push(`// ${width}x${height}px, ${fmt.toString()}\n`);
         codeBuff.push(`// `);
         if (numCh > 1) {
           let chOrderStr = '';
@@ -2121,7 +2063,8 @@ function onRelayout() {
     trimCanvasHeight = rect.height;
   }
   {
-    const rect = previewCanvas.parentElement.getBoundingClientRect();
+    const canvasParent = previewCanvas.parentElement as HTMLElement;
+    const rect = canvasParent.getBoundingClientRect();
     previewCanvasWidth = rect.width;
     previewCanvasHeight = rect.height;
   }

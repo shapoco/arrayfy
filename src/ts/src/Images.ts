@@ -1,3 +1,4 @@
+import {Palette} from './Palettes';
 
 export const enum ColorSpace {
   GRAYSCALE,
@@ -112,8 +113,6 @@ export class PixelFormatInfo {
     return this.colorBits.length;
   }
 
-
-
   channelName(i: number): string {
     switch (this.colorSpace) {
       case ColorSpace.GRAYSCALE:
@@ -131,7 +130,8 @@ export class NormalizedImage {
   public alpha: Float32Array;
   public numColorChannels: number;
   constructor(
-      public width: number, public height: number, public colorSpace: ColorSpace) {
+      public width: number, public height: number,
+      public colorSpace: ColorSpace) {
     switch (colorSpace) {
       case ColorSpace.GRAYSCALE:
         this.numColorChannels = 1;
@@ -146,3 +146,41 @@ export class NormalizedImage {
     this.alpha = new Float32Array(width * height);
   }
 };
+
+export class QuantizedImage {
+  public data: Uint8Array[];
+  public tmp: Uint8Array;
+
+  constructor(
+      public width: number, public height: number,
+      public format: PixelFormatInfo, public palette: Palette) {
+    const numPixels = width * height;
+    const numAllCh = format.numTotalChannels;
+    this.data = [];
+    for (let i = 0; i < numAllCh; i++) {
+      this.data.push(new Uint8Array(numPixels));
+    }
+    this.tmp = new Uint8Array(format.numTotalChannels);
+  }
+
+  getPreviewImage(dest: Uint8Array): void {
+    const numAllCh = this.format.numTotalChannels;
+    const numColCh = this.format.numColorChannels;
+    const alpOutMax =
+        this.format.hasAlpha ? (1 << this.format.alphaBits) - 1 : 1;
+    for (let i = 0; i < this.width * this.height; i++) {
+      // 色の復元
+      for (let ch = 0; ch < numAllCh; ch++) {
+        this.tmp[ch] = this.data[ch][i];
+      }
+      this.palette.extract(this.tmp, 0, dest, i * 4);
+
+      // アルファ値の復元
+      if (this.format.hasAlpha) {
+        dest[i * 4 + 3] = Math.round(this.tmp[numColCh] * 255 / alpOutMax);
+      } else {
+        dest[i * 4 + 3] = 255;
+      }
+    }
+  }
+}
