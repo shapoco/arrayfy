@@ -71,9 +71,9 @@ int main(void) {
 
   gpio_init(I2C_SDA_PORT);
   gpio_init(I2C_SCL_PORT);
+  i2cBusReset();
   gpio_set_function(I2C_SDA_PORT, GPIO_FUNC_I2C);
   gpio_set_function(I2C_SCL_PORT, GPIO_FUNC_I2C);
-  i2cBusReset();
   i2c_init(i2c0, I2C_FREQ);
 
   // int shift = 0;
@@ -281,12 +281,12 @@ bool i2cBusReset() {
     // SDA is already high, no need to reset
     success = true;
   } else {
-    for (uint8_t i = MAX_RETRIES; i != 0; i--) {
+    for (int i = MAX_RETRIES; i != 0; i--) {
       // send SCL pulses until SDA is high
       gpio::setDir(I2C_SDA_PORT, false);
       gpio::setDir(I2C_SCL_PORT, true);
       sleep_us(50);
-      for (uint8_t j = MAX_SCL_PULSES; j != 0; j--) {
+      for (int j = MAX_SCL_PULSES; j != 0; j--) {
         gpio::setDir(I2C_SCL_PORT, false);
         sleep_us(50);
         gpio::setDir(I2C_SCL_PORT, true);

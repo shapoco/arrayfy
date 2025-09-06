@@ -157,6 +157,12 @@ button {
   margin: 0;
 }
 
+input[type="checkbox"] {
+  accent-color: #04F;
+  transform: scale(1.5);
+  margin-right: 7px;
+}
+
 .propertySection {
   background: #f0f4f8;
   border: solid 1px #cde;

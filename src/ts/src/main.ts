@@ -407,11 +407,14 @@ const alphaProcBox = makeSelectBox(
       {value: Preproc.AlphaProc.SET_KEY_COLOR, label: '抜き色指定'},
     ],
     Preproc.AlphaProc.KEEP);
-const backColorBox = makeTextBox('#000');
-const keyColorBox = makeTextBox('#0F0');
+const backColorBox = makeTextBox('#00F');
+const keyColorBox = makeTextBox('#00F');
 const keyToleranceBox = makeTextBox('0', '(auto)', 5);
 const alphaThreshBox = makeTextBox('128', '(auto)', 5);
 const trimCanvas = document.createElement('canvas');
+const hueBox = makeTextBox('0', '(0)', 4);
+const saturationBox = makeTextBox('100', '(100)', 4);
+const lightnessBox = makeTextBox('100', '(100)', 4);
 const gammaBox = makeTextBox('1', '(auto)', 4);
 const brightnessBox = makeTextBox('0', '(auto)', 5);
 const contrastBox = makeTextBox('100', '(auto)', 5);
@@ -705,9 +708,15 @@ async function onLoad() {
   {
     const section = pro(makeSection(makeFloatList([
       makeHeader('色調補正'),
+      tip(['色相: ', upDown(hueBox, -360, 360, 5), '°'],
+          'デフォルトは 0° です。'),
+      tip(['彩度: ', upDown(saturationBox, 0, 200, 1), '%'],
+          'デフォルトは 100% です。'),
+      tip(['明度: ', upDown(lightnessBox, 0, 200, 1), '%'],
+          'デフォルトは 100% です。'),
       tip(['ガンマ: ', upDown(gammaBox, 0.1, 2, 0.1)],
           'デフォルトは 1.0 です。\n空欄にすると、輝度 50% を中心にバランスが取れるように自動調整します。'),
-      tip(['輝度オフセット: ', upDown(brightnessBox, -255, 255, 1)],
+      tip(['輝度: ', upDown(brightnessBox, -255, 255, 8)],
           'デフォルトは 0 です。\n空欄にすると、輝度 50% を中心にバランスが取れるように自動調整します。'),
       tip(['コントラスト: ', upDown(contrastBox, 0, 200, 1), '%'],
           'デフォルトは 100% です。\n空欄にすると、階調が失われない範囲でダイナミックレンジが最大となるように自動調整します。'),
@@ -1375,6 +1384,15 @@ function convert(): void {
         if (backColorBox.value) {
           args.backColor = hexToRgb(backColorBox.value);
         }
+        if (hueBox.value && fmt.numColorChannels > 1) {
+          args.hue = parseFloat(hueBox.value) / 360;
+        }
+        if (saturationBox.value && fmt.numColorChannels > 1) {
+          args.saturation = parseFloat(saturationBox.value) / 100;
+        }
+        if (lightnessBox.value) {
+          args.lightness = parseFloat(lightnessBox.value) / 100;
+        }
         if (gammaBox.value) {
           args.gamma.automatic = false;
           args.gamma.value = parseFloat(gammaBox.value);
@@ -1389,6 +1407,9 @@ function convert(): void {
         }
         args.invert = invertBox.checked;
       }
+
+      setVisible(parentLiOf(hueBox), fmt.numColorChannels > 1);
+      setVisible(parentLiOf(saturationBox), fmt.numColorChannels > 1);
 
       // 前処理実行
       Preproc.process(args);

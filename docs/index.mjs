@@ -549,6 +549,9 @@ var Args = class {
 	keyColor = 0;
 	keyTolerance = 0;
 	backColor = 0;
+	hue = 0;
+	saturation = 1;
+	lightness = 1;
 	gamma = {
 		value: 1,
 		automatic: true
@@ -579,6 +582,7 @@ function process(args) {
 	const img = normalize(resized, args.outSize, args.colorSpace);
 	if (args.alphaProc == AlphaProc.BINARIZE) binarizeAlpha(img, args.alphaThresh / 255);
 	else if (args.alphaProc == AlphaProc.FILL) fillBackground(img, args.backColor);
+	applyHSL(img, args.hue, args.saturation, args.lightness);
 	args.gamma = correctGamma(img, args.gamma);
 	args.brightness = offsetBrightness(img, args.brightness);
 	args.contrast = correctContrast(img, args.contrast);
@@ -647,9 +651,9 @@ function trim(src, srcSize, trimRect, outSize, scalingMethod) {
 	};
 }
 function applyKeyColor(data, size, key, tol) {
-	const keyR = key >> 16 & 255;
+	const keyR = key & 255;
 	const keyG = key >> 8 & 255;
-	const keyB = key & 255;
+	const keyB = key >> 16 & 255;
 	for (let y = 0; y < size.height; y++) {
 		let i = y * size.width * 4;
 		for (let x = 0; x < size.width; x++, i += 4) {
@@ -658,7 +662,12 @@ function applyKeyColor(data, size, key, tol) {
 			const b = data[i + 2];
 			data[i + 3];
 			const d = Math.abs(r - keyR) + Math.abs(g - keyG) + Math.abs(b - keyB);
-			if (d <= tol) data[i + 3] = 0;
+			if (d <= tol) {
+				data[i] = 0;
+				data[i + 1] = 0;
+				data[i + 2] = 0;
+				data[i + 3] = 0;
+			}
 		}
 	}
 }
@@ -775,6 +784,30 @@ function normalize(data, size, colorSpace) {
 	}
 	return img;
 }
+function applyHSL(img, h, s, l) {
+	const numPixels = img.width * img.height;
+	switch (img.colorSpace) {
+		case ColorSpace.GRAYSCALE:
+			if (l == 1) return;
+			for (let i = 0; i < numPixels; i++) img.color[i] = clip(0, 1, img.color[i] * l);
+			break;
+		case ColorSpace.RGB:
+			{
+				if (h == 0 && s == 1 && l == 1) return;
+				const hsl = new Float32Array(3);
+				for (let i = 0; i < numPixels; i++) {
+					rgbToHsl(img.color, i * 3, hsl, 0);
+					const hMod = hsl[0] + h;
+					hsl[0] = hMod - Math.floor(hMod);
+					hsl[1] = clip(0, 1, hsl[1] * s);
+					hsl[2] = clip(0, 1, hsl[2] * l);
+					hslToRgb(hsl, 0, img.color, i * 3);
+				}
+			}
+			break;
+		default: throw new Error("Invalid color space");
+	}
+}
 function makeHistogramF32(img, histogramSize) {
 	const histogram = new Uint32Array(histogramSize);
 	const numPixels = img.width * img.height;
@@ -811,9 +844,9 @@ function binarizeAlpha(img, thresh) {
 function fillBackground(img, color) {
 	const numCh = img.numColorChannels;
 	let bk = new Float32Array(numCh);
-	const backR = (color >> 16 & 255) / 255;
+	const backR = (color & 255) / 255;
 	const backG = (color >> 8 & 255) / 255;
-	const backB = (color & 255) / 255;
+	const backB = (color >> 16 & 255) / 255;
 	switch (img.colorSpace) {
 		case ColorSpace.GRAYSCALE:
 			bk[0] = grayscale(backR, backG, backB);
@@ -889,6 +922,58 @@ function grayscaleArrayF32(data, offset) {
 }
 function grayscaleArrayU8(data, offset) {
 	return grayscale(data[offset], data[offset + 1], data[offset + 2]);
+}
+function rgbToHsl(src, srcOffset, dest, destOffset) {
+	const r = src[srcOffset];
+	const g = src[srcOffset + 1];
+	const b = src[srcOffset + 2];
+	const max = Math.max(r, g, b);
+	const min = Math.min(r, g, b);
+	let h = 0, s = 0, l = (max + min) / 2;
+	if (max != min) {
+		const d = max - min;
+		s = l > .5 ? d / (2 - max - min) : d / (max + min);
+		switch (max) {
+			case r:
+				h = (g - b) / d + (g < b ? 6 : 0);
+				break;
+			case g:
+				h = (b - r) / d + 2;
+				break;
+			case b:
+				h = (r - g) / d + 4;
+				break;
+		}
+	}
+	h /= 6;
+	dest[destOffset] = h;
+	dest[destOffset + 1] = s;
+	dest[destOffset + 2] = l;
+}
+function hslToRgb(src, srcOffset, dest, destOffset) {
+	let h = src[srcOffset];
+	let s = src[srcOffset + 1];
+	let l = src[srcOffset + 2];
+	let r, g, b;
+	if (s == 0) r = g = b = l;
+	else {
+		const hue2rgb = (p$1, q$1, t) => {
+			if (t < 0) t += 1;
+			if (t > 1) t -= 1;
+			if (t < 1 / 6) return p$1 + (q$1 - p$1) * 6 * t;
+			if (t < 1 / 2) return q$1;
+			if (t < 2 / 3) return p$1 + (q$1 - p$1) * (2 / 3 - t) * 6;
+			return p$1;
+		};
+		const q = l < .5 ? l * (1 + s) : l + s - l * s;
+		const p = 2 * l - q;
+		r = hue2rgb(p, q, h + 1 / 3);
+		g = hue2rgb(p, q, h);
+		b = hue2rgb(p, q, h - 1 / 3);
+	}
+	dest[destOffset] = r;
+	dest[destOffset + 1] = g;
+	dest[destOffset + 2] = b;
 }
 
 //#endregion
@@ -1256,11 +1341,14 @@ const alphaProcBox = makeSelectBox([
 		label: "抜き色指定"
 	}
 ], AlphaProc.KEEP);
-const backColorBox = makeTextBox("#000");
-const keyColorBox = makeTextBox("#0F0");
+const backColorBox = makeTextBox("#00F");
+const keyColorBox = makeTextBox("#00F");
 const keyToleranceBox = makeTextBox("0", "(auto)", 5);
 const alphaThreshBox = makeTextBox("128", "(auto)", 5);
 const trimCanvas = document.createElement("canvas");
+const hueBox = makeTextBox("0", "(0)", 4);
+const saturationBox = makeTextBox("100", "(100)", 4);
+const lightnessBox = makeTextBox("100", "(100)", 4);
 const gammaBox = makeTextBox("1", "(auto)", 4);
 const brightnessBox = makeTextBox("0", "(auto)", 5);
 const contrastBox = makeTextBox("100", "(auto)", 5);
@@ -1597,8 +1685,23 @@ async function onLoad() {
 	{
 		const section = pro(makeSection(makeFloatList([
 			makeHeader("色調補正"),
+			tip([
+				"色相: ",
+				upDown(hueBox, -360, 360, 5),
+				"°"
+			], "デフォルトは 0° です。"),
+			tip([
+				"彩度: ",
+				upDown(saturationBox, 0, 200, 1),
+				"%"
+			], "デフォルトは 100% です。"),
+			tip([
+				"明度: ",
+				upDown(lightnessBox, 0, 200, 1),
+				"%"
+			], "デフォルトは 100% です。"),
 			tip(["ガンマ: ", upDown(gammaBox, .1, 2, .1)], "デフォルトは 1.0 です。\n空欄にすると、輝度 50% を中心にバランスが取れるように自動調整します。"),
-			tip(["輝度オフセット: ", upDown(brightnessBox, -255, 255, 1)], "デフォルトは 0 です。\n空欄にすると、輝度 50% を中心にバランスが取れるように自動調整します。"),
+			tip(["輝度: ", upDown(brightnessBox, -255, 255, 8)], "デフォルトは 0 です。\n空欄にすると、輝度 50% を中心にバランスが取れるように自動調整します。"),
 			tip([
 				"コントラスト: ",
 				upDown(contrastBox, 0, 200, 1),
@@ -2119,6 +2222,9 @@ function convert() {
 			if (keyColorBox.value) args.keyColor = hexToRgb(keyColorBox.value);
 			if (keyToleranceBox.value) args.keyTolerance = parseInt(keyToleranceBox.value);
 			if (backColorBox.value) args.backColor = hexToRgb(backColorBox.value);
+			if (hueBox.value && fmt.numColorChannels > 1) args.hue = parseFloat(hueBox.value) / 360;
+			if (saturationBox.value && fmt.numColorChannels > 1) args.saturation = parseFloat(saturationBox.value) / 100;
+			if (lightnessBox.value) args.lightness = parseFloat(lightnessBox.value) / 100;
 			if (gammaBox.value) {
 				args.gamma.automatic = false;
 				args.gamma.value = parseFloat(gammaBox.value);
@@ -2132,6 +2238,8 @@ function convert() {
 				args.contrast.value = parseFloat(contrastBox.value) / 100;
 			}
 			args.invert = invertBox.checked;
+			setVisible(parentLiOf(hueBox), fmt.numColorChannels > 1);
+			setVisible(parentLiOf(saturationBox), fmt.numColorChannels > 1);
 			process(args);
 			norm = args.outImage;
 			gammaBox.placeholder = `(${args.gamma.value.toFixed(2)})`;

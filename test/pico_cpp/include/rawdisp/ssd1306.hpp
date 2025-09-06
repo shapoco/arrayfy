@@ -40,7 +40,7 @@ class SSD1306 : public CommandDataDisplay {
   SSD1306(const DisplayConfig& cfg, CommandDataI2c& bus, int rotation)
       : CommandDataDisplay(bus, cfg), rotation(rotation) {}
 
-  inline void writeCommand(Command cmd, const uint8_t* data, size_t size) {
+  inline void writeCommandArray(Command cmd, const uint8_t* data, size_t size) {
     uint8_t cmdByte = static_cast<uint8_t>(cmd);
     bus.writeStart(true);
     bus.writeBytes(&cmdByte, 1);
@@ -52,15 +52,15 @@ class SSD1306 : public CommandDataDisplay {
     }
   }
 
-  inline void writeCommand(Command cmd) { writeCommand(cmd, nullptr, 0); }
+  inline void writeCommand(Command cmd) { writeCommandArray(cmd, nullptr, 0); }
 
   inline void writeCommand(Command cmd, uint8_t p0) {
-    writeCommand(cmd, &p0, 1);
+    writeCommandArray(cmd, &p0, 1);
   }
 
   inline void writeCommand(Command cmd, uint8_t p0, uint8_t p1) {
     uint8_t params[] = {p0, p1};
-    writeCommand(cmd, params, sizeof(params));
+    writeCommandArray(cmd, params, sizeof(params));
   }
 
   inline Command commandOr(Command cmd, uint8_t mask) {

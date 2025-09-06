@@ -27,7 +27,9 @@ class CommandDataI2c : public CommandDataBus {
   }
 
   void writeEnd() override {
-    i2c_write_blocking(i2c, devAddr, nullptr, 0, false);
+    // force stop condition
+    uint8_t dummy = 0;
+    i2c_write_blocking(i2c, 0xFF, &dummy, 1, false);
   }
 
   void writeCommand(uint8_t cmd, const uint8_t *params, size_t size) override {
