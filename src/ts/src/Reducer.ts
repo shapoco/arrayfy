@@ -1,4 +1,4 @@
-import {ColorSpace, NormalizedImage, PixelFormat, PixelFormatInfo, QuantizedImage} from './Images';
+import {ColorSpace, NormalizedImage, PixelFormat, PixelFormatInfo, ReducedImage} from './Images';
 import {DitherMethod, Palette} from './Palettes';
 
 export class Arguments {
@@ -7,7 +7,7 @@ export class Arguments {
   public alphaDitherMethod: DitherMethod = DitherMethod.NONE;
   public palette: Palette;
   public format: PixelFormatInfo;
-  public output: QuantizedImage;
+  public output: ReducedImage;
 }
 
 export function reduce(args: Arguments) {
@@ -21,7 +21,7 @@ export function reduce(args: Arguments) {
   const numColCh = fmt.numColorChannels;
 
   const palette = args.palette;
-  args.output = new QuantizedImage(outW, outH, fmt, palette);
+  args.output = new ReducedImage(outW, outH, fmt, palette);
   const outData = args.output.data;
 
   const alpErrDiffuse = args.alphaDitherMethod == DitherMethod.DIFFUSION;

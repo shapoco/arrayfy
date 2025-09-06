@@ -147,7 +147,7 @@ export class NormalizedImage {
   }
 };
 
-export class QuantizedImage {
+export class ReducedImage {
   public data: Uint8Array[];
   public tmp: Uint8Array;
 

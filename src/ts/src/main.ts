@@ -1,9 +1,12 @@
+import {ArrayBlob} from './Blobs';
+import * as CodeGen from './CodeGen';
+import * as Encoder from './Encoder';
 import {Point, Rect, Size} from './Geometries';
-import {ColorSpace, NormalizedImage, PixelFormat, PixelFormatInfo, QuantizedImage} from './Images';
-import {DitherMethod, FixedPalette, Palette, RoundMethod} from './Palettes'
-import * as Preproc from './Preprocessor'
-import * as Quantizer from './Reducer'
-import {clip} from './Utils'
+import {ColorSpace, NormalizedImage, PixelFormat, PixelFormatInfo, ReducedImage} from './Images';
+import {DitherMethod, FixedPalette, Palette, RoundMethod} from './Palettes';
+import * as Preproc from './Preproc';
+import * as Reducer from './Reducer';
+import {clip} from './Utils';
 
 const enum TrimState {
   IDLE,
@@ -13,58 +16,11 @@ const enum TrimState {
   DRAG_LEFT,
 }
 
-const enum PackUnit {
-  UNPACKED,
-  PIXEL,
-  ALIGNMENT,
-}
-
-const enum AlignBoundary {
-  NIBBLE = 4,
-  BYTE_1 = 8,
-  BYTE_2 = 16,
-  BYTE_3 = 24,
-  BYTE_4 = 32,
-}
-
-const enum AlignDir {
-  HIGHER,
-  LOWER,
-}
-
-
 const enum ChannelOrder {
   RGBA,
   BGRA,
   ARGB,
   ABGR,
-}
-
-const enum PixelOrder {
-  NEAR_FIRST,
-  FAR_FIRST,
-}
-
-const enum ByteOrder {
-  LITTLE_ENDIAN,
-  BIG_ENDIAN,
-}
-
-const enum ScanDir {
-  HORIZONTAL,
-  VERTICAL,
-}
-
-const enum CodeUnit {
-  ELEMENTS,
-  ARRAY_DEF,
-  FILE,
-}
-
-const enum Indent {
-  TAB,
-  SPACE_X2,
-  SPACE_X4,
 }
 
 class StopWatch {
@@ -91,17 +47,17 @@ class ArrayfyError extends Error {
 }
 
 class Preset {
-  public channelOrder: ChannelOrder = ChannelOrder.ARGB;
-  public pixelOrder: PixelOrder = PixelOrder.NEAR_FIRST;
-  public byteOrder: ByteOrder = ByteOrder.BIG_ENDIAN;
-  public packUnit: PackUnit = PackUnit.PIXEL;
-  public packDir: ScanDir = ScanDir.HORIZONTAL;
-  public alignBoundary: AlignBoundary = AlignBoundary.BYTE_1;
-  public alignDir: AlignDir = AlignDir.LOWER;
-  public addrDir: ScanDir = ScanDir.HORIZONTAL;
+  public channelOrder = ChannelOrder.ARGB;
+  public farPixelFirst = false;
+  public bigEndian = false;
+  public packUnit = Encoder.PackUnit.PIXEL;
+  public vertPack = false;
+  public alignBoundary = Encoder.AlignBoundary.BYTE_1;
+  public alignLeft = false;
+  public vertAddr = false;
   constructor(
-      public label: string, public description, public format: PixelFormat,
-      ops = {}) {
+      public label: string, public description: string,
+      public format: PixelFormat, ops = {}) {
     for (const k of Object.keys(ops)) {
       if (!(k in this)) {
         throw new Error(`Unknown property '${k}'`);
@@ -118,7 +74,6 @@ let presets: Record<string, Preset> = {
       PixelFormat.RGBA8888,
       {
         channelOrder: ChannelOrder.ARGB,
-        byteOrder: ByteOrder.LITTLE_ENDIAN,
       },
       ),
   rgb888_be: new Preset(
@@ -127,7 +82,7 @@ let presets: Record<string, Preset> = {
       PixelFormat.RGB888,
       {
         channelOrder: ChannelOrder.ARGB,
-        byteOrder: ByteOrder.BIG_ENDIAN,
+        bigEndian: true,
       },
       ),
   rgb666_be_ra: new Preset(
@@ -136,9 +91,8 @@ let presets: Record<string, Preset> = {
       PixelFormat.RGB666,
       {
         channelOrder: ChannelOrder.ARGB,
-        packUnit: PackUnit.UNPACKED,
-        alignDir: AlignDir.LOWER,
-        byteOrder: ByteOrder.BIG_ENDIAN,
+        packUnit: Encoder.PackUnit.UNPACKED,
+        bigEndian: true,
       },
       ),
   rgb666_be_la: new Preset(
@@ -147,9 +101,9 @@ let presets: Record<string, Preset> = {
       PixelFormat.RGB666,
       {
         channelOrder: ChannelOrder.ARGB,
-        packUnit: PackUnit.UNPACKED,
-        alignDir: AlignDir.HIGHER,
-        byteOrder: ByteOrder.BIG_ENDIAN,
+        packUnit: Encoder.PackUnit.UNPACKED,
+        alignLeft: true,
+        bigEndian: true,
       },
       ),
   rgb565_be: new Preset(
@@ -157,7 +111,7 @@ let presets: Record<string, Preset> = {
       'ハイカラー。\n各種 GFX ライブラリでの使用を含め、\n組み込み用途で一般的な形式。',
       PixelFormat.RGB565,
       {
-        byteOrder: ByteOrder.BIG_ENDIAN,
+        bigEndian: true,
       },
       ),
   rgb444_be: new Preset(
@@ -165,10 +119,10 @@ let presets: Record<string, Preset> = {
       'ST7789 の 12bit モード用の形式。',
       PixelFormat.RGB444,
       {
-        packUnit: PackUnit.ALIGNMENT,
-        pixelOrder: PixelOrder.FAR_FIRST,
-        byteOrder: ByteOrder.BIG_ENDIAN,
-        alignBoundary: AlignBoundary.BYTE_3,
+        packUnit: Encoder.PackUnit.ALIGNMENT,
+        farPixelFirst: true,
+        bigEndian: true,
+        alignBoundary: Encoder.AlignBoundary.BYTE_3,
       },
       ),
   rgb332: new Preset(
@@ -181,9 +135,8 @@ let presets: Record<string, Preset> = {
       'ILI9488 の 8 色モード用。',
       PixelFormat.RGB111,
       {
-        packUnit: PackUnit.ALIGNMENT,
-        pixelOrder: PixelOrder.FAR_FIRST,
-        packDir: ScanDir.HORIZONTAL,
+        packUnit: Encoder.PackUnit.ALIGNMENT,
+        farPixelFirst: true,
       },
       ),
   bw_hscan: new Preset(
@@ -191,9 +144,8 @@ let presets: Record<string, Preset> = {
       '各種 GFX ライブラリ用。',
       PixelFormat.BW,
       {
-        packUnit: PackUnit.ALIGNMENT,
-        pixelOrder: PixelOrder.FAR_FIRST,
-        packDir: ScanDir.HORIZONTAL,
+        packUnit: Encoder.PackUnit.ALIGNMENT,
+        farPixelFirst: true,
       },
       ),
   bw_vpack: new Preset(
@@ -201,9 +153,8 @@ let presets: Record<string, Preset> = {
       'SPI/I2C ドライバを使用して\nSSD1306/1309 等の白黒ディスプレイに直接転送するための形式。',
       PixelFormat.BW,
       {
-        packUnit: PackUnit.ALIGNMENT,
-        pixelOrder: PixelOrder.NEAR_FIRST,
-        packDir: ScanDir.VERTICAL,
+        packUnit: Encoder.PackUnit.ALIGNMENT,
+        vertPack: true,
       },
       ),
 };
@@ -518,61 +469,41 @@ const channelOrderBox = makeSelectBox(
       {value: ChannelOrder.ABGR, label: 'ABGR'},
     ],
     ChannelOrder.RGBA);
-const pixelOrderBox = makeSelectBox(
+const farPixelFirstBox = makeSelectBox(
     [
-      {value: PixelOrder.FAR_FIRST, label: '上位から'},
-      {value: PixelOrder.NEAR_FIRST, label: '下位から'},
+      {value: 1, label: '上位から'},
+      {value: 0, label: '下位から'},
     ],
-    PixelOrder.FAR_FIRST);
-const byteOrderBox = makeSelectBox(
-    [
-      {value: ByteOrder.LITTLE_ENDIAN, label: 'Little Endian'},
-      {value: ByteOrder.BIG_ENDIAN, label: 'Big Endian'},
-    ],
-    ByteOrder.BIG_ENDIAN);
+    1);
+const bigEndianBox = makeCheckBox('ビッグエンディアン');
 const packUnitBox = makeSelectBox(
     [
-      {value: PackUnit.UNPACKED, label: 'アンパックド'},
-      {value: PackUnit.PIXEL, label: '1 ピクセル'},
-      {value: PackUnit.ALIGNMENT, label: 'アライメント境界'},
+      {value: Encoder.PackUnit.UNPACKED, label: 'アンパックド'},
+      {value: Encoder.PackUnit.PIXEL, label: '1 ピクセル'},
+      {value: Encoder.PackUnit.ALIGNMENT, label: 'アライメント境界'},
     ],
-    PackUnit.PIXEL);
-const packDirBox = makeSelectBox(
-    [
-      {value: ScanDir.HORIZONTAL, label: '横'},
-      {value: ScanDir.VERTICAL, label: '縦'},
-    ],
-    ScanDir.HORIZONTAL);
+    Encoder.PackUnit.PIXEL);
+const vertPackBox = makeCheckBox('縦パッキング');
 const alignBoundaryBox = makeSelectBox(
     [
-      {value: AlignBoundary.NIBBLE, label: 'ニブル'},
-      {value: AlignBoundary.BYTE_1, label: '1 バイト'},
-      {value: AlignBoundary.BYTE_2, label: '2 バイト'},
-      {value: AlignBoundary.BYTE_3, label: '3 バイト'},
-      {value: AlignBoundary.BYTE_4, label: '4 バイト'},
+      {value: Encoder.AlignBoundary.NIBBLE, label: 'ニブル'},
+      {value: Encoder.AlignBoundary.BYTE_1, label: '1 バイト'},
+      {value: Encoder.AlignBoundary.BYTE_2, label: '2 バイト'},
+      {value: Encoder.AlignBoundary.BYTE_3, label: '3 バイト'},
+      {value: Encoder.AlignBoundary.BYTE_4, label: '4 バイト'},
     ],
-    AlignBoundary.BYTE_1);
-const alignDirBox = makeSelectBox(
-    [
-      {value: AlignDir.HIGHER, label: '上位詰め'},
-      {value: AlignDir.LOWER, label: '下位詰め'},
-    ],
-    AlignDir.LOWER);
-const addressingBox = makeSelectBox(
-    [
-      {value: ScanDir.HORIZONTAL, label: '水平'},
-      {value: ScanDir.VERTICAL, label: '垂直'},
-    ],
-    ScanDir.HORIZONTAL);
+    Encoder.AlignBoundary.BYTE_1);
+const leftAlignBox = makeCheckBox('左詰め');
+const vertAddrBox = makeCheckBox('垂直スキャン');
 const structCanvas = document.createElement('canvas');
 const structErrorBox = makeParagraph();
 const codeUnitBox = makeSelectBox(
     [
-      {value: CodeUnit.FILE, label: 'ファイル全体'},
-      {value: CodeUnit.ARRAY_DEF, label: '配列定義'},
-      {value: CodeUnit.ELEMENTS, label: '要素のみ'},
+      {value: CodeGen.CodeUnit.FILE, label: 'ファイル全体'},
+      {value: CodeGen.CodeUnit.ARRAY_DEF, label: '配列定義'},
+      {value: CodeGen.CodeUnit.ELEMENTS, label: '要素のみ'},
     ],
-    CodeUnit.FILE)
+    CodeGen.CodeUnit.FILE)
 const codeColsBox = makeSelectBox(
     [
       {value: 8, label: '8'},
@@ -582,11 +513,11 @@ const codeColsBox = makeSelectBox(
     16);
 const indentBox = makeSelectBox(
     [
-      {value: Indent.SPACE_X2, label: 'スペース x2'},
-      {value: Indent.SPACE_X4, label: 'スペース x4'},
-      {value: Indent.TAB, label: 'タブ'},
+      {value: CodeGen.Indent.SPACE_X2, label: 'スペース x2'},
+      {value: CodeGen.Indent.SPACE_X4, label: 'スペース x4'},
+      {value: CodeGen.Indent.TAB, label: 'タブ'},
     ],
-    Indent.SPACE_X2);
+    CodeGen.Indent.SPACE_X2);
 
 const codeBox = document.createElement('pre');
 
@@ -625,7 +556,7 @@ let trimL = 0, trimT = 0, trimR = 1, trimB = 1;
 
 let trimUiState = TrimState.IDLE;
 
-let quantizedImage: QuantizedImage|null = null;
+let reducedImage: ReducedImage|null = null;
 
 let trimCanvasWidth = 800;
 let trimCanvasHeight = 400;
@@ -780,7 +711,7 @@ async function onLoad() {
           'デフォルトは 0 です。\n空欄にすると、輝度 50% を中心にバランスが取れるように自動調整します。'),
       tip(['コントラスト: ', upDown(contrastBox, 0, 200, 1), '%'],
           'デフォルトは 100% です。\n空欄にすると、階調が失われない範囲でダイナミックレンジが最大となるように自動調整します。'),
-      tip([invertBox.parentNode], '各チャネルの値を大小反転します。'),
+      tip([invertBox.parentElement], '各チャネルの値を大小反転します。'),
     ])));
     container.appendChild(section);
 
@@ -879,27 +810,27 @@ async function onLoad() {
             tip(['パッキング単位: ', packUnitBox],
                 'パッキングの単位を指定します。')),
         pro(tip(
-            ['パッキング方向: ', packDirBox],
-            '複数ピクセルをパッキングする場合に、どの方向にパッキングするかを指定します。\n' +
-                '多くの場合横ですが、SSD1306/1309 などの一部の白黒ディスプレイに\n' +
-                '直接転送可能なデータを生成する場合は縦を指定してください。')),
-        pro(tip(
-            ['アドレス方向: ', addressingBox],
-            'アドレスのインクリメント方向を指定します。\n通常は水平です。')),
+            [vertPackBox.parentElement],
+            '複数ピクセルをパッキングする場合に、縦方向にパッキングします。\n' +
+                'SSD1306/1309 などの一部の白黒ディスプレイに\n' +
+                '直接転送可能なデータを生成する場合はチェックします。')),
+        pro(
+            tip([vertAddrBox.parentElement],
+                'アドレスを縦方向にインクリメントする場合にチェックします。')),
         pro(
             tip(['チャネル順: ', channelOrderBox],
                 'RGB のチャネルを並べる順序を指定します。')),
         pro(
-            tip(['ピクセル順: ', pixelOrderBox],
+            tip(['ピクセル順: ', farPixelFirstBox],
                 'バイト内のピクセルの順序を指定します。')),
         pro(
             tip(['アライメント境界: ', alignBoundaryBox],
                 'アライメントの境界を指定します。')),
         pro(
-            tip(['アライメント方向: ', alignDirBox],
-                'アライメントの方向を指定します。')),
+            tip([leftAlignBox.parentElement],
+                'フィールドをアライメント境界内で左詰めします。')),
         pro(
-            tip(['バイト順: ', byteOrderBox],
+            tip([bigEndianBox.parentElement],
                 'ピクセル内のバイトの順序を指定します。')),
       ]),
       pCanvas,
@@ -1300,7 +1231,10 @@ function updateTrimCanvas(): void {
     const dy = view.y - worldY0 * zoom;
     const dw = origCanvas.width * zoom;
     const dh = origCanvas.height * zoom;
+
+    ctx.imageSmoothingEnabled = zoom < 3;
     ctx.drawImage(origCanvas, dx, dy, dw, dh);
+    ctx.imageSmoothingEnabled = true;
   }
 
   // トリミングのガイド線描画
@@ -1322,13 +1256,13 @@ function updateTrimCanvas(): void {
 function loadPreset(preset: Preset): void {
   pixelFormatBox.value = preset.format.toString();
   channelOrderBox.value = preset.channelOrder.toString();
-  pixelOrderBox.value = preset.pixelOrder.toString();
-  byteOrderBox.value = preset.byteOrder.toString();
+  farPixelFirstBox.value = preset.farPixelFirst ? '1' : '0';
+  bigEndianBox.checked = preset.bigEndian;
   packUnitBox.value = preset.packUnit.toString();
-  packDirBox.value = preset.packDir.toString();
+  vertPackBox.checked = preset.vertPack;
   alignBoundaryBox.value = preset.alignBoundary.toString();
-  alignDirBox.value = preset.alignDir.toString();
-  addressingBox.value = preset.addrDir.toString();
+  leftAlignBox.checked = preset.alignLeft;
+  vertAddrBox.checked = preset.vertAddr;
   requestQuantize();
 }
 
@@ -1340,7 +1274,7 @@ function requestQuantize(): void {
 }
 
 function convert(): void {
-  quantizedImage = null;
+  reducedImage = null;
 
   if (quantizeTimeoutId >= 0) {
     clearTimeout(quantizeTimeoutId);
@@ -1507,23 +1441,23 @@ function convert(): void {
       const palette = new FixedPalette(fmt.colorBits, roundMethod);
 
       // 減色
-      const args = new Quantizer.Arguments();
+      const args = new Reducer.Arguments();
       args.src = norm;
       args.format = fmt;
       args.palette = palette;
       args.colorDitherMethod = colDither;
       args.alphaDitherMethod = alpDither;
 
-      Quantizer.reduce(args);
+      Reducer.reduce(args);
 
-      quantizedImage = args.output;
+      reducedImage = args.output;
 
       swDetail.lap('Quantization');
 
       // プレビューの作成
       {
         const previewData = new Uint8Array(numPixels * 4);
-        quantizedImage.getPreviewImage(previewData);
+        reducedImage.getPreviewImage(previewData);
 
         previewCanvas.width = outW;
         previewCanvas.height = outH;
@@ -1587,183 +1521,67 @@ function requestGenerateCode(): void {
 function generateCode(): void {
   const swDetail = new StopWatch(false);
 
-  if (!quantizedImage) {
+  if (!reducedImage) {
     codeBox.textContent = '';
     show(codeBox);
     hide(codeHiddenBox);
     hide(codeErrorBox);
     return;
   }
+  let blobs: ArrayBlob[] = [];
+
 
   try {
-    const channelData = quantizedImage.data;
-    const fmt = quantizedImage.format;
-
+    const args = new Encoder.ImageArgs();
+    args.src = reducedImage;
     const chOrder: ChannelOrder = parseInt(channelOrderBox.value);
-    const msb1st = parseInt(pixelOrderBox.value) == PixelOrder.FAR_FIRST;
-    const bigEndian = parseInt(byteOrderBox.value) == ByteOrder.BIG_ENDIAN;
-    const packUnit: PackUnit = parseInt(packUnitBox.value);
-    const vertPack = parseInt(packDirBox.value) == ScanDir.VERTICAL;
-    const alignBoundary: AlignBoundary = parseInt(alignBoundaryBox.value);
-    const alignLeft = parseInt(alignDirBox.value) == AlignDir.HIGHER;
-    const vertAddr = parseInt(addressingBox.value) == ScanDir.VERTICAL;
-
-    const numCh = fmt.numTotalChannels;
-    swDetail.lap('Channel Order Determination');
-
-    // チャネル順序の決定
-    let chMap: Int32Array;
-    switch (fmt.colorSpace) {
-      case ColorSpace.GRAYSCALE:
-        chMap = new Int32Array([0]);
+    switch (chOrder) {
+      case ChannelOrder.RGBA:
+        args.alphaFirst = true;
+        args.colorDescending = true;
         break;
-      case ColorSpace.RGB:
-        if (fmt.hasAlpha) {
-          switch (chOrder) {
-            case ChannelOrder.RGBA:
-              chMap = new Int32Array([3, 2, 1, 0]);
-              break;
-            case ChannelOrder.BGRA:
-              chMap = new Int32Array([3, 0, 1, 2]);
-              break;
-            case ChannelOrder.ARGB:
-              chMap = new Int32Array([2, 1, 0, 3]);
-              break;
-            case ChannelOrder.ABGR:
-              chMap = new Int32Array([0, 1, 2, 3]);
-              break;
-            default:
-              throw new Error('Unsupported channel order');
-          }
-        } else {
-          switch (chOrder) {
-            case ChannelOrder.RGBA:
-            case ChannelOrder.ARGB:
-              chMap = new Int32Array([2, 1, 0]);
-              break;
-            case ChannelOrder.BGRA:
-            case ChannelOrder.ABGR:
-              chMap = new Int32Array([0, 1, 2]);
-              break;
-            default:
-              throw new Error('Unsupported channel order');
-          }
-        }
+      case ChannelOrder.BGRA:
+        args.alphaFirst = true;
+        args.colorDescending = false;
+        break;
+      case ChannelOrder.ARGB:
+        args.alphaFirst = false;
+        args.colorDescending = true;
+        break;
+      case ChannelOrder.ABGR:
+        args.alphaFirst = false;
+        args.colorDescending = false;
         break;
       default:
-        throw new Error('Unsupported color space');
+        throw new Error('Unsupported channel order');
+    }
+    const plane = new Encoder.PlaneArgs();
+    plane.farPixelFirst = parseInt(farPixelFirstBox.value) == 1;
+    plane.bigEndian = bigEndianBox.checked;
+    plane.packUnit = parseInt(packUnitBox.value);
+    plane.vertPack = vertPackBox.checked;
+    plane.alignBoundary = parseInt(alignBoundaryBox.value);
+    plane.alignLeft = leftAlignBox.checked;
+    plane.vertAddr = vertAddrBox.checked;
+    args.planes.push(plane);
+
+    Encoder.encode(args);
+
+    for (const plane of args.planes) {
+      blobs.push(plane.output.blob);
     }
 
-    // チャネル毎のビット数
-    const chBits = new Int32Array(numCh);
+    setVisible(parentLiOf(leftAlignBox), plane.output.alignRequired);
+    setVisible(parentLiOf(channelOrderBox), plane.output.fields.length > 1);
+    setVisible(parentLiOf(farPixelFirstBox), plane.output.pixelsPerFrag > 1);
+    setVisible(parentLiOf(vertPackBox), plane.output.pixelsPerFrag > 1);
+    setVisible(parentLiOf(bigEndianBox), plane.output.bytesPerFrag > 1);
     {
-      const tmp = new Int32Array(numCh);
-      for (let i = 0; i < fmt.numColorChannels; i++) {
-        tmp[i] = fmt.colorBits[i];
-      }
-      if (fmt.hasAlpha) {
-        tmp[fmt.numColorChannels] = fmt.alphaBits;
-      }
-      for (let i = 0; i < numCh; i++) {
-        chBits[i] = tmp[chMap[i]];
-      }
-    }
-    swDetail.lap('Channel Bit Depth Determination');
+      const fmt = args.src.format;
+      const out = plane.output;
+      const numCh = out.fields.length;
 
-    // 構造体の構造を決定
-    let chPos = new Uint8Array(numCh);  // チャネル毎のビット位置
-    let pixelStride = 0;  // ピクセルあたりのビット数 (パディング含む)
-    let pixelsPerFrag = 0;  // フラグメントあたりのピクセル数
-    let bytesPerFrag = 0;   // フラグメントあたりのバイト数
-    let alignRequired = false;
-    if (packUnit == PackUnit.UNPACKED) {
-      // 一番幅の広いチャネルに合わせてチャネル毎の幅を決定
-      let maxChBits = 0;
-      for (let i = 0; i < numCh; i++) {
-        if (maxChBits < chBits[i]) {
-          maxChBits = chBits[i];
-        }
-      }
-      const chStride = Math.ceil(maxChBits / alignBoundary) * alignBoundary;
-
-      // 各チャネルのビット位置を算出
-      for (let ch = 0; ch < numCh; ch++) {
-        chPos[ch] = ch * chStride;
-        alignRequired ||= chStride != chBits[ch];
-        if (alignLeft) {
-          chPos[ch] += chStride - chBits[ch];
-        }
-      }
-
-      pixelStride = chStride * numCh;
-      bytesPerFrag = Math.ceil(pixelStride / 8);
-      pixelsPerFrag = 1;
-
-    } else {
-      // 各チャネルのビット位置 (下位詰めの場合)
-      let pixBits = 0;
-      for (let ch = 0; ch < numCh; ch++) {
-        chPos[ch] = pixBits;
-        pixBits += chBits[ch];
-      }
-
-      switch (packUnit) {
-        case PackUnit.PIXEL:
-          // ピクセル単位のパッキングの場合
-          pixelStride = Math.ceil(pixBits / alignBoundary) * alignBoundary;
-          pixelsPerFrag = Math.max(1, Math.floor(8 / pixelStride));
-          bytesPerFrag = Math.ceil(pixelStride / 8);
-          alignRequired = pixelStride != pixBits;
-          if (alignLeft) {
-            // 上位詰めの場合はチャネルのビット位置修正
-            for (let ch = 0; ch < numCh; ch++) {
-              chPos[ch] += pixelStride - pixBits;
-            }
-          }
-          break;
-
-        case PackUnit.ALIGNMENT:
-          // 複数ピクセルをパッキングする場合
-          if (pixBits > alignBoundary / 2) {
-            throw new ArrayfyError(
-                packUnitBox,
-                'アライメント境界の半分より大きなピクセルを複数パッキングできません。',
-            );
-          }
-          pixelStride = pixBits;
-          pixelsPerFrag = Math.floor(alignBoundary / pixBits);
-
-          const fragBits = pixBits * pixelsPerFrag;
-          const fragStride =
-              Math.ceil(fragBits / alignBoundary) * alignBoundary;
-          bytesPerFrag = Math.ceil(fragStride / 8);
-          alignRequired = fragStride != fragBits;
-          if (alignLeft) {
-            // 上位詰めの場合はチャネルビット位置に下駄を履かせる
-            for (let i = 0; i < numCh; i++) {
-              chPos[i] += fragStride - fragBits;
-            }
-          }
-
-          break;
-
-        default:
-          throw new Error('Unsupported PackUnit');
-      }
-    }
-    swDetail.lap('Fragment Structure Determination');
-
-    setVisible(parentLiOf(alignDirBox), alignRequired);
-    setVisible(parentLiOf(channelOrderBox), numCh > 1);
-    setVisible(parentLiOf(pixelOrderBox), pixelsPerFrag > 1);
-    setVisible(parentLiOf(packDirBox), pixelsPerFrag > 1);
-    setVisible(parentLiOf(byteOrderBox), bytesPerFrag > 1);
-
-    swDetail.lap('UI Update');
-
-    // 構造体の図を描画
-    {
-      const numCols = bytesPerFrag * 8;
+      const numCols = out.bytesPerFrag * 8;
       const numRows = 3;
 
       const colW = clip(20, 40, Math.round(800 / numCols));
@@ -1808,7 +1626,7 @@ function generateCode(): void {
           ctx.fillText(iBit.toString(), x + colW / 2, pad + rowH + rowH / 2);
           if (iBit == 3) {
             const ib = Math.floor((numCols - 1 - i) / 8);
-            const iByte = bigEndian ? (bytesPerFrag - 1 - ib) : ib;
+            const iByte = plane.bigEndian ? (out.bytesPerFrag - 1 - ib) : ib;
             ctx.fillText('Byte' + iByte.toString(), x, pad + rowH / 2);
           }
         }
@@ -1842,14 +1660,14 @@ function generateCode(): void {
       }
 
       // チャネルの描画
-      for (let ip = 0; ip < pixelsPerFrag; ip++) {
-        const iPix = msb1st ? (pixelsPerFrag - 1 - ip) : ip;
-        for (let ch = 0; ch < numCh; ch++) {
-          const r = pad + tableW - (ip * pixelStride + chPos[ch]) * colW;
-          const w = chBits[ch] * colW;
+      for (let ip = 0; ip < out.pixelsPerFrag; ip++) {
+        const iPix = plane.farPixelFirst ? (out.pixelsPerFrag - 1 - ip) : ip;
+        for (const field of out.fields) {
+          const r = pad + tableW - (ip * out.pixelStride + field.pos) * colW;
+          const w = field.width * colW;
           const x = r - w;
           const y = pad + tableH - rowH;
-          ctx.fillStyle = rgbColors[chMap[ch]];
+          ctx.fillStyle = rgbColors[field.srcChannel];
           ctx.fillRect(x, y, w, rowH);
 
           ctx.strokeStyle = '#000';
@@ -1858,180 +1676,55 @@ function generateCode(): void {
           ctx.fillStyle = '#000';
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
-          const label =
-              fmt.channelName(chMap[ch]) + (pixelsPerFrag > 1 ? iPix : '');
+          const label = fmt.channelName(field.srcChannel) +
+              (out.pixelsPerFrag > 1 ? iPix : '');
           const mtx = ctx.measureText(label);
           ctx.fillText(label, x + w / 2, y + rowH / 2);
         }
       }
     }
-    swDetail.lap('Table Draw');
-
-    // エンコードパラメータ
-    const fragWidth = vertPack ? 1 : pixelsPerFrag;
-    const fragHeight = vertPack ? pixelsPerFrag : 1;
-    const width = previewCanvas.width;
-    const height = previewCanvas.height;
-    const cols = Math.ceil(width / fragWidth);
-    const rows = Math.ceil(height / fragHeight);
-    const numPacks = cols * rows;
-
-    const arrayData = new Uint8Array(numPacks * bytesPerFrag);
-    let iByte = 0;
-
-    // フラグメントループ
-    for (let fragIndex = 0; fragIndex < numPacks; fragIndex++) {
-      let xCoarse: number, yCoarse: number;
-      if (vertAddr) {
-        xCoarse = fragWidth * Math.floor(fragIndex / rows);
-        yCoarse = fragHeight * (fragIndex % rows);
-      } else {
-        xCoarse = fragWidth * (fragIndex % cols);
-        yCoarse = fragHeight * Math.floor(fragIndex / cols);
-      }
-
-      // ピクセルループ
-      let fragData = 0;
-      let ip = 0;
-      for (let yFine = 0; yFine < fragHeight; yFine++) {
-        for (let xFine = 0; xFine < fragWidth; xFine++) {
-          const x = xCoarse + xFine;
-          const y = yCoarse + yFine;
-
-          if (y < height && x < width) {
-            // チャネルループ
-            const iPix = msb1st ? (pixelsPerFrag - 1 - ip) : ip;
-            const pixOffset = pixelStride * iPix;
-            for (let ch = 0; ch < numCh; ch++) {
-              const chData = channelData[chMap[ch]][y * width + x];
-              const shift = pixOffset + chPos[ch];
-              fragData |= chData << shift;
-            }  // for ch
-          }
-
-          ip++;
-        }  // for xFine
-      }  // for yFine
-
-      // バイト単位に変換
-      const fragBits = bytesPerFrag * 8;
-      for (let j = 0; j < bytesPerFrag; j++) {
-        if (bigEndian) {
-          arrayData[iByte++] = (fragData >> (fragBits - 8)) & 0xFF;
-          fragData <<= 8;
-        } else {
-          arrayData[iByte++] = fragData & 0xFF;
-          fragData >>= 8;
-        }
-      }
-    }  // for packIndex
-    swDetail.lap('Array Generation');
-
-    try {
-      // 列数決定
-      let arrayCols = parseInt(codeColsBox.value);
-
-      // インデント決定
-      let indent = '  ';
-      switch (parseInt(indentBox.value)) {
-        case Indent.SPACE_X2:
-          indent = '  ';
-          break;
-        case Indent.SPACE_X4:
-          indent = '    ';
-          break;
-        case Indent.TAB:
-          indent = '\t';
-          break;
-        default:
-          throw new Error('Unknown indent type');
-      }
-
-      const codeUnit: CodeUnit = parseInt(codeUnitBox.value);
-
-      // コード生成
-      let codeBuff: string[] = [];
-      if (codeUnit >= CodeUnit.FILE) {
-        codeBuff.push(`#pragma once\n`);
-        codeBuff.push(`\n`);
-        codeBuff.push(`#include <stdint.h>\n`);
-        codeBuff.push(`\n`);
-      }
-
-      if (codeUnit >= CodeUnit.ARRAY_DEF) {
-        codeBuff.push(`// ${width}x${height}px, ${fmt.toString()}\n`);
-        codeBuff.push(`// `);
-        if (numCh > 1) {
-          let chOrderStr = '';
-          for (let i = 0; i < numCh; i++) {
-            if (i > 0) chOrderStr += ':';
-            chOrderStr += fmt.channelName(chMap[numCh - 1 - i]);
-          }
-          codeBuff.push(chOrderStr + ', ');
-        }
-        if (pixelsPerFrag > 1) {
-          codeBuff.push((msb1st ? 'MSB' : 'LSB') + ' First, ');
-          codeBuff.push((vertPack ? 'Vertical' : 'Horizontal') + ' Packing, ');
-        }
-        if (bytesPerFrag > 1) {
-          codeBuff.push((bigEndian ? 'Big' : 'Little') + ' Endian, ');
-        }
-        codeBuff.push(`${vertAddr ? 'Vertical' : 'Horizontal'} Adressing\n`);
-        codeBuff.push(`// ${arrayData.length} Bytes\n`);
-        codeBuff.push('const uint8_t imageArray[] = {\n');
-      }
-
-      swDetail.lap('Code Generation (Before Array Elements)');
-      let hexTable: string[] = [];
-      for (let i = 0; i < 256; i++) {
-        hexTable.push('0x' + i.toString(16).padStart(2, '0') + ',');
-      }
-      for (let i = 0; i < arrayData.length; i++) {
-        if (i % arrayCols == 0) codeBuff.push(indent);
-        codeBuff.push(hexTable[arrayData[i]]);
-        if ((i + 1) % arrayCols == 0 || i + 1 == arrayData.length) {
-          codeBuff.push('\n');
-        } else {
-          codeBuff.push(' ');
-        }
-      }
-
-      if (codeUnit >= CodeUnit.ARRAY_DEF) {
-        codeBuff.push('};\n');
-      }
-      swDetail.lap('Code Generation (After Array Elements)');
-
-      let numLines = 0;
-      for (let s of codeBuff) {
-        if (s.endsWith('\n')) numLines++;
-      }
-
-      codeBox.textContent = codeBuff.join('');
-      if (numLines < 1000) {
-        show(codeBox);
-        hide(codeHiddenBox);
-      } else {
-        showCodeLink.textContent = `表示する (${numLines} 行)`;
-        hide(codeBox);
-        show(codeHiddenBox);
-      }
-      hide(codeErrorBox);
-    } catch (error) {
-      codeErrorBox.textContent = error.message;
-      hide(codeBox);
-      hide(codeHiddenBox);
-      show(codeErrorBox);
-    }
-
     show(structCanvas);
     hide(structErrorBox);
   } catch (error) {
+    hide(structCanvas);
+    show(structErrorBox);
+    structErrorBox.textContent = `${error.stack}`;
     codeBox.textContent = '';
-    structErrorBox.textContent = error.message;
     show(codeBox);
     hide(codeHiddenBox);
     hide(codeErrorBox);
-    show(structErrorBox);
+    return;
+  }
+
+  try {
+    const args = new CodeGen.Args();
+    args.src = reducedImage;
+    args.blobs = blobs;
+    args.codeUnit = parseInt(codeUnitBox.value);
+    args.indent = parseInt(indentBox.value);
+    args.arrayCols = Math.max(1, parseInt(codeColsBox.value));
+
+    CodeGen.generate(args);
+
+    const code = args.codes[0];
+
+    codeBox.textContent = code.code;
+    if (code.numLines < 1000) {
+      show(codeBox);
+      hide(codeHiddenBox);
+    } else {
+      showCodeLink.textContent = `表示する (${code.numLines} 行)`;
+      hide(codeBox);
+      show(codeHiddenBox);
+    }
+
+    hide(codeErrorBox);
+  } catch (error) {
+    codeErrorBox.textContent = `${error.stack}`;
+    codeBox.textContent = '';
+    show(codeBox);
+    hide(codeHiddenBox);
+    hide(codeErrorBox);
   }
 
   swDetail.lap('UI Update');

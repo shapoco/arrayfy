@@ -12,10 +12,12 @@ export const enum DitherMethod {
 }
 
 export abstract class Palette {
+  // 減色
   abstract reduce(
       src: Float32Array, srcOffset: number, dest: Uint8Array,
       destOffset: number, error: Float32Array): void;
 
+  // プレビュー用に元の色を復元
   abstract extract(
       src: Uint8Array, srcOffset: number, dest: Uint8Array,
       destOffset: number): void;
@@ -56,7 +58,6 @@ export class FixedPalette extends Palette {
   extract(
       src: Uint8Array, srcOffset: number, dest: Uint8Array,
       destOffset: number): void {
-    // プレビュー用の色生成
     switch (this.channelBits.length) {
       case 1:
         // グレースケール
