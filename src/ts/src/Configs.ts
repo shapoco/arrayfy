@@ -64,8 +64,7 @@ export const defaultConfig: Config = {
 const argb8888_le = (function(): Config {
   let p = {...defaultConfig};
   p.label = 'ARGB8888-LE';
-  p.description =
-      '透明度付きフルカラー。\n一般的な PC/Mac のビットマップ形式。\nWindows GDI+ 互換。';
+  p.description = '透明度付きフルカラー。';
   p.format = Images.PixelFormat.RGBA8888;
   p.channelOrder = Images.ChannelOrder.ARGB;
   return p;

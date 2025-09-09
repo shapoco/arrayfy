@@ -290,9 +290,23 @@ const heightBox = Ui.makeTextBox('', '(auto)', 4);
 
 const scalingMethodBox = Ui.makeSelectBox(
     [
-      {value: Preproc.ScalingMethod.ZOOM, label: 'ズーム'},
-      {value: Preproc.ScalingMethod.FIT, label: 'フィット'},
-      {value: Preproc.ScalingMethod.STRETCH, label: 'ストレッチ'},
+      {
+        value: Preproc.ScalingMethod.ZOOM,
+        label: 'ズーム',
+        tip:
+            'アスペクト比を維持したまま、出力画像に余白が出ないように画像をズームします。',
+      },
+      {
+        value: Preproc.ScalingMethod.FIT,
+        label: 'フィット',
+        tip:
+            'アスペクト比を維持したまま、画像全体が出力画像に収まるようにズームします。',
+      },
+      {
+        value: Preproc.ScalingMethod.STRETCH,
+        label: 'ストレッチ',
+        tip: 'アスペクト比を無視して、出力画像に合わせて画像を引き伸ばします。',
+      },
     ],
     Preproc.ScalingMethod.ZOOM);
 
@@ -321,16 +335,16 @@ const csrModeBox = Ui.makeSelectBox(
       {
         value: Preproc.ColorSpaceReductionMode.NONE,
         label: '縮退しない',
-        tip: '元の色空間をそのまま使います。',
+        tip: '元の色を保ったまま減色を行います。誤差拡散と組み合わせると不自然になることがあります。',
       },
       {
         value: Preproc.ColorSpaceReductionMode.CLIP,
         label: '切り捨てる',
-        tip: '新しい色空間で表現できない色は最も近い色に変換します。',
+        tip: '新しい色空間で表現できない色は彩度を下げて灰色にします。',
       },
       {
         value: Preproc.ColorSpaceReductionMode.FOLD,
-        label: '畳み込む',
+        label: '折り畳む',
         tip:
             '新しい色空間で表現できない色は色相環上で折り返して空間内に収めます。',
       },

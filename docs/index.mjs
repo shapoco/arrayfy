@@ -740,7 +740,7 @@ const defaultConfig = {
 const argb8888_le = (function() {
 	let p = { ...defaultConfig };
 	p.label = "ARGB8888-LE";
-	p.description = "透明度付きフルカラー。\n一般的な PC/Mac のビットマップ形式。\nWindows GDI+ 互換。";
+	p.description = "透明度付きフルカラー。";
 	p.format = PixelFormat.RGBA8888;
 	p.channelOrder = ChannelOrder.ARGB;
 	return p;
@@ -2069,15 +2069,18 @@ const heightBox = makeTextBox("", "(auto)", 4);
 const scalingMethodBox = makeSelectBox([
 	{
 		value: ScalingMethod.ZOOM,
-		label: "ズーム"
+		label: "ズーム",
+		tip: "アスペクト比を維持したまま、出力画像に余白が出ないように画像をズームします。"
 	},
 	{
 		value: ScalingMethod.FIT,
-		label: "フィット"
+		label: "フィット",
+		tip: "アスペクト比を維持したまま、画像全体が出力画像に収まるようにズームします。"
 	},
 	{
 		value: ScalingMethod.STRETCH,
-		label: "ストレッチ"
+		label: "ストレッチ",
+		tip: "アスペクト比を無視して、出力画像に合わせて画像を引き伸ばします。"
 	}
 ], ScalingMethod.ZOOM);
 const formatSection = makeSection(makeFloatList([
@@ -2096,16 +2099,16 @@ const csrModeBox = makeSelectBox([
 	{
 		value: ColorSpaceReductionMode.NONE,
 		label: "縮退しない",
-		tip: "元の色空間をそのまま使います。"
+		tip: "元の色を保ったまま減色を行います。誤差拡散と組み合わせると不自然になることがあります。"
 	},
 	{
 		value: ColorSpaceReductionMode.CLIP,
 		label: "切り捨てる",
-		tip: "新しい色空間で表現できない色は最も近い色に変換します。"
+		tip: "新しい色空間で表現できない色は彩度を下げて灰色にします。"
 	},
 	{
 		value: ColorSpaceReductionMode.FOLD,
-		label: "畳み込む",
+		label: "折り畳む",
 		tip: "新しい色空間で表現できない色は色相環上で折り返して空間内に収めます。"
 	},
 	{
