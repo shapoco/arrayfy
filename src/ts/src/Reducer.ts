@@ -1,4 +1,4 @@
-import {ColorSpace, NormalizedImage, PixelFormat, PixelFormatInfo, ReducedImage} from './Images';
+import {NormalizedImage, PixelFormatInfo, ReducedImage} from './Images';
 import {DitherMethod, Palette} from './Palettes';
 
 export class Arguments {
@@ -14,10 +14,8 @@ export function reduce(args: Arguments) {
   const norm = args.src;
   const outW = norm.width;
   const outH = norm.height;
-  const numPixels = outW * outH;
 
   const fmt = args.format;
-  const numAllCh = fmt.numTotalChannels;
   const numColCh = fmt.numColorChannels;
 
   const palette = args.palette;

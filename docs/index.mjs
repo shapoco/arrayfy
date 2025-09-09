@@ -16,7 +16,8 @@ var Code = class {
 	code;
 	numLines;
 };
-var Args$1 = class {
+var CodeGenArgs = class {
+	name;
 	src;
 	blobs;
 	codeUnit;
@@ -46,12 +47,16 @@ function generate(args) {
 		codeBuff.push(`\n`);
 	}
 	args.src.format;
-	for (let blob of args.blobs) {
+	for (let iBlob = 0; iBlob < args.blobs.length; iBlob++) {
+		const blob = args.blobs[iBlob];
 		const array = blob.array;
+		let arrayName;
+		if (args.blobs.length <= 1) arrayName = args.name;
+		else arrayName = args.name + "_" + blob.name;
 		if (args.codeUnit >= CodeUnit.ARRAY_DEF) {
 			const lines = blob.comment.trimEnd().split("\n");
 			for (let line of lines) codeBuff.push(`// ${line}\n`);
-			codeBuff.push(`const uint8_t ${blob.name}[] = {\n`);
+			codeBuff.push(`const uint8_t ${arrayName}[] = {\n`);
 		}
 		let hexTable = [];
 		for (let i = 0; i < 256; i++) hexTable.push("0x" + i.toString(16).padStart(2, "0") + ",");
@@ -62,14 +67,209 @@ function generate(args) {
 			else codeBuff.push(" ");
 		}
 		if (args.codeUnit >= CodeUnit.ARRAY_DEF) codeBuff.push("};\n");
+		if (args.codeUnit < CodeUnit.FILE || iBlob + 1 >= args.blobs.length) {
+			const code = new Code();
+			if (args.codeUnit >= CodeUnit.FILE) code.name = args.name + ".h";
+			else code.name = args.name + "_" + blob.name + ".h";
+			code.code = codeBuff.join("");
+			let numLines = 0;
+			for (let s of codeBuff) if (s.endsWith("\n")) numLines++;
+			code.numLines = numLines;
+			args.codes.push(code);
+			codeBuff = [];
+		}
 	}
-	const code = new Code();
-	code.name = "Image Data";
-	code.code = codeBuff.join("");
-	let numLines = 0;
-	for (let s of codeBuff) if (s.endsWith("\n")) numLines++;
-	code.numLines = numLines;
-	args.codes.push(code);
+}
+
+//#endregion
+//#region src/Utils.ts
+function clip(min, max, val) {
+	if (val < min) return min;
+	if (val > max) return max;
+	return val;
+}
+function intCeil(val, unit) {
+	return Math.ceil(val / unit) * unit;
+}
+
+//#endregion
+//#region src/Colors.ts
+var HslRange = class {
+	hMin = 0;
+	hRange = 1;
+	sMin = 0;
+	sMax = 1;
+	lMin = 0;
+	lMax = 1;
+};
+function hexStrToRgb(hex) {
+	if (hex.startsWith("#")) hex = hex.slice(1);
+	if (hex.length === 3) {
+		const r = parseInt(hex[0] + hex[0], 16);
+		const g = parseInt(hex[1] + hex[1], 16);
+		const b = parseInt(hex[2] + hex[2], 16);
+		return r | g << 8 | b << 16;
+	} else if (hex.length == 6) {
+		const r = parseInt(hex.slice(0, 2), 16);
+		const g = parseInt(hex.slice(2, 4), 16);
+		const b = parseInt(hex.slice(4, 6), 16);
+		return r | g << 8 | b << 16;
+	} else throw new Error("Invalid hex color");
+}
+function rgbToHexStr(rgb) {
+	const { r, g, b } = rgbU32ToU8(rgb);
+	const chVals = [
+		r,
+		g,
+		b
+	];
+	let longFormat = false;
+	for (let i = 0; i < 3; i++) {
+		const hi = chVals[i] >> 4;
+		const lo = chVals[i] & 15;
+		if (hi != lo) {
+			longFormat = true;
+			break;
+		}
+	}
+	if (longFormat) return "#" + r.toString(16).padStart(2, "0") + g.toString(16).padStart(2, "0") + b.toString(16).padStart(2, "0");
+	else return "#" + (r >> 4).toString(16) + (g >> 4).toString(16) + (b >> 4).toString(16);
+}
+function rgbU32ToU8(color) {
+	const r = color & 255;
+	const g = color >> 8 & 255;
+	const b = color >> 16 & 255;
+	return {
+		r,
+		g,
+		b
+	};
+}
+function rgbU32ToF32(color) {
+	const r = (color & 255) / 255;
+	const g = (color >> 8 & 255) / 255;
+	const b = (color >> 16 & 255) / 255;
+	return {
+		r,
+		g,
+		b
+	};
+}
+function grayscale(r, g, b) {
+	return .299 * r + .587 * g + .114 * b;
+}
+function grayscaleArrayF32(data, offset) {
+	return grayscale(data[offset], data[offset + 1], data[offset + 2]);
+}
+function grayscaleArrayU8(data, offset) {
+	return grayscale(data[offset], data[offset + 1], data[offset + 2]);
+}
+function rgbToHslArrayF32(src, srcOffset, dest, destOffset, numPixels) {
+	for (let i = 0; i < numPixels; i++) {
+		const r = src[srcOffset];
+		const g = src[srcOffset + 1];
+		const b = src[srcOffset + 2];
+		const max = Math.max(r, g, b);
+		const min = Math.min(r, g, b);
+		let h = 0, s = 0, l = (max + min) / 2;
+		if (max != min) {
+			const d = max - min;
+			s = d;
+			switch (max) {
+				case r:
+					h = (g - b) / d + (g < b ? 6 : 0);
+					break;
+				case g:
+					h = (b - r) / d + 2;
+					break;
+				case b:
+					h = (r - g) / d + 4;
+					break;
+			}
+		}
+		h /= 6;
+		dest[destOffset] = h;
+		dest[destOffset + 1] = s;
+		dest[destOffset + 2] = l;
+		srcOffset += 3;
+		destOffset += 3;
+	}
+}
+function hslToRgbArrayF32(src, srcOffset, dest, destOffset, numPixels) {
+	for (let i = 0; i < numPixels; i++) {
+		let h = src[srcOffset];
+		let s = src[srcOffset + 1];
+		let l = src[srcOffset + 2];
+		let r, g, b;
+		if (s == 0) r = g = b = l;
+		else {
+			const p = s / 2;
+			const max = l + p;
+			const min = l - p;
+			h -= Math.floor(h);
+			h *= 6;
+			if (h < 1) {
+				r = max;
+				g = min + (max - min) * h;
+				b = min;
+			} else if (h < 2) {
+				r = min + (max - min) * (2 - h);
+				g = max;
+				b = min;
+			} else if (h < 3) {
+				r = min;
+				g = max;
+				b = min + (max - min) * (h - 2);
+			} else if (h < 4) {
+				r = min;
+				g = min + (max - min) * (4 - h);
+				b = max;
+			} else if (h < 5) {
+				r = min + (max - min) * (h - 4);
+				g = min;
+				b = max;
+			} else {
+				r = max;
+				g = min;
+				b = min + (max - min) * (6 - h);
+			}
+		}
+		dest[destOffset] = clip(0, 1, r);
+		dest[destOffset + 1] = clip(0, 1, g);
+		dest[destOffset + 2] = clip(0, 1, b);
+		srcOffset += 3;
+		destOffset += 3;
+	}
+}
+function hueWrap(hue) {
+	return hue - Math.floor(hue);
+}
+function hueAdd(hue, add) {
+	return hueWrap(hue + add);
+}
+function hueDiff(hue1, hue2) {
+	const d = hueWrap(hue1 - hue2);
+	if (d < .5) return d;
+	else return d - 1;
+}
+function hueClip(min, range, hue) {
+	const radius = range / 2;
+	const center = hueAdd(min, radius);
+	const d = hueDiff(hue, center);
+	if (d < -radius) return hueAdd(center, -radius);
+	else if (d > radius) return hueAdd(center, radius);
+	else return hue;
+}
+function dot(a, ia, b, ib) {
+	return a[ia + 0] * b[ib + 0] + a[ia + 1] * b[ib + 1] + a[ia + 2] * b[ib + 2];
+}
+function transformColor(mat, v, iv) {
+	const r = dot(mat, 0, v, iv + 0) + mat[3];
+	const g = dot(mat, 4, v, iv + 0) + mat[7];
+	const b = dot(mat, 8, v, iv + 0) + mat[11];
+	v[iv + 0] = clip(0, 1, r);
+	v[iv + 1] = clip(0, 1, g);
+	v[iv + 2] = clip(0, 1, b);
 }
 
 //#endregion
@@ -86,23 +286,17 @@ var ArrayBlob = class {
 };
 
 //#endregion
-//#region src/Utils.ts
-function clip(min, max, val) {
-	if (val < min) return min;
-	if (val > max) return max;
-	return val;
-}
-function intCeil(val, unit) {
-	return Math.ceil(val / unit) * unit;
-}
-
-//#endregion
 //#region src/Encoder.ts
 let PackUnit = /* @__PURE__ */ function(PackUnit$1) {
 	PackUnit$1[PackUnit$1["UNPACKED"] = 0] = "UNPACKED";
 	PackUnit$1[PackUnit$1["PIXEL"] = 1] = "PIXEL";
 	PackUnit$1[PackUnit$1["ALIGNMENT"] = 2] = "ALIGNMENT";
 	return PackUnit$1;
+}({});
+let PlaneType = /* @__PURE__ */ function(PlaneType$1) {
+	PlaneType$1[PlaneType$1["DIRECT"] = 0] = "DIRECT";
+	PlaneType$1[PlaneType$1["INDEX_MATCH"] = 1] = "INDEX_MATCH";
+	return PlaneType$1;
 }({});
 let AlignBoundary = /* @__PURE__ */ function(AlignBoundary$1) {
 	AlignBoundary$1[AlignBoundary$1["NIBBLE"] = 4] = "NIBBLE";
@@ -113,9 +307,9 @@ let AlignBoundary = /* @__PURE__ */ function(AlignBoundary$1) {
 	return AlignBoundary$1;
 }({});
 var FieldLayout = class {
-	srcChannel;
-	pos;
-	width;
+	srcChannel = 0;
+	pos = 0;
+	width = 0;
 };
 var PlaneOutput = class {
 	fields = [];
@@ -126,6 +320,10 @@ var PlaneOutput = class {
 	blob;
 };
 var PlaneArgs = class {
+	id;
+	type = PlaneType.DIRECT;
+	indexMatchValue;
+	postInvert = false;
 	farPixelFirst;
 	bigEndian;
 	packUnit;
@@ -135,7 +333,7 @@ var PlaneArgs = class {
 	vertAddr;
 	output = new PlaneOutput();
 };
-var ImageArgs = class {
+var EncodeArgs = class {
 	src;
 	alphaFirst;
 	colorDescending;
@@ -143,23 +341,41 @@ var ImageArgs = class {
 };
 function encode(args) {
 	const fmt = args.src.format;
-	let alphaField = null;
-	if (fmt.hasAlpha) {
-		alphaField = new FieldLayout();
-		alphaField.srcChannel = fmt.numColorChannels;
-		alphaField.width = fmt.alphaBits;
-	}
-	if (alphaField && args.alphaFirst) args.planes[0].output.fields.push(alphaField);
-	for (let ch = 0; ch < fmt.numColorChannels; ch++) {
-		const field = new FieldLayout();
-		if (args.colorDescending) field.srcChannel = fmt.numColorChannels - 1 - ch;
-		else field.srcChannel = ch;
-		field.width = fmt.colorBits[field.srcChannel];
-		args.planes[0].output.fields.push(field);
-	}
-	if (alphaField && !args.alphaFirst) args.planes[0].output.fields.push(alphaField);
 	for (let plane of args.planes) {
 		const out = plane.output;
+		let alphaField = null;
+		if (fmt.hasAlpha) {
+			alphaField = new FieldLayout();
+			alphaField.srcChannel = fmt.numColorChannels;
+			alphaField.width = fmt.alphaBits;
+		}
+		switch (plane.type) {
+			case PlaneType.DIRECT:
+				if (alphaField && args.alphaFirst) out.fields.push(alphaField);
+				if (fmt.isIndexed) {
+					const field = new FieldLayout();
+					field.srcChannel = 0;
+					field.width = fmt.indexBits;
+					out.fields.push(field);
+				} else for (let ch = 0; ch < fmt.numColorChannels; ch++) {
+					const field = new FieldLayout();
+					if (args.colorDescending) field.srcChannel = fmt.numColorChannels - 1 - ch;
+					else field.srcChannel = ch;
+					field.width = fmt.colorBits[field.srcChannel];
+					out.fields.push(field);
+				}
+				if (alphaField && !args.alphaFirst) out.fields.push(alphaField);
+				break;
+			case PlaneType.INDEX_MATCH:
+				{
+					const field = new FieldLayout();
+					field.width = 1;
+					out.fields.push(field);
+				}
+				break;
+			default: throw new Error("Unsupported filter mode");
+		}
+		if (out.fields.length == 0) throw new Error("内部エラー: フィールドが定義されていません。");
 		const numCh = out.fields.length;
 		if (plane.packUnit == PackUnit.UNPACKED) {
 			let maxChBits = 0;
@@ -206,13 +422,15 @@ function encode(args) {
 	for (let plane of args.planes) {
 		const out = plane.output;
 		const numCh = out.fields.length;
+		if (!(out.pixelsPerFrag >= 1)) throw new Error("内部エラー: フラグメントあたりのピクセル数が不正です。");
+		if (!(out.bytesPerFrag >= 1)) throw new Error("内部エラー: フラグメントあたりのバイト数が不正です。");
 		const fragWidth = plane.vertPack ? 1 : out.pixelsPerFrag;
 		const fragHeight = plane.vertPack ? out.pixelsPerFrag : 1;
 		const fragSize = fragWidth * fragHeight;
 		const cols = Math.ceil(src.width / fragWidth);
 		const rows = Math.ceil(src.height / fragHeight);
 		const numFrags = cols * rows;
-		out.blob = new ArrayBlob("imageArray", numFrags * out.bytesPerFrag);
+		out.blob = new ArrayBlob(plane.id, numFrags * out.bytesPerFrag);
 		const array = out.blob.array;
 		let iByte = 0;
 		for (let iFrag = 0; iFrag < numFrags; iFrag++) {
@@ -233,10 +451,23 @@ function encode(args) {
 				const y = yCoarse + yFine;
 				if (y < src.height && x < src.width) {
 					const pixOffset = out.pixelStride * iDest;
-					for (const field of out.fields) {
-						const chData = src.data[field.srcChannel][y * src.width + x];
-						const shift = pixOffset + field.pos;
-						fragData |= chData << shift;
+					switch (plane.type) {
+						case PlaneType.DIRECT:
+							for (const field of out.fields) {
+								const chData = src.data[field.srcChannel][y * src.width + x];
+								const shift = pixOffset + field.pos;
+								fragData |= chData << shift;
+							}
+							break;
+						case PlaneType.INDEX_MATCH:
+							{
+								const chData = src.data[0][y * src.width + x];
+								let match = chData == plane.indexMatchValue;
+								if (plane.postInvert) match = !match;
+								if (match) fragData |= 1 << pixOffset + out.fields[0].pos;
+							}
+							break;
+						default: throw new Error("Unsupported filter mode");
 					}
 				}
 			}
@@ -252,6 +483,11 @@ function encode(args) {
 		{
 			let buff = [];
 			buff.push(`${args.src.width}x${args.src.height}px, ${fmt.toString()}\n`);
+			if (plane.type == PlaneType.INDEX_MATCH) {
+				buff.push(`Plane "${plane.id}", color index=${plane.indexMatchValue}`);
+				if (plane.postInvert) buff.push(`, Inverted`);
+				buff.push(`\n`);
+			}
 			if (numCh > 1) {
 				let chOrderStr = "";
 				for (let i = 0; i < numCh; i++) {
@@ -285,21 +521,30 @@ let PixelFormat = /* @__PURE__ */ function(PixelFormat$1) {
 	PixelFormat$1[PixelFormat$1["RGB888"] = 1] = "RGB888";
 	PixelFormat$1[PixelFormat$1["RGB666"] = 2] = "RGB666";
 	PixelFormat$1[PixelFormat$1["RGB565"] = 3] = "RGB565";
-	PixelFormat$1[PixelFormat$1["RGB555"] = 4] = "RGB555";
-	PixelFormat$1[PixelFormat$1["RGB444"] = 5] = "RGB444";
-	PixelFormat$1[PixelFormat$1["RGB332"] = 6] = "RGB332";
-	PixelFormat$1[PixelFormat$1["RGB111"] = 7] = "RGB111";
-	PixelFormat$1[PixelFormat$1["GRAY4"] = 8] = "GRAY4";
-	PixelFormat$1[PixelFormat$1["GRAY2"] = 9] = "GRAY2";
-	PixelFormat$1[PixelFormat$1["BW"] = 10] = "BW";
+	PixelFormat$1[PixelFormat$1["RGB444"] = 4] = "RGB444";
+	PixelFormat$1[PixelFormat$1["RGB332"] = 5] = "RGB332";
+	PixelFormat$1[PixelFormat$1["RGB111"] = 6] = "RGB111";
+	PixelFormat$1[PixelFormat$1["GRAY4"] = 7] = "GRAY4";
+	PixelFormat$1[PixelFormat$1["GRAY2"] = 8] = "GRAY2";
+	PixelFormat$1[PixelFormat$1["BW"] = 9] = "BW";
+	PixelFormat$1[PixelFormat$1["I2_RGB888"] = 10] = "I2_RGB888";
 	return PixelFormat$1;
+}({});
+let ChannelOrder = /* @__PURE__ */ function(ChannelOrder$1) {
+	ChannelOrder$1[ChannelOrder$1["RGBA"] = 0] = "RGBA";
+	ChannelOrder$1[ChannelOrder$1["BGRA"] = 1] = "BGRA";
+	ChannelOrder$1[ChannelOrder$1["ARGB"] = 2] = "ARGB";
+	ChannelOrder$1[ChannelOrder$1["ABGR"] = 3] = "ABGR";
+	return ChannelOrder$1;
 }({});
 var PixelFormatInfo = class {
 	colorSpace;
 	colorBits;
 	alphaBits = 0;
-	constructor(fmt) {
-		switch (fmt) {
+	indexBits = 0;
+	constructor(id) {
+		this.id = id;
+		switch (id) {
 			case PixelFormat.RGBA8888:
 				this.colorSpace = ColorSpace.RGB;
 				this.colorBits = [
@@ -330,14 +575,6 @@ var PixelFormatInfo = class {
 				this.colorBits = [
 					5,
 					6,
-					5
-				];
-				break;
-			case PixelFormat.RGB555:
-				this.colorSpace = ColorSpace.RGB;
-				this.colorBits = [
-					5,
-					5,
 					5
 				];
 				break;
@@ -377,11 +614,21 @@ var PixelFormatInfo = class {
 				this.colorSpace = ColorSpace.GRAYSCALE;
 				this.colorBits = [1];
 				break;
+			case PixelFormat.I2_RGB888:
+				this.colorSpace = ColorSpace.RGB;
+				this.colorBits = [
+					8,
+					8,
+					8
+				];
+				this.indexBits = 2;
+				break;
 			default: throw new Error("Unknown image format");
 		}
 	}
 	toString() {
-		switch (this.colorSpace) {
+		if (this.isIndexed) return "Indexed" + this.indexBits;
+		else switch (this.colorSpace) {
 			case ColorSpace.GRAYSCALE: if (this.colorBits[0] == 1) return "B/W";
 			else return "Gray" + this.colorBits[0];
 			case ColorSpace.RGB: if (this.hasAlpha) return "RGBA" + this.colorBits.join("") + this.alphaBits.toString();
@@ -391,6 +638,9 @@ var PixelFormatInfo = class {
 	}
 	get hasAlpha() {
 		return this.alphaBits > 0;
+	}
+	get isIndexed() {
+		return this.indexBits > 0;
 	}
 	get numTotalChannels() {
 		return this.colorBits.length + (this.hasAlpha ? 1 : 0);
@@ -455,6 +705,177 @@ var ReducedImage = class {
 };
 
 //#endregion
+//#region src/Configs.ts
+function makeDirectPlane(id = "color") {
+	return {
+		planeType: PlaneType.DIRECT,
+		id,
+		matchIndex: -1,
+		matchInvert: false
+	};
+}
+function makeIndexMatch(index, id, invert = false) {
+	return {
+		planeType: PlaneType.INDEX_MATCH,
+		id,
+		matchIndex: index,
+		matchInvert: invert
+	};
+}
+const defaultConfig = {
+	label: "default",
+	description: "default",
+	format: PixelFormat.RGBA8888,
+	channelOrder: ChannelOrder.ARGB,
+	farPixelFirst: false,
+	bigEndian: false,
+	packUnit: PackUnit.PIXEL,
+	vertPack: false,
+	alignBoundary: AlignBoundary.BYTE_1,
+	alignLeft: false,
+	vertAddr: false,
+	palette: new Uint32Array(),
+	planeCfgs: [makeDirectPlane()]
+};
+const argb8888_le = (function() {
+	let p = { ...defaultConfig };
+	p.label = "ARGB8888-LE";
+	p.description = "透明度付きフルカラー。\n一般的な PC/Mac のビットマップ形式。\nWindows GDI+ 互換。";
+	p.format = PixelFormat.RGBA8888;
+	p.channelOrder = ChannelOrder.ARGB;
+	return p;
+})();
+const rgb888_be = (function() {
+	let p = { ...defaultConfig };
+	p.label = "RGB888-BE";
+	p.description = "フルカラー。24bit 液晶用。";
+	p.format = PixelFormat.RGB888;
+	p.channelOrder = ChannelOrder.ARGB;
+	p.bigEndian = true;
+	return p;
+})();
+const rgb666_be_ra = (function() {
+	let p = { ...defaultConfig };
+	p.label = "RGB666-BE-RA";
+	p.description = "各バイトにチャネルを下位詰めで配置した RGB666。LovyanGFX 用。";
+	p.format = PixelFormat.RGB666;
+	p.channelOrder = ChannelOrder.ARGB;
+	p.packUnit = PackUnit.UNPACKED;
+	p.bigEndian = true;
+	return p;
+})();
+const rgb666_be_la = (function() {
+	let p = { ...defaultConfig };
+	p.label = "RGB666-BE-LA";
+	p.description = "各バイトにチャネルを上位詰めで配置した RGB666。低レベル API の 18bit モード用。";
+	p.format = PixelFormat.RGB666;
+	p.channelOrder = ChannelOrder.ARGB;
+	p.packUnit = PackUnit.UNPACKED;
+	p.alignLeft = true;
+	p.bigEndian = true;
+	return p;
+})();
+const rgb565_be = (function() {
+	let p = { ...defaultConfig };
+	p.label = "RGB565-BE";
+	p.description = "ハイカラー。\n各種 GFX ライブラリでの使用を含め、\n組み込み用途で一般的な形式。";
+	p.format = PixelFormat.RGB565;
+	p.channelOrder = ChannelOrder.ARGB;
+	p.bigEndian = true;
+	return p;
+})();
+const rgb444_be = (function() {
+	let p = { ...defaultConfig };
+	p.label = "RGB444-BE";
+	p.description = "ST7789 の 12bit モード用の形式。";
+	p.format = PixelFormat.RGB444;
+	p.packUnit = PackUnit.ALIGNMENT;
+	p.farPixelFirst = true;
+	p.bigEndian = true;
+	p.alignBoundary = AlignBoundary.BYTE_3;
+	return p;
+})();
+const rgb332 = (function() {
+	let p = { ...defaultConfig };
+	p.label = "RGB332";
+	p.description = "各種 GFX ライブラリ用。";
+	p.format = PixelFormat.RGB332;
+	return p;
+})();
+const rgb111_ra = (function() {
+	let p = { ...defaultConfig };
+	p.label = "RGB111";
+	p.description = "ILI9488 の 8 色モード用。";
+	p.format = PixelFormat.RGB111;
+	p.packUnit = PackUnit.ALIGNMENT;
+	p.farPixelFirst = true;
+	return p;
+})();
+const bw_hscan = (function() {
+	let p = { ...defaultConfig };
+	p.label = "白黒 横スキャン";
+	p.description = "各種 GFX ライブラリ用。";
+	p.format = PixelFormat.BW;
+	p.packUnit = PackUnit.ALIGNMENT;
+	p.farPixelFirst = true;
+	return p;
+})();
+const bw_vpack = (function() {
+	let p = { ...defaultConfig };
+	p.label = "白黒 縦パッキング";
+	p.description = "SPI/I2C ドライバを使用して\nSSD1306/1309 等の白黒ディスプレイに直接転送するための形式。";
+	p.format = PixelFormat.BW;
+	p.packUnit = PackUnit.ALIGNMENT;
+	p.vertPack = true;
+	return p;
+})();
+const epd_kwr = (function() {
+	let p = { ...defaultConfig };
+	p.label = "黒白赤 (2plane)";
+	p.description = "3色電子ペーパー向けの形式。";
+	p.format = PixelFormat.I2_RGB888;
+	p.packUnit = PackUnit.ALIGNMENT;
+	p.farPixelFirst = true;
+	p.palette = new Uint32Array([
+		hexStrToRgb("#000"),
+		hexStrToRgb("#FFF"),
+		hexStrToRgb("#F00")
+	]);
+	p.planeCfgs = [makeIndexMatch(1, "white"), makeIndexMatch(2, "red")];
+	return p;
+})();
+const epd_kwry = (function() {
+	let p = { ...defaultConfig };
+	p.label = "黒白赤黄 (2bpp)";
+	p.description = "4色電子ペーパー向けの形式。";
+	p.format = PixelFormat.I2_RGB888;
+	p.packUnit = PackUnit.ALIGNMENT;
+	p.farPixelFirst = true;
+	p.palette = new Uint32Array([
+		hexStrToRgb("#000"),
+		hexStrToRgb("#FFF"),
+		hexStrToRgb("#F00"),
+		hexStrToRgb("#FF0")
+	]);
+	p.planeCfgs = [makeDirectPlane("index")];
+	return p;
+})();
+const presets = {
+	argb8888_le,
+	rgb888_be,
+	rgb666_be_ra,
+	rgb666_be_la,
+	rgb565_be,
+	rgb444_be,
+	rgb332,
+	rgb111_ra,
+	bw_hscan,
+	bw_vpack,
+	epd_kwr,
+	epd_kwry
+};
+
+//#endregion
 //#region src/Palettes.ts
 let RoundMethod = /* @__PURE__ */ function(RoundMethod$1) {
 	RoundMethod$1[RoundMethod$1["NEAREST"] = 0] = "NEAREST";
@@ -508,22 +929,131 @@ var FixedPalette = class extends Palette {
 			default: throw new Error("Invalid channel number");
 		}
 	}
+	getHslRange() {
+		return {
+			hMin: 0,
+			hRange: 1,
+			sMin: 0,
+			sMax: 1,
+			lMin: 0,
+			lMax: 1
+		};
+	}
+};
+var IndexedPalette = class extends Palette {
+	colors;
+	enabled;
+	constructor(channelBits, indexBits) {
+		super();
+		this.channelBits = channelBits;
+		this.indexBits = indexBits;
+		const numColors = 1 << indexBits;
+		this.colors = new Float32Array(numColors * channelBits.length);
+		this.enabled = new Array(numColors).fill(false);
+	}
+	reduce(src, srcOffset, dest, destOffset, error) {
+		const numCh = this.channelBits.length;
+		let bestIdx = 0;
+		let bestDist = Number.MAX_VALUE;
+		for (let i = 0; i < 1 << this.indexBits; i++) {
+			if (!this.enabled[i]) continue;
+			let dist = 0;
+			for (let ch = 0; ch < numCh; ch++) {
+				const diff = src[srcOffset + ch] - this.colors[i * numCh + ch];
+				dist += diff * diff;
+			}
+			if (dist < bestDist) {
+				bestDist = dist;
+				bestIdx = i;
+			}
+		}
+		dest[destOffset] = bestIdx;
+		for (let ch = 0; ch < numCh; ch++) {
+			const outNorm = this.colors[bestIdx * numCh + ch];
+			error[ch] = src[srcOffset + ch] - outNorm;
+		}
+	}
+	extract(src, srcOffset, dest, destOffset) {
+		switch (this.channelBits.length) {
+			case 1:
+				const gray = Math.round(this.colors[src[srcOffset]] * 255);
+				for (let ch = 0; ch < 3; ch++) dest[destOffset + ch] = gray;
+				break;
+			case 3:
+				for (let ch = 0; ch < 3; ch++) dest[destOffset + ch] = Math.round(this.colors[src[srcOffset] * 3 + ch] * 255);
+				break;
+			default: throw new Error("Invalid channel number");
+		}
+	}
+	getHslRange() {
+		const numColors = this.colors.length / this.channelBits.length;
+		let rgbCenter = new Float32Array([
+			0,
+			0,
+			0
+		]);
+		for (let i = 0; i < numColors; i++) {
+			rgbCenter[0] += this.colors[i * 3 + 0];
+			rgbCenter[1] += this.colors[i * 3 + 1];
+			rgbCenter[2] += this.colors[i * 3 + 2];
+		}
+		rgbCenter[0] /= numColors;
+		rgbCenter[1] /= numColors;
+		rgbCenter[2] /= numColors;
+		let hslCenter = new Float32Array(3);
+		rgbToHslArrayF32(rgbCenter, 0, hslCenter, 0, 1);
+		const centerH = hslCenter[0];
+		const hsl = new Float32Array(this.colors.length);
+		rgbToHslArrayF32(this.colors, 0, hsl, 0, numColors);
+		let hDistMin = 0, hDistMax = 0, sMin = 1, sMax = 0, lMin = 1, lMax = 0;
+		for (let i = 0; i < numColors; i++) {
+			const h = hsl[i * 3 + 0];
+			const s = hsl[i * 3 + 1];
+			const l = hsl[i * 3 + 2];
+			if (s > 0) {
+				const hDist = hueDiff(h, centerH);
+				if (hDist < hDistMin) hDistMin = hDist;
+				if (hDist > hDistMax) hDistMax = hDist;
+			}
+			if (s < sMin) sMin = s;
+			if (s > sMax) sMax = s;
+			if (l < lMin) lMin = l;
+			if (l > lMax) lMax = l;
+		}
+		const hMin = hueAdd(centerH, hDistMin);
+		const hRange = hDistMax - hDistMin;
+		return {
+			hMin,
+			hRange,
+			sMin,
+			sMax,
+			lMin,
+			lMax
+		};
+	}
 };
 
 //#endregion
 //#region src/Preproc.ts
-let AlphaProc = /* @__PURE__ */ function(AlphaProc$1) {
-	AlphaProc$1[AlphaProc$1["KEEP"] = 0] = "KEEP";
-	AlphaProc$1[AlphaProc$1["FILL"] = 1] = "FILL";
-	AlphaProc$1[AlphaProc$1["BINARIZE"] = 2] = "BINARIZE";
-	AlphaProc$1[AlphaProc$1["SET_KEY_COLOR"] = 3] = "SET_KEY_COLOR";
-	return AlphaProc$1;
+let AlphaMode = /* @__PURE__ */ function(AlphaMode$1) {
+	AlphaMode$1[AlphaMode$1["KEEP"] = 0] = "KEEP";
+	AlphaMode$1[AlphaMode$1["FILL"] = 1] = "FILL";
+	AlphaMode$1[AlphaMode$1["BINARIZE"] = 2] = "BINARIZE";
+	AlphaMode$1[AlphaMode$1["SET_KEY_COLOR"] = 3] = "SET_KEY_COLOR";
+	return AlphaMode$1;
 }({});
 let ScalingMethod = /* @__PURE__ */ function(ScalingMethod$1) {
 	ScalingMethod$1[ScalingMethod$1["ZOOM"] = 0] = "ZOOM";
 	ScalingMethod$1[ScalingMethod$1["FIT"] = 1] = "FIT";
 	ScalingMethod$1[ScalingMethod$1["STRETCH"] = 2] = "STRETCH";
 	return ScalingMethod$1;
+}({});
+let ColorSpaceReductionMode = /* @__PURE__ */ function(ColorSpaceReductionMode$1) {
+	ColorSpaceReductionMode$1[ColorSpaceReductionMode$1["NONE"] = 0] = "NONE";
+	ColorSpaceReductionMode$1[ColorSpaceReductionMode$1["CLIP"] = 1] = "CLIP";
+	ColorSpaceReductionMode$1[ColorSpaceReductionMode$1["FOLD"] = 2] = "FOLD";
+	ColorSpaceReductionMode$1[ColorSpaceReductionMode$1["TRANSFORM"] = 3] = "TRANSFORM";
+	return ColorSpaceReductionMode$1;
 }({});
 var Args = class {
 	srcData;
@@ -544,7 +1074,7 @@ var Args = class {
 	outImage;
 	colorSpace;
 	scalingMethod = ScalingMethod.ZOOM;
-	alphaProc = AlphaProc.KEEP;
+	alphaProc = AlphaMode.KEEP;
 	alphaThresh = 128;
 	keyColor = 0;
 	keyTolerance = 0;
@@ -552,6 +1082,10 @@ var Args = class {
 	hue = 0;
 	saturation = 1;
 	lightness = 1;
+	csrMode = ColorSpaceReductionMode.NONE;
+	csrHslRange = new HslRange();
+	csrHueTolerance = 60 / 360;
+	csrTransformMatrix = new Float32Array(12);
 	gamma = {
 		value: 1,
 		automatic: true
@@ -573,20 +1107,31 @@ function process(args) {
 		src = data;
 		args.trimRect = rect;
 	}
-	if (args.alphaProc == AlphaProc.SET_KEY_COLOR) applyKeyColor(src, args.srcSize, args.keyColor, args.keyTolerance);
+	if (args.alphaProc == AlphaMode.SET_KEY_COLOR) applyKeyColor(src, args.srcSize, args.keyColor, args.keyTolerance);
 	const trimSize = {
 		width: args.trimRect.width,
 		height: args.trimRect.height
 	};
 	const resized = resize(src, trimSize, args.outSize);
 	const img = normalize(resized, args.outSize, args.colorSpace);
-	if (args.alphaProc == AlphaProc.BINARIZE) binarizeAlpha(img, args.alphaThresh / 255);
-	else if (args.alphaProc == AlphaProc.FILL) fillBackground(img, args.backColor);
-	applyHSL(img, args.hue, args.saturation, args.lightness);
+	if (args.alphaProc == AlphaMode.BINARIZE) binarizeAlpha(img, args.alphaThresh / 255);
+	else if (args.alphaProc == AlphaMode.FILL) fillBackground(img, args.backColor);
+	correctHSL(img, args.hue, args.saturation, args.lightness);
 	args.gamma = correctGamma(img, args.gamma);
 	args.brightness = offsetBrightness(img, args.brightness);
 	args.contrast = correctContrast(img, args.contrast);
 	if (args.invert) for (let i = 0; i < img.color.length; i++) img.color[i] = 1 - img.color[i];
+	switch (args.csrMode) {
+		case ColorSpaceReductionMode.CLIP:
+			clipColorSpace(img, args.csrHslRange, args.csrHueTolerance);
+			break;
+		case ColorSpaceReductionMode.FOLD:
+			foldColorSpace(img, args.csrHslRange);
+			break;
+		case ColorSpaceReductionMode.TRANSFORM:
+			transformColorSpace(img, args.csrTransformMatrix);
+			break;
+	}
 	args.outImage = img;
 }
 function trim(src, srcSize, trimRect, outSize, scalingMethod) {
@@ -651,9 +1196,7 @@ function trim(src, srcSize, trimRect, outSize, scalingMethod) {
 	};
 }
 function applyKeyColor(data, size, key, tol) {
-	const keyR = key & 255;
-	const keyG = key >> 8 & 255;
-	const keyB = key >> 16 & 255;
+	const { r: keyR, g: keyG, b: keyB } = rgbU32ToU8(key);
 	for (let y = 0; y < size.height; y++) {
 		let i = y * size.width * 4;
 		for (let x = 0; x < size.width; x++, i += 4) {
@@ -784,28 +1327,131 @@ function normalize(data, size, colorSpace) {
 	}
 	return img;
 }
-function applyHSL(img, h, s, l) {
+function correctHSL(img, hShift, sCoeff, lCoeff) {
 	const numPixels = img.width * img.height;
 	switch (img.colorSpace) {
 		case ColorSpace.GRAYSCALE:
-			if (l == 1) return;
-			for (let i = 0; i < numPixels; i++) img.color[i] = clip(0, 1, img.color[i] * l);
+			if (lCoeff == 1) return;
+			for (let i = 0; i < numPixels; i++) img.color[i] = clip(0, 1, img.color[i] * lCoeff);
 			break;
 		case ColorSpace.RGB:
 			{
-				if (h == 0 && s == 1 && l == 1) return;
-				const hsl = new Float32Array(3);
+				if (hShift == 0 && sCoeff == 1 && lCoeff == 1) return;
+				const hsl = new Float32Array(numPixels * 3);
+				rgbToHslArrayF32(img.color, 0, hsl, 0, numPixels);
 				for (let i = 0; i < numPixels; i++) {
-					rgbToHsl(img.color, i * 3, hsl, 0);
-					const hMod = hsl[0] + h;
-					hsl[0] = hMod - Math.floor(hMod);
-					hsl[1] = clip(0, 1, hsl[1] * s);
-					hsl[2] = clip(0, 1, hsl[2] * l);
-					hslToRgb(hsl, 0, img.color, i * 3);
+					hsl[i * 3 + 0] = hueAdd(hsl[i * 3 + 0], hShift);
+					hsl[i * 3 + 1] = clip(0, 1, hsl[i * 3 + 1] * sCoeff);
+					hsl[i * 3 + 2] = clip(0, 1, hsl[i * 3 + 2] * lCoeff);
 				}
+				hslToRgbArrayF32(hsl, 0, img.color, 0, numPixels);
 			}
 			break;
 		default: throw new Error("Invalid color space");
+	}
+}
+function clipColorSpace(img, hslRange, hueTolerance) {
+	const hMin = hueWrap(hslRange.hMin);
+	const hRange = clip(0, 1, hslRange.hRange);
+	const sMin = clip(0, 1, hslRange.sMin);
+	const sMax = clip(sMin, 1, hslRange.sMax);
+	const lMin = clip(0, 1, hslRange.lMin);
+	const lMax = clip(lMin, 1, hslRange.lMax);
+	const hReduction = hRange < .99999;
+	const sReduction = sMin != 0 || sMax != 1;
+	const lReduction = lMin != 0 || lMax != 1;
+	const hslReduction = hReduction || sReduction || lReduction;
+	const numPixels = img.width * img.height;
+	switch (img.colorSpace) {
+		case ColorSpace.GRAYSCALE:
+			if (!lReduction) return;
+			for (let i = 0; i < numPixels; i++) img.color[i] = clip(lMin, lMax, img.color[i]);
+			break;
+		case ColorSpace.RGB:
+			{
+				if (!hslReduction) return;
+				const hsl = new Float32Array(numPixels * 3);
+				rgbToHslArrayF32(img.color, 0, hsl, 0, numPixels);
+				for (let i = 0; i < numPixels; i++) {
+					let h = hsl[i * 3 + 0];
+					let s = hsl[i * 3 + 1];
+					let l = hsl[i * 3 + 2];
+					const hClipped = hueClip(hMin, hRange, h);
+					const hDiff = Math.abs(hueDiff(hClipped, h));
+					if (hDiff >= hueTolerance) s = 0;
+					else s *= 1 - hDiff / hueTolerance;
+					hsl[i * 3 + 0] = hClipped;
+					hsl[i * 3 + 1] = clip(sMin, sMax, s);
+					hsl[i * 3 + 2] = clip(lMin, lMax, l);
+				}
+				hslToRgbArrayF32(hsl, 0, img.color, 0, numPixels);
+			}
+			break;
+		default: throw new Error("Invalid color space");
+	}
+}
+function foldColorSpace(img, hslRange) {
+	const hMin = hueWrap(hslRange.hMin);
+	const hRange = clip(0, 1, hslRange.hRange);
+	const sMin = clip(0, 1, hslRange.sMin);
+	const sMax = clip(sMin, 1, hslRange.sMax);
+	const lMin = clip(0, 1, hslRange.lMin);
+	const lMax = clip(lMin, 1, hslRange.lMax);
+	const hReduction = hRange < .99999;
+	const sReduction = sMin != 0 || sMax != 1;
+	const lReduction = lMin != 0 || lMax != 1;
+	const hslReduction = hReduction || sReduction || lReduction;
+	const numPixels = img.width * img.height;
+	switch (img.colorSpace) {
+		case ColorSpace.GRAYSCALE:
+			if (!lReduction) return;
+			for (let i = 0; i < numPixels; i++) {
+				let l = img.color[i];
+				l = lMin + (l - lMin) * (lMax - lMin);
+				img.color[i] = clip(0, 1, l);
+			}
+			break;
+		case ColorSpace.RGB:
+			{
+				if (!hslReduction) return;
+				const hHalfRange = hRange / 2;
+				const hCenter = hueAdd(hMin, hHalfRange);
+				const hsl = new Float32Array(numPixels * 3);
+				rgbToHslArrayF32(img.color, 0, hsl, 0, numPixels);
+				for (let i = 0; i < numPixels; i++) {
+					let h = hsl[i * 3 + 0];
+					let s = hsl[i * 3 + 1];
+					let l = hsl[i * 3 + 2];
+					if (hHalfRange == 0) h = hMin;
+					else {
+						let hDist = hueDiff(h, hCenter);
+						if (hDist < -hHalfRange || hHalfRange < hDist) {
+							const sign = hDist < 0 ? -1 : 1;
+							hDist = Math.abs(hDist);
+							hDist = (.5 - hDist) / (.5 - hHalfRange);
+							hDist *= sign * hHalfRange;
+							h = hueAdd(hCenter, hDist);
+						}
+					}
+					l = lMin + (l - lMin) * (lMax - lMin);
+					s = sMin + (s - sMin) * (sMax - sMin);
+					hsl[i * 3 + 0] = h;
+					hsl[i * 3 + 1] = clip(0, 1, s);
+					hsl[i * 3 + 2] = clip(0, 1, l);
+				}
+				hslToRgbArrayF32(hsl, 0, img.color, 0, numPixels);
+			}
+			break;
+		default: throw new Error("Invalid color space");
+	}
+}
+function transformColorSpace(img, matrix) {
+	const numPixels = img.width * img.height;
+	switch (img.colorSpace) {
+		case ColorSpace.RGB:
+			for (let i = 0; i < numPixels; i++) transformColor(matrix, img.color, i * 3);
+			break;
+		default: throw new Error("Invalid color space for transform");
 	}
 }
 function makeHistogramF32(img, histogramSize) {
@@ -844,9 +1490,7 @@ function binarizeAlpha(img, thresh) {
 function fillBackground(img, color) {
 	const numCh = img.numColorChannels;
 	let bk = new Float32Array(numCh);
-	const backR = (color & 255) / 255;
-	const backG = (color >> 8 & 255) / 255;
-	const backB = (color >> 16 & 255) / 255;
+	const { r: backR, g: backG, b: backB } = rgbU32ToF32(color);
 	switch (img.colorSpace) {
 		case ColorSpace.GRAYSCALE:
 			bk[0] = grayscale(backR, backG, backB);
@@ -914,84 +1558,6 @@ function getColorMinMax(img) {
 		max: .5
 	};
 }
-function grayscale(r, g, b) {
-	return .299 * r + .587 * g + .114 * b;
-}
-function grayscaleArrayF32(data, offset) {
-	return grayscale(data[offset], data[offset + 1], data[offset + 2]);
-}
-function grayscaleArrayU8(data, offset) {
-	return grayscale(data[offset], data[offset + 1], data[offset + 2]);
-}
-function rgbToHsl(src, srcOffset, dest, destOffset) {
-	const r = src[srcOffset];
-	const g = src[srcOffset + 1];
-	const b = src[srcOffset + 2];
-	const max = Math.max(r, g, b);
-	const min = Math.min(r, g, b);
-	let h = 0, s = 0, l = (max + min) / 2;
-	if (max != min) {
-		const d = max - min;
-		s = d;
-		switch (max) {
-			case r:
-				h = (g - b) / d + (g < b ? 6 : 0);
-				break;
-			case g:
-				h = (b - r) / d + 2;
-				break;
-			case b:
-				h = (r - g) / d + 4;
-				break;
-		}
-	}
-	h /= 6;
-	dest[destOffset] = h;
-	dest[destOffset + 1] = s;
-	dest[destOffset + 2] = l;
-}
-function hslToRgb(src, srcOffset, dest, destOffset) {
-	let h = src[srcOffset];
-	let s = src[srcOffset + 1];
-	let l = src[srcOffset + 2];
-	let r, g, b;
-	if (s == 0) r = g = b = l;
-	else {
-		const p = s / 2;
-		const max = l + p;
-		const min = l - p;
-		h -= Math.floor(h);
-		h *= 6;
-		if (h < 1) {
-			r = max;
-			g = min + (max - min) * h;
-			b = min;
-		} else if (h < 2) {
-			r = min + (max - min) * (2 - h);
-			g = max;
-			b = min;
-		} else if (h < 3) {
-			r = min;
-			g = max;
-			b = min + (max - min) * (h - 2);
-		} else if (h < 4) {
-			r = min;
-			g = min + (max - min) * (4 - h);
-			b = max;
-		} else if (h < 5) {
-			r = min + (max - min) * (h - 4);
-			g = min;
-			b = max;
-		} else {
-			r = max;
-			g = min;
-			b = min + (max - min) * (6 - h);
-		}
-	}
-	dest[destOffset] = r;
-	dest[destOffset + 1] = g;
-	dest[destOffset + 2] = b;
-}
 
 //#endregion
 //#region src/Reducer.ts
@@ -1007,9 +1573,7 @@ function reduce(args) {
 	const norm = args.src;
 	const outW = norm.width;
 	const outH = norm.height;
-	outW * outH;
 	const fmt = args.format;
-	fmt.numTotalChannels;
 	const numColCh = fmt.numColorChannels;
 	const palette = args.palette;
 	args.output = new ReducedImage(outW, outH, fmt, palette);
@@ -1069,92 +1633,7 @@ function diffuseError(img, alpha, error, x, y, forward) {
 }
 
 //#endregion
-//#region src/main.ts
-var TrimState = /* @__PURE__ */ function(TrimState$1) {
-	TrimState$1[TrimState$1["IDLE"] = 0] = "IDLE";
-	TrimState$1[TrimState$1["DRAG_TOP"] = 1] = "DRAG_TOP";
-	TrimState$1[TrimState$1["DRAG_RIGHT"] = 2] = "DRAG_RIGHT";
-	TrimState$1[TrimState$1["DRAG_BOTTOM"] = 3] = "DRAG_BOTTOM";
-	TrimState$1[TrimState$1["DRAG_LEFT"] = 4] = "DRAG_LEFT";
-	return TrimState$1;
-}(TrimState || {});
-var ChannelOrder = /* @__PURE__ */ function(ChannelOrder$1) {
-	ChannelOrder$1[ChannelOrder$1["RGBA"] = 0] = "RGBA";
-	ChannelOrder$1[ChannelOrder$1["BGRA"] = 1] = "BGRA";
-	ChannelOrder$1[ChannelOrder$1["ARGB"] = 2] = "ARGB";
-	ChannelOrder$1[ChannelOrder$1["ABGR"] = 3] = "ABGR";
-	return ChannelOrder$1;
-}(ChannelOrder || {});
-var StopWatch = class {
-	lastTime;
-	constructor(report) {
-		this.report = report;
-		this.lastTime = performance.now();
-		this.report = report;
-	}
-	lap(label) {
-		const now = performance.now();
-		if (this.report) console.log(`${(now - this.lastTime).toFixed(1)} ms: ${label}`);
-		this.lastTime = now;
-	}
-};
-var Preset = class {
-	channelOrder = ChannelOrder.ARGB;
-	farPixelFirst = false;
-	bigEndian = false;
-	packUnit = PackUnit.PIXEL;
-	vertPack = false;
-	alignBoundary = AlignBoundary.BYTE_1;
-	alignLeft = false;
-	vertAddr = false;
-	constructor(label, description, format, ops = {}) {
-		this.label = label;
-		this.description = description;
-		this.format = format;
-		for (const k of Object.keys(ops)) {
-			if (!(k in this)) throw new Error(`Unknown property '${k}'`);
-			this[k] = ops[k];
-		}
-	}
-};
-let presets = {
-	argb8888_le: new Preset("ARGB8888-LE", "透明度付きフルカラー。\nLovyanGFX の pushAlphaImage 関数向け。", PixelFormat.RGBA8888, { channelOrder: ChannelOrder.ARGB }),
-	rgb888_be: new Preset("RGB888-BE", "フルカラー。24bit 液晶用。", PixelFormat.RGB888, {
-		channelOrder: ChannelOrder.ARGB,
-		bigEndian: true
-	}),
-	rgb666_be_ra: new Preset("RGB666-BE-RA", "各バイトにチャネルを下位詰めで配置した RGB666。LovyanGFX 用。", PixelFormat.RGB666, {
-		channelOrder: ChannelOrder.ARGB,
-		packUnit: PackUnit.UNPACKED,
-		bigEndian: true
-	}),
-	rgb666_be_la: new Preset("RGB666-BE-LA", "各バイトにチャネルを上位詰めで配置した RGB666。低レベル API の 18bit モード用。", PixelFormat.RGB666, {
-		channelOrder: ChannelOrder.ARGB,
-		packUnit: PackUnit.UNPACKED,
-		alignLeft: true,
-		bigEndian: true
-	}),
-	rgb565_be: new Preset("RGB565-BE", "ハイカラー。\n各種 GFX ライブラリでの使用を含め、\n組み込み用途で一般的な形式。", PixelFormat.RGB565, { bigEndian: true }),
-	rgb444_be: new Preset("RGB444-BE", "ST7789 の 12bit モード用の形式。", PixelFormat.RGB444, {
-		packUnit: PackUnit.ALIGNMENT,
-		farPixelFirst: true,
-		bigEndian: true,
-		alignBoundary: AlignBoundary.BYTE_3
-	}),
-	rgb332: new Preset("RGB332", "各種 GFX ライブラリ用。", PixelFormat.RGB332),
-	rgb111_ra: new Preset("RGB111", "ILI9488 の 8 色モード用。", PixelFormat.RGB111, {
-		packUnit: PackUnit.ALIGNMENT,
-		farPixelFirst: true
-	}),
-	bw_hscan: new Preset("白黒 横スキャン", "各種 GFX ライブラリ用。", PixelFormat.BW, {
-		packUnit: PackUnit.ALIGNMENT,
-		farPixelFirst: true
-	}),
-	bw_vpack: new Preset("白黒 縦パッキング", "SPI/I2C ドライバを使用して\nSSD1306/1309 等の白黒ディスプレイに直接転送するための形式。", PixelFormat.BW, {
-		packUnit: PackUnit.ALIGNMENT,
-		vertPack: true
-	})
-};
+//#region src/Ui.ts
 function toElementArray(children) {
 	if (children == null) return [];
 	if (!Array.isArray(children)) children = [children];
@@ -1178,6 +1657,24 @@ function makeFloatList(children = [], sep = true) {
 		ul.appendChild(li);
 	});
 	return ul;
+}
+function makeGroup(children = []) {
+	const div = document.createElement("div");
+	div.classList.add("group");
+	toElementArray(children).forEach((child) => div.appendChild(child));
+	return div;
+}
+function makeGroupTitle(children = []) {
+	const div = document.createElement("div");
+	div.classList.add("groupTitle");
+	toElementArray(children).forEach((child) => div.appendChild(child));
+	return div;
+}
+function makeGroupBody(children = []) {
+	const div = document.createElement("div");
+	div.classList.add("groupBody");
+	toElementArray(children).forEach((child) => div.appendChild(child));
+	return div;
 }
 function makeParagraph(children = []) {
 	const p = document.createElement("p");
@@ -1215,10 +1712,11 @@ function makeTextBox(value = "", placeholder = "", maxLength = 100) {
 }
 function makeSelectBox(items, defaultValue) {
 	const select = document.createElement("select");
-	for (const { value, label } of items) {
+	for (const item of items) {
 		const option = document.createElement("option");
-		option.value = value.toString();
-		option.textContent = label;
+		option.value = item.value.toString();
+		option.textContent = item.label;
+		if (item.tip) option.title = item.tip;
 		select.appendChild(option);
 	}
 	select.value = defaultValue.toString();
@@ -1235,29 +1733,6 @@ function makeCheckBox(labelText) {
 function makeButton(text = "") {
 	const button = document.createElement("button");
 	button.textContent = text;
-	return button;
-}
-function makeSampleImageButton(url) {
-	const button = document.createElement("button");
-	button.classList.add("sampleImageButton");
-	button.style.backgroundImage = `url(${url})`;
-	button.addEventListener("click", () => {
-		loadFromString(url);
-	});
-	button.textContent = "";
-	return button;
-}
-function makePresetButton(id, preset) {
-	const button = document.createElement("button");
-	button.dataset.presetName = id;
-	button.classList.add("presetButton");
-	const img = document.createElement("img");
-	img.src = `img/preset/${id}.svg`;
-	button.appendChild(img);
-	button.appendChild(document.createElement("br"));
-	button.appendChild(document.createTextNode(preset.label));
-	button.title = preset.description;
-	button.addEventListener("click", () => loadPreset(preset));
 	return button;
 }
 function basic(elem) {
@@ -1311,17 +1786,15 @@ function upDown(elem, min, max, step) {
 	});
 	upDownButton.addEventListener("pointerdown", (e) => {
 		e.preventDefault();
-		if (trimViewToNextState(e.offsetX, e.offsetY) != TrimState.IDLE) {
-			const y = e.offsetY;
-			let val;
-			if (textBox.value.trim()) val = parseFloat(textBox.value.trim());
-			else val = parseFloat(textBox.placeholder.replaceAll(/[\(\)]/g, "").trim());
-			val = Math.round(val / step) * step;
-			upDownButton.dataset.dragStartY = y.toString();
-			upDownButton.dataset.dragStartVal = val.toString();
-			upDownButton.style.cursor = "grabbing";
-			upDownButton.setPointerCapture(e.pointerId);
-		}
+		const y = e.offsetY;
+		let val;
+		if (textBox.value.trim()) val = parseFloat(textBox.value.trim());
+		else val = parseFloat(textBox.placeholder.replaceAll(/[\(\)]/g, "").trim());
+		val = Math.round(val / step) * step;
+		upDownButton.dataset.dragStartY = y.toString();
+		upDownButton.dataset.dragStartVal = val.toString();
+		upDownButton.style.cursor = "grabbing";
+		upDownButton.setPointerCapture(e.pointerId);
 	});
 	upDownButton.addEventListener("pointerup", (e) => {
 		e.preventDefault();
@@ -1335,34 +1808,183 @@ function upDown(elem, min, max, step) {
 	upDownButton.addEventListener("touchend", (e) => e.preventDefault());
 	return makeSpan([textBox, upDownButton]);
 }
+
+//#endregion
+//#region src/main.ts
+var TrimState = /* @__PURE__ */ function(TrimState$1) {
+	TrimState$1[TrimState$1["IDLE"] = 0] = "IDLE";
+	TrimState$1[TrimState$1["DRAG_TOP"] = 1] = "DRAG_TOP";
+	TrimState$1[TrimState$1["DRAG_RIGHT"] = 2] = "DRAG_RIGHT";
+	TrimState$1[TrimState$1["DRAG_BOTTOM"] = 3] = "DRAG_BOTTOM";
+	TrimState$1[TrimState$1["DRAG_LEFT"] = 4] = "DRAG_LEFT";
+	return TrimState$1;
+}(TrimState || {});
+var StopWatch = class {
+	lastTime;
+	constructor(report) {
+		this.report = report;
+		this.lastTime = performance.now();
+		this.report = report;
+	}
+	lap(label) {
+		const now = performance.now();
+		if (this.report) console.log(`${(now - this.lastTime).toFixed(1)} ms: ${label}`);
+		this.lastTime = now;
+	}
+};
+var PlaneUi = class {
+	container = document.createElement("div");
+	planeTypeBox = makeSelectBox([{
+		value: PlaneType.DIRECT,
+		label: "直接出力",
+		tip: "ピクセルデータをそのまま出力します。"
+	}, {
+		value: PlaneType.INDEX_MATCH,
+		label: "色番号を指定",
+		tip: "指定した色番号に一致するピクセルを抽出します。"
+	}], PlaneType.DIRECT);
+	matchIndexBox = makeTextBox("0", "", 4);
+	matchInvertBox = makeCheckBox("反転");
+	ul = makeFloatList([
+		tip(["種類: ", this.planeTypeBox], "プレーンの種類を指定します。"),
+		tip(["色番号: ", this.matchIndexBox], "抽出する色番号を指定します。"),
+		tip(["反転: ", this.matchInvertBox], "抽出結果を反転します。")
+	]);
+	constructor(config) {
+		this.config = config;
+		this.container.appendChild(this.ul);
+		this.planeTypeBox.value = config.planeType.toString();
+		this.matchIndexBox.value = config.matchIndex.toString();
+		this.matchInvertBox.checked = config.matchInvert;
+		this.container.querySelectorAll("input, select").forEach((el) => {
+			el.addEventListener("change", () => {
+				requestGenerateCode();
+			});
+			el.addEventListener("input", () => {
+				requestGenerateCode();
+			});
+		});
+	}
+	dispose() {
+		this.container.remove();
+	}
+};
+function makeSampleImageButton(url) {
+	const fileName = url.split("/").pop() || DEFAULT_INPUT_FILE_NAME;
+	const button = document.createElement("button");
+	button.classList.add("sampleImageButton");
+	button.style.backgroundImage = `url(${url})`;
+	button.addEventListener("click", () => {
+		loadFromString(fileName, url);
+	});
+	button.textContent = "";
+	return button;
+}
+function makePresetButton(id, preset) {
+	const button = document.createElement("button");
+	button.dataset.presetName = id;
+	button.classList.add("presetButton");
+	const img = document.createElement("img");
+	img.src = `img/preset/${id}.svg`;
+	button.appendChild(img);
+	button.appendChild(document.createElement("br"));
+	button.appendChild(document.createTextNode(preset.label));
+	button.title = preset.description;
+	button.addEventListener("click", () => loadPreset(preset));
+	return button;
+}
 const dropTarget = document.createElement("div");
+dropTarget.classList.add("dropTarget");
+dropTarget.innerHTML = "ドロップして読み込む";
+document.body.appendChild(dropTarget);
+hide(dropTarget);
+const fileBrowseButton = makeButton("ファイルを選択");
 const hiddenFileBox = document.createElement("input");
+hiddenFileBox.type = "file";
+hiddenFileBox.accept = "image/*";
+hiddenFileBox.style.display = "none";
+fileBrowseButton.addEventListener("click", () => {
+	hiddenFileBox.click();
+});
 const pasteTarget = document.createElement("input");
+pasteTarget.type = "text";
+pasteTarget.style.textAlign = "center";
+pasteTarget.style.width = "8em";
+pasteTarget.placeholder = "ここに貼り付け";
+const fileSection = makeSection(makeFloatList([
+	makeHeader("入力画像"),
+	"画像をドロップ、",
+	makeSpan([pasteTarget, "、"]),
+	makeSpan(["または ", fileBrowseButton]),
+	makeSpan([
+		"（サンプル: ",
+		makeSampleImageButton("./img/sample/gradient.png"),
+		makeSampleImageButton("./img/sample/forest-path.jpg"),
+		makeSampleImageButton("./img/sample/rgb-chan.png"),
+		makeSampleImageButton("./img/sample/rgb-chan-tp.png"),
+		"）"
+	])
+], false));
+const pPresetButtons = makeParagraph();
+for (const id in presets) pPresetButtons.appendChild(makePresetButton(id, presets[id]));
+const presetSection = makeSection([makeFloatList([makeHeader("プリセット"), makeNowrap("選んでください: ")]), pPresetButtons]);
+const proModeCheckBox = makeCheckBox("上級者向け設定を表示する");
+proModeCheckBox.addEventListener("change", onProModeChanged);
+function onProModeChanged() {
+	const pro$1 = proModeCheckBox.checked;
+	history.replaceState(null, "", pro$1 ? "#detail" : "#");
+	document.querySelectorAll(".professional").forEach((el) => {
+		setVisible(el, pro$1);
+		onRelayout();
+	});
+	document.querySelectorAll(".basic").forEach((el) => {
+		setVisible(el, !pro$1);
+		onRelayout();
+	});
+	updateTrimCanvas();
+}
+const proModeSection = makeSection(makeFloatList([makeHeader("編集モード"), proModeCheckBox.parentElement]));
 const origCanvas = document.createElement("canvas");
 const resetTrimButton = makeButton("範囲をリセット");
-const alphaProcBox = makeSelectBox([
+const trimCanvas = document.createElement("canvas");
+trimCanvas.style.width = "100%";
+trimCanvas.style.height = "400px";
+trimCanvas.style.boxSizing = "border-box";
+trimCanvas.style.border = "solid 1px #444";
+trimCanvas.style.backgroundImage = "url(./img/checker.png)";
+const pTrimCanvas = makeParagraph(trimCanvas);
+pTrimCanvas.style.textAlign = "center";
+const trimSection = makeSection([makeFloatList([makeHeader("トリミング"), tip(resetTrimButton, "トリミングしていない状態に戻します。")]), pTrimCanvas]);
+const alphaModeBox = makeSelectBox([
 	{
-		value: AlphaProc.KEEP,
+		value: AlphaMode.KEEP,
 		label: "変更しない"
 	},
 	{
-		value: AlphaProc.FILL,
+		value: AlphaMode.FILL,
 		label: "背景色を指定"
 	},
 	{
-		value: AlphaProc.BINARIZE,
+		value: AlphaMode.BINARIZE,
 		label: "二値化"
 	},
 	{
-		value: AlphaProc.SET_KEY_COLOR,
+		value: AlphaMode.SET_KEY_COLOR,
 		label: "抜き色指定"
 	}
-], AlphaProc.KEEP);
+], AlphaMode.KEEP);
 const backColorBox = makeTextBox("#00F");
 const keyColorBox = makeTextBox("#00F");
 const keyToleranceBox = makeTextBox("0", "(auto)", 5);
 const alphaThreshBox = makeTextBox("128", "(auto)", 5);
-const trimCanvas = document.createElement("canvas");
+const alphaSection = pro(makeSection(makeFloatList([
+	makeHeader("透過色"),
+	tip(["透過色の扱い: ", alphaModeBox], "入力画像に対する透過色の取り扱いを指定します。"),
+	tip(["背景色: ", backColorBox], "画像の透明部分をこの色で塗り潰して不透明化します。"),
+	tip(["キーカラー: ", keyColorBox], "透明にしたい色を指定します。"),
+	tip(["許容誤差: ", upDown(keyToleranceBox, 0, 255, 1)], "キーカラーからの許容誤差を指定します。"),
+	tip(["閾値: ", upDown(alphaThreshBox, 0, 255, 1)], "透明にするかどうかの閾値を指定します。")
+])));
 const hueBox = makeTextBox("0", "(0)", 4);
 const saturationBox = makeTextBox("100", "(100)", 4);
 const lightnessBox = makeTextBox("100", "(100)", 4);
@@ -1370,6 +1992,32 @@ const gammaBox = makeTextBox("1", "(auto)", 4);
 const brightnessBox = makeTextBox("0", "(auto)", 5);
 const contrastBox = makeTextBox("100", "(auto)", 5);
 const invertBox = makeCheckBox("階調反転");
+const colorCorrectSection = pro(makeSection(makeFloatList([
+	makeHeader("色調補正"),
+	tip([
+		"色相: ",
+		upDown(hueBox, -360, 360, 5),
+		"°"
+	], "デフォルトは 0° です。"),
+	tip([
+		"彩度: ",
+		upDown(saturationBox, 0, 200, 5),
+		"%"
+	], "デフォルトは 100% です。"),
+	tip([
+		"明度: ",
+		upDown(lightnessBox, 0, 200, 5),
+		"%"
+	], "デフォルトは 100% です。"),
+	tip(["ガンマ: ", upDown(gammaBox, .1, 2, .05)], "デフォルトは 1.0 です。\n空欄にすると、輝度 50% を中心にバランスが取れるように自動調整します。"),
+	tip(["輝度: ", upDown(brightnessBox, -255, 255, 8)], "デフォルトは 0 です。\n空欄にすると、輝度 50% を中心にバランスが取れるように自動調整します。"),
+	tip([
+		"コントラスト: ",
+		upDown(contrastBox, 0, 200, 5),
+		"%"
+	], "デフォルトは 100% です。\n空欄にすると、階調が失われない範囲でダイナミックレンジが最大となるように自動調整します。"),
+	tip([invertBox.parentElement], "各チャネルの値を大小反転します。")
+])));
 const pixelFormatBox = makeSelectBox([
 	{
 		value: PixelFormat.RGBA8888,
@@ -1386,10 +2034,6 @@ const pixelFormatBox = makeSelectBox([
 	{
 		value: PixelFormat.RGB565,
 		label: "RGB565"
-	},
-	{
-		value: PixelFormat.RGB555,
-		label: "RGB555"
 	},
 	{
 		value: PixelFormat.RGB444,
@@ -1414,6 +2058,10 @@ const pixelFormatBox = makeSelectBox([
 	{
 		value: PixelFormat.BW,
 		label: "B/W"
+	},
+	{
+		value: PixelFormat.I2_RGB888,
+		label: "Index2"
 	}
 ], PixelFormat.RGB565);
 const widthBox = makeTextBox("", "(auto)", 4);
@@ -1432,6 +2080,51 @@ const scalingMethodBox = makeSelectBox([
 		label: "ストレッチ"
 	}
 ], ScalingMethod.ZOOM);
+const formatSection = makeSection(makeFloatList([
+	makeHeader("出力形式"),
+	pro(tip(["フォーマット: ", pixelFormatBox], "ピクセルフォーマットを指定します。")),
+	tip([
+		"サイズ: ",
+		upDown(widthBox, 1, 1024, 1),
+		" x ",
+		upDown(heightBox, 1, 1024, 1),
+		" px"
+	], "片方を空欄にすると他方はアスペクト比に基づいて自動的に決定されます。"),
+	tip(["拡縮方法: ", scalingMethodBox], "トリミングサイズと出力サイズが異なる場合の拡縮方法を指定します。")
+]));
+const csrModeBox = makeSelectBox([
+	{
+		value: ColorSpaceReductionMode.NONE,
+		label: "縮退しない",
+		tip: "元の色空間をそのまま使います。"
+	},
+	{
+		value: ColorSpaceReductionMode.CLIP,
+		label: "切り捨てる",
+		tip: "新しい色空間で表現できない色は最も近い色に変換します。"
+	},
+	{
+		value: ColorSpaceReductionMode.FOLD,
+		label: "畳み込む",
+		tip: "新しい色空間で表現できない色は色相環上で折り返して空間内に収めます。"
+	},
+	{
+		value: ColorSpaceReductionMode.TRANSFORM,
+		label: "圧縮する",
+		tip: "元の色空間全体を変形してパレットの空間内に収まるようにします。"
+	}
+], ColorSpaceReductionMode.FOLD);
+const csrHueToleranceBox = makeTextBox("60", "(60)", 4);
+const paletteTable = document.createElement("table");
+const paletteSection = makeSection([makeFloatList([
+	makeHeader("パレット"),
+	tip(["色空間の縮退方法: ", csrModeBox], "パレット内の色で表現できない色の扱いを指定します。"),
+	tip([
+		"許容誤差: ",
+		upDown(csrHueToleranceBox, 0, 180, 1),
+		"°"
+	], "新しい色空間の外側をどこまで空間内に丸めるかを色相の角度で指定します。")
+]), pro(paletteTable)]);
 const colorDitherBox = makeSelectBox([{
 	value: DitherMethod.NONE,
 	label: "なし"
@@ -1448,13 +2141,30 @@ const alphaDitherBox = makeSelectBox([{
 }], DitherMethod.NONE);
 const roundMethodBox = makeSelectBox([{
 	value: RoundMethod.NEAREST,
-	label: "最も近い輝度"
+	label: "近似値",
+	tip: "元の色の輝度値に最も近い色を選択します。"
 }, {
 	value: RoundMethod.EQUAL_DIVISION,
-	label: "均等割り"
+	label: "均等割り",
+	tip: "色の範囲を均等に分割します。"
 }], RoundMethod.NEAREST);
 const previewCanvas = document.createElement("canvas");
-const quantizeErrorBox = document.createElement("span");
+const reductionErrorBox = document.createElement("span");
+previewCanvas.style.backgroundImage = "url(./img/checker.png)";
+reductionErrorBox.style.color = "red";
+hide(previewCanvas);
+hide(reductionErrorBox);
+const pPreviewCanvas = makeParagraph([previewCanvas, reductionErrorBox]);
+pPreviewCanvas.style.height = "400px";
+pPreviewCanvas.style.background = "#444";
+pPreviewCanvas.style.border = "solid 1px #444";
+pPreviewCanvas.style.textAlign = "center";
+const colorReductionSection = makeSection([makeFloatList([
+	makeHeader("減色"),
+	pro(tip(["丸め方法: ", roundMethodBox], "パレットから色を選択する際の戦略を指定します。\nディザリングを行う場合はあまり関係ありません。")),
+	tip(["ディザリング: ", colorDitherBox], "あえてノイズを加えることでできるだけ元画像の色を再現します。"),
+	pro(tip(["透明度のディザ: ", alphaDitherBox], "あえてノイズを加えることでできるだけ元画像の透明度を再現します。"))
+]), pPreviewCanvas]);
 const channelOrderBox = makeSelectBox([
 	{
 		value: ChannelOrder.RGBA,
@@ -1520,8 +2230,37 @@ const alignBoundaryBox = makeSelectBox([
 ], AlignBoundary.BYTE_1);
 const leftAlignBox = makeCheckBox("左詰め");
 const vertAddrBox = makeCheckBox("垂直スキャン");
+const planeSelectBox = makeSelectBox([{
+	value: 0,
+	label: "プレーン0"
+}], 0);
+const planeGroupBody = makeGroupBody();
+const planeGroupBox = makeGroup([makeGroupTitle([planeSelectBox]), planeGroupBody]);
+planeSelectBox.addEventListener("change", onSelectedPlaneChanged);
 const structCanvas = document.createElement("canvas");
+structCanvas.style.maxWidth = "100%";
 const structErrorBox = makeParagraph();
+structErrorBox.style.textAlign = "center";
+structErrorBox.style.color = "red";
+hide(structErrorBox);
+const pStructCanvas = makeParagraph([structCanvas, structErrorBox]);
+pStructCanvas.style.textAlign = "center";
+const encodeSection = makeSection([
+	makeFloatList([
+		makeHeader("エンコード"),
+		basic(makeSpan("この構造で生成されます:")),
+		pro(tip(["パッキング単位: ", packUnitBox], "パッキングの単位を指定します。")),
+		pro(tip([vertPackBox.parentElement], "複数ピクセルをパッキングする場合に、縦方向にパッキングします。\nSSD1306/1309 などの一部の白黒ディスプレイに\n直接転送可能なデータを生成する場合はチェックします。")),
+		pro(tip([vertAddrBox.parentElement], "アドレスを縦方向にインクリメントする場合にチェックします。")),
+		pro(tip(["チャネル順: ", channelOrderBox], "RGB のチャネルを並べる順序を指定します。")),
+		pro(tip(["ピクセル順: ", farPixelFirstBox], "バイト内のピクセルの順序を指定します。")),
+		pro(tip(["アライメント境界: ", alignBoundaryBox], "アライメントの境界を指定します。")),
+		pro(tip([leftAlignBox.parentElement], "フィールドをアライメント境界内で左詰めします。")),
+		pro(tip([bigEndianBox.parentElement], "ピクセル内のバイトの順序を指定します。"))
+	]),
+	pro(planeGroupBox),
+	pStructCanvas
+]);
 const codeUnitBox = makeSelectBox([
 	{
 		value: CodeUnit.FILE,
@@ -1564,26 +2303,24 @@ const indentBox = makeSelectBox([
 		label: "タブ"
 	}
 ], Indent.SPACE_X2);
-const codeBox = document.createElement("pre");
+const codePlaneContainer = document.createElement("div");
 const showCodeLink = document.createElement("a");
 showCodeLink.href = "#";
 showCodeLink.textContent = "表示する";
-const codeHiddenBox = makeParagraph([
-	"生成されたコードが非常に長いので非表示になっています",
-	document.createElement("br"),
-	showCodeLink
-]);
-codeHiddenBox.classList.add("codeHiddenBox");
-codeHiddenBox.style.textAlign = "center";
-showCodeLink.addEventListener("click", (e) => {
-	e.preventDefault();
-	show(codeBox);
-	hide(codeHiddenBox);
-});
 const codeErrorBox = makeParagraph();
 codeErrorBox.style.textAlign = "center";
 codeErrorBox.style.color = "red";
-const copyButton = makeButton("コードをコピー");
+hide(codeErrorBox);
+const codeGenSection = makeSection([
+	makeFloatList([
+		makeHeader("コード生成"),
+		tip(["生成範囲: ", codeUnitBox], "生成するコードの範囲を指定します。"),
+		tip(["列数: ", codeColsBox], "1 行に詰め込む要素数を指定します。"),
+		tip(["インデント: ", indentBox], "インデントの形式とサイズを指定します。")
+	]),
+	codePlaneContainer,
+	codeErrorBox
+]);
 let container;
 let updateTrimCanvasTimeoutId = -1;
 let quantizeTimeoutId = -1;
@@ -1591,262 +2328,67 @@ let generateCodeTimeoutId = -1;
 let worldX0 = 0, worldY0 = 0, zoom = 1;
 let trimL = 0, trimT = 0, trimR = 1, trimB = 1;
 let trimUiState = TrimState.IDLE;
+let paletteColor = new Uint32Array(256);
+let paletteEnabled = new Array(256).fill(false);
 let reducedImage = null;
 let trimCanvasWidth = 800;
 let trimCanvasHeight = 400;
 let previewCanvasWidth = 800;
 let previewCanvasHeight = 400;
+let planeUis = {};
+let keepShowLongCode = false;
+const DEFAULT_INPUT_FILE_NAME = "imageArray";
+let inputFileName = DEFAULT_INPUT_FILE_NAME;
 async function onLoad() {
 	container = document.querySelector("#arrayfyContainer");
-	{
-		dropTarget.classList.add("dropTarget");
-		dropTarget.innerHTML = "ドロップして読み込む";
-		document.body.appendChild(dropTarget);
-		hide(dropTarget);
-		hiddenFileBox.type = "file";
-		hiddenFileBox.accept = "image/*";
-		hiddenFileBox.style.display = "none";
-		const fileBrowseButton = makeButton("ファイルを選択");
-		fileBrowseButton.addEventListener("click", () => {
-			hiddenFileBox.click();
+	container.appendChild(proModeSection);
+	container.appendChild(fileSection);
+	container.appendChild(presetSection);
+	container.appendChild(pro(trimSection));
+	container.appendChild(alphaSection);
+	container.appendChild(colorCorrectSection);
+	container.appendChild(formatSection);
+	container.appendChild(paletteSection);
+	container.appendChild(colorReductionSection);
+	container.appendChild(encodeSection);
+	container.appendChild(codeGenSection);
+	alphaModeBox.addEventListener("change", onAlphaProcChanged);
+	onAlphaProcChanged();
+	alphaSection.querySelectorAll("input, select").forEach((el) => {
+		el.addEventListener("change", () => {
+			requestUpdateTrimCanvas();
 		});
-		pasteTarget.type = "text";
-		pasteTarget.style.textAlign = "center";
-		pasteTarget.style.width = "8em";
-		pasteTarget.placeholder = "ここに貼り付け";
-		container.appendChild(makeSection(makeFloatList([
-			makeHeader("入力画像"),
-			"画像をドロップ、",
-			makeSpan([pasteTarget, "、"]),
-			makeSpan(["または ", fileBrowseButton]),
-			makeSpan([
-				"（サンプル: ",
-				makeSampleImageButton("./img/sample/gradient.png"),
-				makeSampleImageButton("./img/sample/forest-path.jpg"),
-				makeSampleImageButton("./img/sample/rgb-chan.png"),
-				makeSampleImageButton("./img/sample/rgb-chan-tp.png"),
-				"）"
-			])
-		], false)));
-	}
-	{
-		const pPresetButtons = makeParagraph();
-		for (const id in presets) pPresetButtons.appendChild(makePresetButton(id, presets[id]));
-		const pNote = makeParagraph([
-			"白黒ディスプレイについては、各種 GFX ライブラリを使用して描画する場合は横スキャンを選択してください。",
-			"I2C や SPI ドライバを用いて直接転送する場合はディスプレイの仕様に従ってください。",
-			"SSD1306/1309 など一部のディスプレイでは縦パッキングされたデータが必要です。"
-		]);
-		pNote.style.fontSize = "smaller";
-		container.appendChild(makeSection([
-			makeFloatList([makeHeader("プリセット"), makeNowrap("選んでください: ")]),
-			pPresetButtons,
-			pNote
-		]));
-	}
-	{
-		const showProButton = document.createElement("a");
-		const hideProButton = document.createElement("a");
-		showProButton.textContent = "上級者向け設定を表示する";
-		showProButton.href = "#";
-		hideProButton.textContent = "上級者向け設定を隠す";
-		hideProButton.href = "#";
-		showProButton.addEventListener("click", (e) => {
-			e.preventDefault();
-			showPro();
-			history.replaceState(null, "", "#detail");
+		el.addEventListener("input", () => {
+			requestUpdateTrimCanvas();
 		});
-		hideProButton.addEventListener("click", (e) => {
-			e.preventDefault();
-			hidePro();
-			history.replaceState(null, "", "#");
+	});
+	const colorReductionSections = [
+		alphaSection,
+		colorCorrectSection,
+		formatSection,
+		paletteSection,
+		colorReductionSection
+	];
+	for (const section of colorReductionSections) section.querySelectorAll("input, select").forEach((el) => {
+		el.addEventListener("change", () => {
+			requestColorReduction();
 		});
-		const section = makeSection([basic(showProButton), pro(hideProButton)]);
-		section.style.textAlign = "center";
-		section.style.padding = "5px 0";
-		container.appendChild(section);
-	}
-	{
-		trimCanvas.style.width = "100%";
-		trimCanvas.style.height = "400px";
-		trimCanvas.style.boxSizing = "border-box";
-		trimCanvas.style.border = "solid 1px #444";
-		trimCanvas.style.backgroundImage = "url(./img/checker.png)";
-		const pCanvas = makeParagraph(trimCanvas);
-		pCanvas.style.textAlign = "center";
-		container.appendChild(pro(makeSection([makeFloatList([makeHeader("トリミング"), tip(resetTrimButton, "トリミングしていない状態に戻します。")]), pCanvas])));
-	}
-	{
-		const section = pro(makeSection(makeFloatList([
-			makeHeader("透過色"),
-			tip(["透過色の扱い: ", alphaProcBox], "入力画像に対する透過色の取り扱いを指定します。"),
-			tip(["背景色: ", backColorBox], "画像の透明部分をこの色で塗り潰して不透明化します。"),
-			tip(["キーカラー: ", keyColorBox], "透明にしたい色を指定します。"),
-			tip(["許容誤差: ", upDown(keyToleranceBox, 0, 255, 1)], "キーカラーからの許容誤差を指定します。"),
-			tip(["閾値: ", upDown(alphaThreshBox, 0, 255, 1)], "透明にするかどうかの閾値を指定します。")
-		])));
-		container.appendChild(section);
-		alphaProcBox.addEventListener("change", onAlphaProcChanged);
-		onAlphaProcChanged();
-		section.querySelectorAll("input, select").forEach((el) => {
-			el.addEventListener("change", () => {
-				requestUpdateTrimCanvas();
-				requestQuantize();
-			});
-			el.addEventListener("input", () => {
-				requestUpdateTrimCanvas();
-				requestQuantize();
-			});
+		el.addEventListener("input", () => {
+			requestColorReduction();
 		});
-	}
-	{
-		const section = pro(makeSection(makeFloatList([
-			makeHeader("色調補正"),
-			tip([
-				"色相: ",
-				upDown(hueBox, -360, 360, 5),
-				"°"
-			], "デフォルトは 0° です。"),
-			tip([
-				"彩度: ",
-				upDown(saturationBox, 0, 200, 1),
-				"%"
-			], "デフォルトは 100% です。"),
-			tip([
-				"明度: ",
-				upDown(lightnessBox, 0, 200, 1),
-				"%"
-			], "デフォルトは 100% です。"),
-			tip(["ガンマ: ", upDown(gammaBox, .1, 2, .1)], "デフォルトは 1.0 です。\n空欄にすると、輝度 50% を中心にバランスが取れるように自動調整します。"),
-			tip(["輝度: ", upDown(brightnessBox, -255, 255, 8)], "デフォルトは 0 です。\n空欄にすると、輝度 50% を中心にバランスが取れるように自動調整します。"),
-			tip([
-				"コントラスト: ",
-				upDown(contrastBox, 0, 200, 1),
-				"%"
-			], "デフォルトは 100% です。\n空欄にすると、階調が失われない範囲でダイナミックレンジが最大となるように自動調整します。"),
-			tip([invertBox.parentElement], "各チャネルの値を大小反転します。")
-		])));
-		container.appendChild(section);
-		section.querySelectorAll("input, select").forEach((el) => {
-			el.addEventListener("change", () => {
-				requestQuantize();
-			});
-			el.addEventListener("input", () => {
-				requestQuantize();
-			});
+	});
+	const codeGenSections = [encodeSection, codeGenSection];
+	for (const section of codeGenSections) section.querySelectorAll("input, select").forEach((el) => {
+		el.addEventListener("change", () => {
+			requestGenerateCode();
 		});
-	}
-	{
-		const section = makeSection(makeFloatList([
-			makeHeader("出力サイズ"),
-			tip([
-				upDown(widthBox, 1, 1024, 1),
-				" x ",
-				upDown(heightBox, 1, 1024, 1),
-				" px"
-			], "片方を空欄にすると他方はアスペクト比に基づいて自動的に決定されます。"),
-			tip(["拡縮方法: ", scalingMethodBox], "トリミングサイズと出力サイズが異なる場合の拡縮方法を指定します。")
-		]));
-		container.appendChild(section);
-		section.querySelectorAll("input, select").forEach((el) => {
-			el.addEventListener("change", () => {
-				requestQuantize();
-			});
-			el.addEventListener("input", () => {
-				requestQuantize();
-			});
+		el.addEventListener("input", () => {
+			requestGenerateCode();
 		});
-	}
-	{
-		previewCanvas.style.backgroundImage = "url(./img/checker.png)";
-		quantizeErrorBox.style.color = "red";
-		hide(previewCanvas);
-		hide(quantizeErrorBox);
-		const pCanvas = makeParagraph([previewCanvas, quantizeErrorBox]);
-		pCanvas.style.height = "400px";
-		pCanvas.style.background = "#444";
-		pCanvas.style.border = "solid 1px #444";
-		pCanvas.style.textAlign = "center";
-		container.appendChild(pCanvas);
-		const section = makeSection([makeFloatList([
-			makeHeader("減色"),
-			pro(tip(["フォーマット: ", pixelFormatBox], "ピクセルフォーマットを指定します。")),
-			pro(tip(["丸め方法: ", roundMethodBox], "パレットから色を選択する際の戦略を指定します。\nディザリングを行う場合はあまり関係ありません。")),
-			tip(["ディザリング: ", colorDitherBox], "あえてノイズを加えることでできるだけ元画像の色を再現します。"),
-			pro(tip(["透明度のディザ: ", alphaDitherBox], "あえてノイズを加えることでできるだけ元画像の透明度を再現します。"))
-		]), pCanvas]);
-		container.appendChild(section);
-		section.querySelectorAll("input, select").forEach((el) => {
-			el.addEventListener("change", () => {
-				requestQuantize();
-			});
-			el.addEventListener("input", () => {
-				requestQuantize();
-			});
-		});
-	}
-	{
-		structCanvas.style.maxWidth = "100%";
-		structErrorBox.style.textAlign = "center";
-		structErrorBox.style.color = "red";
-		hide(structErrorBox);
-		const pCanvas = makeParagraph([structCanvas, structErrorBox]);
-		pCanvas.style.textAlign = "center";
-		const section = makeSection([makeFloatList([
-			makeHeader("エンコード"),
-			basic(makeSpan("このフォーマットで生成されます:")),
-			pro(tip(["パッキング単位: ", packUnitBox], "パッキングの単位を指定します。")),
-			pro(tip([vertPackBox.parentElement], "複数ピクセルをパッキングする場合に、縦方向にパッキングします。\nSSD1306/1309 などの一部の白黒ディスプレイに\n直接転送可能なデータを生成する場合はチェックします。")),
-			pro(tip([vertAddrBox.parentElement], "アドレスを縦方向にインクリメントする場合にチェックします。")),
-			pro(tip(["チャネル順: ", channelOrderBox], "RGB のチャネルを並べる順序を指定します。")),
-			pro(tip(["ピクセル順: ", farPixelFirstBox], "バイト内のピクセルの順序を指定します。")),
-			pro(tip(["アライメント境界: ", alignBoundaryBox], "アライメントの境界を指定します。")),
-			pro(tip([leftAlignBox.parentElement], "フィールドをアライメント境界内で左詰めします。")),
-			pro(tip([bigEndianBox.parentElement], "ピクセル内のバイトの順序を指定します。"))
-		]), pCanvas]);
-		container.appendChild(section);
-		section.querySelectorAll("input, select").forEach((el) => {
-			el.addEventListener("change", () => {
-				requestGenerateCode();
-			});
-			el.addEventListener("input", () => {
-				requestGenerateCode();
-			});
-		});
-	}
-	{
-		hide(codeHiddenBox);
-		hide(codeErrorBox);
-		const section = makeSection([
-			makeFloatList([
-				makeHeader("コード生成"),
-				tip(["生成範囲: ", codeUnitBox], "生成するコードの範囲を指定します。"),
-				tip(["列数: ", codeColsBox], "1 行に詰め込む要素数を指定します。"),
-				tip(["インデント: ", indentBox], "インデントの形式とサイズを指定します。"),
-				copyButton
-			]),
-			codeBox,
-			codeHiddenBox,
-			codeErrorBox
-		]);
-		container.appendChild(section);
-		const buttonParent = parentLiOf(copyButton);
-		buttonParent.style.float = "right";
-		buttonParent.style.marginRight = "0";
-		buttonParent.style.paddingRight = "0";
-		buttonParent.style.borderRight = "none";
-		section.querySelectorAll("input, select").forEach((el) => {
-			el.addEventListener("change", () => {
-				requestGenerateCode();
-			});
-			el.addEventListener("input", () => {
-				requestGenerateCode();
-			});
-		});
-	}
+	});
 	hiddenFileBox.addEventListener("change", async (e) => {
 		const input = e.target;
-		if (input.files && input.files[0]) await loadFromFile(input.files[0]);
+		if (input.files && input.files[0]) await loadFromFile(input.files[0].name, input.files[0]);
 	});
 	document.body.addEventListener("dragover", (e) => {
 		if (!e.dataTransfer) return;
@@ -1870,7 +2412,8 @@ async function onLoad() {
 		for (const item of items) if (item.kind === "file") {
 			e.preventDefault();
 			e.stopPropagation();
-			await loadFromFile(item.getAsFile());
+			const file = item.getAsFile();
+			await loadFromFile(file.name, file);
 			break;
 		}
 	});
@@ -1880,7 +2423,8 @@ async function onLoad() {
 		for (const item of items) if (item.kind === "file") {
 			e.preventDefault();
 			e.stopPropagation();
-			await loadFromFile(item.getAsFile());
+			const file = item.getAsFile();
+			await loadFromFile(file.name, file);
 			break;
 		}
 	});
@@ -1932,7 +2476,7 @@ async function onLoad() {
 					break;
 			}
 			requestUpdateTrimCanvas();
-			requestQuantize();
+			requestColorReduction();
 		}
 	});
 	trimCanvas.addEventListener("pointerdown", (e) => {
@@ -1962,13 +2506,10 @@ async function onLoad() {
 	resetTrimButton.addEventListener("click", () => {
 		resetTrim();
 	});
-	copyButton.addEventListener("click", () => {
-		if (!codeBox.textContent) return;
-		navigator.clipboard.writeText(codeBox.textContent);
-	});
-	if (window.location.hash === "#detail") showPro();
-	else hidePro();
-	await loadFromString("./img/sample/gradient.png");
+	proModeCheckBox.checked = window.location.hash === "#detail";
+	onProModeChanged();
+	loadPreset(presets.rgb565_be);
+	await loadFromString("gradient", "./img/sample/gradient.png");
 	onRelayout();
 }
 function onAlphaProcChanged() {
@@ -1976,44 +2517,25 @@ function onAlphaProcChanged() {
 	hide(parentLiOf(keyColorBox));
 	hide(parentLiOf(keyToleranceBox));
 	hide(parentLiOf(alphaThreshBox));
-	const alphaProc = parseInt(alphaProcBox.value);
+	const alphaProc = parseInt(alphaModeBox.value);
 	switch (alphaProc) {
-		case AlphaProc.FILL:
+		case AlphaMode.FILL:
 			show(parentLiOf(backColorBox));
 			break;
-		case AlphaProc.SET_KEY_COLOR:
+		case AlphaMode.SET_KEY_COLOR:
 			show(parentLiOf(keyColorBox));
 			show(parentLiOf(keyToleranceBox));
 			break;
-		case AlphaProc.BINARIZE:
+		case AlphaMode.BINARIZE:
 			show(parentLiOf(alphaThreshBox));
 			break;
 	}
 }
-function showPro() {
-	document.querySelectorAll(".professional").forEach((el) => {
-		show(el);
-		onRelayout();
-	});
-	document.querySelectorAll(".basic").forEach((el) => {
-		hide(el);
-		onRelayout();
-	});
-	updateTrimCanvas();
-}
-function hidePro() {
-	document.querySelectorAll(".professional").forEach((el) => {
-		hide(el);
-	});
-	document.querySelectorAll(".basic").forEach((el) => {
-		show(el);
-	});
-}
-async function loadFromFile(file) {
+async function loadFromFile(name, file) {
 	return new Promise((resolve, reject) => {
 		const reader = new FileReader();
 		reader.onload = async (e) => {
-			if (e.target && typeof e.target.result === "string") await loadFromString(e.target.result);
+			if (e.target && typeof e.target.result === "string") await loadFromString(name, e.target.result);
 			else throw new Error("Invalid image data");
 			resolve();
 		};
@@ -2023,10 +2545,12 @@ async function loadFromFile(file) {
 		reader.readAsDataURL(file);
 	});
 }
-async function loadFromString(s) {
+async function loadFromString(fileName, blobStr) {
+	inputFileName = DEFAULT_INPUT_FILE_NAME;
 	return new Promise((resolve, reject) => {
 		const img = new Image();
 		img.onload = () => {
+			inputFileName = fileName;
 			origCanvas.width = img.width;
 			origCanvas.height = img.height;
 			const ctx = origCanvas.getContext("2d", { willReadFrequently: true });
@@ -2036,15 +2560,16 @@ async function loadFromString(s) {
 			}
 			ctx.clearRect(0, 0, img.width, img.height);
 			ctx.drawImage(img, 0, 0);
+			keepShowLongCode = false;
 			resetTrim();
-			convert();
+			reduceColor();
 			requestUpdateTrimCanvas();
 			resolve();
 		};
 		img.onerror = () => {
 			reject(/* @__PURE__ */ new Error("Failed to load image"));
 		};
-		img.src = s;
+		img.src = blobStr;
 	});
 }
 function resetTrim() {
@@ -2053,7 +2578,7 @@ function resetTrim() {
 	trimR = origCanvas.width;
 	trimB = origCanvas.height;
 	requestUpdateTrimCanvas();
-	requestQuantize();
+	requestColorReduction();
 }
 function getTrimViewArea() {
 	const margin = 20;
@@ -2108,8 +2633,6 @@ function updateTrimCanvas() {
 	trimCanvas.height = trimCanvasHeight - 2;
 	const canvasW = trimCanvas.width;
 	const canvasH = trimCanvas.height;
-	origCanvas.width;
-	origCanvas.height;
 	const view = getTrimViewArea();
 	if (trimUiState == TrimState.IDLE) {
 		const worldL = trimL;
@@ -2163,15 +2686,59 @@ function loadPreset(preset) {
 	alignBoundaryBox.value = preset.alignBoundary.toString();
 	leftAlignBox.checked = preset.alignLeft;
 	vertAddrBox.checked = preset.vertAddr;
-	requestQuantize();
+	paletteTable.innerHTML = "";
+	if (preset.palette) {
+		for (let i = 0; i < 256; i++) if (i < preset.palette.length) {
+			paletteColor[i] = preset.palette[i];
+			paletteEnabled[i] = true;
+		} else paletteEnabled[i] = false;
+		const headerTr = document.createElement("tr");
+		for (let i = 0; i < preset.palette.length; i++) {
+			const th = document.createElement("th");
+			th.textContent = i.toString();
+			headerTr.appendChild(th);
+		}
+		const colorTr = document.createElement("tr");
+		for (let i = 0; i < preset.palette.length; i++) {
+			const { r, g, b } = rgbU32ToU8(preset.palette[i]);
+			const colorStr = rgbToHexStr(preset.palette[i]);
+			const td = document.createElement("td");
+			td.textContent = colorStr;
+			td.style.backgroundColor = colorStr;
+			if (r + g + b < 384) td.style.color = "#FFF";
+			else td.style.color = "#000";
+			colorTr.appendChild(td);
+		}
+		paletteTable.appendChild(headerTr);
+		paletteTable.appendChild(colorTr);
+	}
+	for (const [key, value] of Object.entries(planeUis)) value.dispose();
+	planeUis = {};
+	planeSelectBox.innerHTML = "";
+	for (const planeCfg of preset.planeCfgs) {
+		const planeUi = new PlaneUi(planeCfg);
+		planeUis[planeCfg.id] = planeUi;
+		hide(planeUi.container);
+		planeGroupBody.appendChild(planeUi.container);
+		const option = document.createElement("option");
+		option.value = planeCfg.id;
+		option.textContent = planeCfg.id + " プレーン";
+		planeSelectBox.appendChild(option);
+	}
+	planeSelectBox.firstChild.selected = true;
+	onSelectedPlaneChanged();
+	requestColorReduction();
 }
-function requestQuantize() {
+function onSelectedPlaneChanged() {
+	for (const [key, value] of Object.entries(planeUis)) setVisible(value.container, key === planeSelectBox.value);
+}
+function requestColorReduction() {
 	if (quantizeTimeoutId >= 0) return;
 	quantizeTimeoutId = setTimeout(() => {
-		convert();
+		reduceColor();
 	}, 100);
 }
-function convert() {
+function reduceColor() {
 	reducedImage = null;
 	if (quantizeTimeoutId >= 0) {
 		clearTimeout(quantizeTimeoutId);
@@ -2182,6 +2749,28 @@ function convert() {
 		let outW = -1, outH = -1;
 		let norm;
 		const fmt = new PixelFormatInfo(parseInt(pixelFormatBox.value));
+		let roundMethod = RoundMethod.NEAREST;
+		{
+			let maxChannelDepth = 0;
+			for (const depth of fmt.colorBits) if (depth > maxChannelDepth) maxChannelDepth = depth;
+			if (maxChannelDepth > 1 && !fmt.isIndexed) {
+				show(parentLiOf(roundMethodBox));
+				roundMethod = parseInt(roundMethodBox.value);
+			} else hide(parentLiOf(roundMethodBox));
+		}
+		let palette;
+		if (fmt.isIndexed) {
+			const indexedPalette = new IndexedPalette(fmt.colorBits, fmt.indexBits);
+			palette = indexedPalette;
+			const numColors = 1 << indexedPalette.indexBits;
+			for (let i = 0; i < numColors; i++) {
+				const { r, g, b } = rgbU32ToF32(paletteColor[i]);
+				indexedPalette.colors[i * 3 + 0] = r;
+				indexedPalette.colors[i * 3 + 1] = g;
+				indexedPalette.colors[i * 3 + 2] = b;
+				indexedPalette.enabled[i] = paletteEnabled[i];
+			}
+		} else palette = new FixedPalette(fmt.colorBits, roundMethod);
 		{
 			let args = new Args();
 			args.colorSpace = fmt.colorSpace;
@@ -2215,8 +2804,9 @@ function convert() {
 					outW = Math.max(1, Math.round(trimW * (outH / trimH)));
 					hide(parentLiOf(scalingMethodBox));
 				} else {
-					if (outW > 256 || outH > 256) {
-						const scale = Math.min(256 / outW, 256 / outH);
+					const MAX_SIZE = 512;
+					if (outW > MAX_SIZE || outH > MAX_SIZE) {
+						const scale = Math.min(MAX_SIZE / outW, MAX_SIZE / outH);
 						outW = Math.floor(outW * scale);
 						outH = Math.floor(outH * scale);
 					}
@@ -2234,11 +2824,11 @@ function convert() {
 				args.outSize.height = outH;
 				args.scalingMethod = parseInt(scalingMethodBox.value);
 			}
-			args.alphaProc = parseInt(alphaProcBox.value);
+			args.alphaProc = parseInt(alphaModeBox.value);
 			args.alphaThresh = parseInt(alphaThreshBox.value);
-			if (keyColorBox.value) args.keyColor = hexToRgb(keyColorBox.value);
+			if (keyColorBox.value) args.keyColor = hexStrToRgb(keyColorBox.value);
 			if (keyToleranceBox.value) args.keyTolerance = parseInt(keyToleranceBox.value);
-			if (backColorBox.value) args.backColor = hexToRgb(backColorBox.value);
+			if (backColorBox.value) args.backColor = hexStrToRgb(backColorBox.value);
 			if (hueBox.value && fmt.numColorChannels > 1) args.hue = parseFloat(hueBox.value) / 360;
 			if (saturationBox.value && fmt.numColorChannels > 1) args.saturation = parseFloat(saturationBox.value) / 100;
 			if (lightnessBox.value) args.lightness = parseFloat(lightnessBox.value) / 100;
@@ -2255,6 +2845,112 @@ function convert() {
 				args.contrast.value = parseFloat(contrastBox.value) / 100;
 			}
 			args.invert = invertBox.checked;
+			setVisible(paletteSection, fmt.isIndexed);
+			if (fmt.isIndexed) {
+				args.csrMode = parseInt(csrModeBox.value);
+				args.csrHslRange = palette.getHslRange();
+				setVisible(parentLiOf(csrHueToleranceBox), args.csrMode == ColorSpaceReductionMode.CLIP);
+				if (args.csrMode == ColorSpaceReductionMode.CLIP) args.csrHueTolerance = parseFloat(csrHueToleranceBox.value) / 360;
+				else if (args.csrMode == ColorSpaceReductionMode.TRANSFORM) {
+					const indexedPalette = palette;
+					const numColors = 1 << indexedPalette.indexBits;
+					const vecs = [
+						[
+							0,
+							0,
+							0
+						],
+						[
+							1,
+							0,
+							0
+						],
+						[
+							0,
+							1,
+							0
+						],
+						[
+							0,
+							0,
+							1
+						]
+					];
+					let remainingVecIndexes = {
+						0: true,
+						1: true,
+						2: true,
+						3: true
+					};
+					let mappedVecIndices = {};
+					let mappedPalIndices = {};
+					while (Object.keys(remainingVecIndexes).length > 0) {
+						let bestPalIndex = -1;
+						let bestVecIndex = -1;
+						let bestDist = 999;
+						for (const ivStr in remainingVecIndexes) {
+							const iv = parseInt(ivStr);
+							const vr = vecs[iv][0];
+							const vg = vecs[iv][1];
+							const vb = vecs[iv][2];
+							for (let ip = 0; ip < numColors; ip++) {
+								if (!indexedPalette.enabled[ip]) continue;
+								const pr = indexedPalette.colors[ip * 3 + 0];
+								const pg = indexedPalette.colors[ip * 3 + 1];
+								const pb = indexedPalette.colors[ip * 3 + 2];
+								const dist = Math.abs(pr - vr) * .299 + Math.abs(pg - vg) * .587 + Math.abs(pb - vb) * .114;
+								if (dist < bestDist && !(ip in mappedPalIndices)) {
+									bestDist = dist;
+									bestPalIndex = ip;
+									bestVecIndex = iv;
+								}
+							}
+						}
+						if (bestVecIndex >= 0) {
+							mappedVecIndices[bestVecIndex] = bestPalIndex;
+							mappedPalIndices[bestPalIndex] = bestVecIndex;
+							delete remainingVecIndexes[bestVecIndex];
+						} else throw new Error("色空間の圧縮には 4 色以上が必要です");
+					}
+					const io = mappedVecIndices[0];
+					const ir = mappedVecIndices[1];
+					const ig = mappedVecIndices[2];
+					const ib = mappedVecIndices[3];
+					const o0 = indexedPalette.colors[io * 3 + 0];
+					const o1 = indexedPalette.colors[io * 3 + 1];
+					const o2 = indexedPalette.colors[io * 3 + 2];
+					const r0 = indexedPalette.colors[ir * 3 + 0] - o0;
+					const r1 = indexedPalette.colors[ir * 3 + 1] - o1;
+					const r2 = indexedPalette.colors[ir * 3 + 2] - o2;
+					const g0 = indexedPalette.colors[ig * 3 + 0] - o0;
+					const g1 = indexedPalette.colors[ig * 3 + 1] - o1;
+					const g2 = indexedPalette.colors[ig * 3 + 2] - o2;
+					const b0 = indexedPalette.colors[ib * 3 + 0] - o0;
+					const b1 = indexedPalette.colors[ib * 3 + 1] - o1;
+					const b2 = indexedPalette.colors[ib * 3 + 2] - o2;
+					const dr = Math.sqrt(r0 * r0 + r1 * r1 + r2 * r2) * Math.sqrt(3);
+					const dg = Math.sqrt(g0 * g0 + g1 * g1 + g2 * g2) * Math.sqrt(3);
+					const db = Math.sqrt(b0 * b0 + b1 * b1 + b2 * b2) * Math.sqrt(3);
+					const mat = new Float32Array([
+						r0 / dr,
+						g0 / dg,
+						b0 / db,
+						o0,
+						r1 / dr,
+						g1 / dg,
+						b1 / db,
+						o1,
+						r2 / dr,
+						g2 / dg,
+						b2 / db,
+						o2
+					]);
+					args.csrTransformMatrix = mat;
+				}
+			} else {
+				args.csrMode = ColorSpaceReductionMode.NONE;
+				hide(parentLiOf(csrHueToleranceBox));
+			}
 			setVisible(parentLiOf(hueBox), fmt.numColorChannels > 1);
 			setVisible(parentLiOf(saturationBox), fmt.numColorChannels > 1);
 			process(args);
@@ -2264,25 +2960,15 @@ function convert() {
 			contrastBox.placeholder = `(${Math.round(args.contrast.value * 100)})`;
 		}
 		{
-			let maxChannelDepth = 0;
-			let roundMethod = RoundMethod.NEAREST;
-			for (const depth of fmt.colorBits) if (depth > maxChannelDepth) maxChannelDepth = depth;
-			if (maxChannelDepth > 1) {
-				show(parentLiOf(roundMethodBox));
-				roundMethod = parseInt(roundMethodBox.value);
-			} else hide(parentLiOf(roundMethodBox));
 			const numPixels = outW * outH;
-			fmt.numTotalChannels;
-			fmt.numColorChannels;
 			let minColBits = 999;
 			for (const bits of fmt.colorBits) if (bits < minColBits) minColBits = bits;
-			const colReduce = minColBits < 8;
+			const colReduce = minColBits < 8 || fmt.isIndexed;
 			const alpReduce = fmt.hasAlpha && fmt.alphaBits < 8;
 			const colDither = colReduce ? parseInt(colorDitherBox.value) : DitherMethod.NONE;
 			const alpDither = alpReduce ? parseInt(alphaDitherBox.value) : DitherMethod.NONE;
 			setVisible(parentLiOf(colorDitherBox), colReduce);
 			setVisible(parentLiOf(alphaDitherBox), alpReduce);
-			const palette = new FixedPalette(fmt.colorBits, roundMethod);
 			const args = new Arguments();
 			args.src = norm;
 			args.format = fmt;
@@ -2304,7 +2990,7 @@ function convert() {
 				ctx.putImageData(previewImageData, 0, 0);
 			}
 			show(previewCanvas);
-			hide(quantizeErrorBox);
+			hide(reductionErrorBox);
 			swDetail.lap("Update Preview");
 			generateCode();
 			swDetail.lap("Entire Code Generation");
@@ -2325,10 +3011,9 @@ function convert() {
 		swDetail.lap("Fix Preview Size");
 	} catch (error) {
 		hide(previewCanvas);
-		hide(codeBox);
-		hide(codeHiddenBox);
-		show(quantizeErrorBox);
-		quantizeErrorBox.textContent = `${error.stack}`;
+		hide(codePlaneContainer);
+		show(reductionErrorBox);
+		reductionErrorBox.textContent = `${error.stack}`;
 	}
 }
 function requestGenerateCode() {
@@ -2341,15 +3026,14 @@ function requestGenerateCode() {
 function generateCode() {
 	const swDetail = new StopWatch(false);
 	if (!reducedImage) {
-		codeBox.textContent = "";
-		show(codeBox);
-		hide(codeHiddenBox);
-		hide(codeErrorBox);
+		codeErrorBox.textContent = "まだコードは生成されていません。";
+		show(codePlaneContainer);
+		show(codeErrorBox);
 		return;
 	}
 	let blobs = [];
 	try {
-		const args = new ImageArgs();
+		const args = new EncodeArgs();
 		args.src = reducedImage;
 		const chOrder = parseInt(channelOrderBox.value);
 		switch (chOrder) {
@@ -2371,26 +3055,38 @@ function generateCode() {
 				break;
 			default: throw new Error("Unsupported channel order");
 		}
-		const plane = new PlaneArgs();
-		plane.farPixelFirst = parseInt(farPixelFirstBox.value) == 1;
-		plane.bigEndian = bigEndianBox.checked;
-		plane.packUnit = parseInt(packUnitBox.value);
-		plane.vertPack = vertPackBox.checked;
-		plane.alignBoundary = parseInt(alignBoundaryBox.value);
-		plane.alignLeft = leftAlignBox.checked;
-		plane.vertAddr = vertAddrBox.checked;
-		args.planes.push(plane);
+		for (const [id, planeUi] of Object.entries(planeUis)) {
+			const plane = new PlaneArgs();
+			plane.id = id;
+			plane.type = parseInt(planeUi.planeTypeBox.value);
+			const indexMatchMode = plane.type == PlaneType.INDEX_MATCH;
+			if (indexMatchMode) {
+				plane.indexMatchValue = parseInt(planeUi.matchIndexBox.value);
+				plane.postInvert = planeUi.matchInvertBox.checked;
+			}
+			setVisible(parentLiOf(planeUi.matchIndexBox), indexMatchMode);
+			setVisible(parentLiOf(planeUi.matchInvertBox), indexMatchMode);
+			plane.farPixelFirst = parseInt(farPixelFirstBox.value) == 1;
+			plane.bigEndian = bigEndianBox.checked;
+			plane.packUnit = parseInt(packUnitBox.value);
+			plane.vertPack = vertPackBox.checked;
+			plane.alignBoundary = parseInt(alignBoundaryBox.value);
+			plane.alignLeft = leftAlignBox.checked;
+			plane.vertAddr = vertAddrBox.checked;
+			args.planes.push(plane);
+		}
+		if (args.planes.length == 0) throw new Error("プレーンが定義されていません");
 		encode(args);
-		for (const plane$1 of args.planes) blobs.push(plane$1.output.blob);
-		setVisible(parentLiOf(leftAlignBox), plane.output.alignRequired);
-		setVisible(parentLiOf(channelOrderBox), plane.output.fields.length > 1);
-		setVisible(parentLiOf(farPixelFirstBox), plane.output.pixelsPerFrag > 1);
-		setVisible(parentLiOf(vertPackBox), plane.output.pixelsPerFrag > 1);
-		setVisible(parentLiOf(bigEndianBox), plane.output.bytesPerFrag > 1);
+		for (const plane of args.planes) blobs.push(plane.output.blob);
+		const firstPlane = args.planes[0];
+		setVisible(parentLiOf(leftAlignBox), firstPlane.output.alignRequired);
+		setVisible(parentLiOf(channelOrderBox), firstPlane.output.fields.length > 1);
+		setVisible(parentLiOf(farPixelFirstBox), firstPlane.output.pixelsPerFrag > 1);
+		setVisible(parentLiOf(vertPackBox), firstPlane.output.pixelsPerFrag > 1);
+		setVisible(parentLiOf(bigEndianBox), firstPlane.output.bytesPerFrag > 1);
 		{
 			const fmt = args.src.format;
-			const out = plane.output;
-			out.fields.length;
+			const out = firstPlane.output;
 			const numCols = out.bytesPerFrag * 8;
 			const numRows = 3;
 			const colW = clip(20, 40, Math.round(800 / numCols));
@@ -2424,7 +3120,7 @@ function generateCode() {
 					ctx.fillText(iBit.toString(), x + colW / 2, pad + rowH + rowH / 2);
 					if (iBit == 3) {
 						const ib = Math.floor((numCols - 1 - i) / 8);
-						const iByte = plane.bigEndian ? out.bytesPerFrag - 1 - ib : ib;
+						const iByte = firstPlane.bigEndian ? out.bytesPerFrag - 1 - ib : ib;
 						ctx.fillText("Byte" + iByte.toString(), x, pad + rowH / 2);
 					}
 				}
@@ -2436,36 +3132,33 @@ function generateCode() {
 				ctx.lineTo(pad + tableW, pad + i * rowH);
 				ctx.stroke();
 			}
-			let rgbColors;
-			switch (fmt.colorSpace) {
-				case ColorSpace.GRAYSCALE:
-					rgbColors = ["rgba(255,255,255,0.8)"];
-					break;
-				case ColorSpace.RGB:
-					rgbColors = [
-						"rgba(255,128,128,0.8)",
-						"rgba(128,255,128,0.8)",
-						"rgba(128,160,255,0.8)",
-						"rgba(192,128,255,0.8)"
-					];
-					break;
-				default: throw new Error("Unknown color space");
-			}
+			let cellColors;
+			if (firstPlane.type == PlaneType.DIRECT && !fmt.isIndexed && fmt.colorSpace == ColorSpace.RGB) cellColors = [
+				"rgba(255,128,128,0.8)",
+				"rgba(128,255,128,0.8)",
+				"rgba(128,160,255,0.8)",
+				"rgba(192,128,255,0.8)"
+			];
+			else cellColors = ["rgba(255,255,255,0.8)"];
 			for (let ip = 0; ip < out.pixelsPerFrag; ip++) {
-				const iPix = plane.farPixelFirst ? out.pixelsPerFrag - 1 - ip : ip;
+				const iPix = firstPlane.farPixelFirst ? out.pixelsPerFrag - 1 - ip : ip;
 				for (const field of out.fields) {
 					const r = pad + tableW - (ip * out.pixelStride + field.pos) * colW;
 					const w = field.width * colW;
 					const x = r - w;
 					const y = pad + tableH - rowH;
-					ctx.fillStyle = rgbColors[field.srcChannel];
+					ctx.fillStyle = cellColors[field.srcChannel];
 					ctx.fillRect(x, y, w, rowH);
 					ctx.strokeStyle = "#000";
 					ctx.strokeRect(x, y, w, rowH);
 					ctx.fillStyle = "#000";
 					ctx.textAlign = "center";
 					ctx.textBaseline = "middle";
-					const label = fmt.channelName(field.srcChannel) + (out.pixelsPerFrag > 1 ? iPix : "");
+					let label;
+					if (firstPlane.type == PlaneType.INDEX_MATCH) label = "C";
+					else if (fmt.isIndexed) label = "Index";
+					else label = fmt.channelName(field.srcChannel);
+					if (out.pixelsPerFrag > 1) label += iPix.toString();
 					ctx.measureText(label);
 					ctx.fillText(label, x + w / 2, y + rowH / 2);
 				}
@@ -2477,53 +3170,66 @@ function generateCode() {
 		hide(structCanvas);
 		show(structErrorBox);
 		structErrorBox.textContent = `${error.stack}`;
-		codeBox.textContent = "";
-		show(codeBox);
-		hide(codeHiddenBox);
-		hide(codeErrorBox);
+		codeErrorBox.textContent = "エンコードのエラーを解消してください。";
+		hide(codePlaneContainer);
+		show(codeErrorBox);
 		return;
 	}
 	try {
-		const args = new Args$1();
+		const args = new CodeGenArgs();
+		args.name = inputFileName.split(".")[0].replaceAll(/[-\s]/g, "_");
 		args.src = reducedImage;
 		args.blobs = blobs;
 		args.codeUnit = parseInt(codeUnitBox.value);
 		args.indent = parseInt(indentBox.value);
 		args.arrayCols = Math.max(1, parseInt(codeColsBox.value));
 		generate(args);
-		const code = args.codes[0];
-		codeBox.textContent = code.code;
-		if (code.numLines < 1e3) {
-			show(codeBox);
-			hide(codeHiddenBox);
-		} else {
-			showCodeLink.textContent = `表示する (${code.numLines} 行)`;
-			hide(codeBox);
-			show(codeHiddenBox);
+		codePlaneContainer.innerHTML = "";
+		for (const code of args.codes) {
+			const copyButton = makeButton("コピー");
+			copyButton.style.float = "right";
+			const title = document.createElement("div");
+			title.classList.add("codePlaneTitle");
+			title.appendChild(document.createTextNode(code.name));
+			title.appendChild(copyButton);
+			const pre = document.createElement("pre");
+			pre.textContent = code.code;
+			const wrap = document.createElement("div");
+			wrap.classList.add("codePlane");
+			wrap.appendChild(title);
+			wrap.appendChild(pre);
+			if (code.numLines > 1e3 && !keepShowLongCode) {
+				const showCodeLink$1 = document.createElement("a");
+				showCodeLink$1.href = "#";
+				showCodeLink$1.textContent = `表示する (${code.numLines} 行)`;
+				const hiddenBox = document.createElement("div");
+				hiddenBox.classList.add("codeHiddenBox");
+				hiddenBox.style.textAlign = "center";
+				hiddenBox.innerHTML = `コードが非常に長いため非表示になっています。<br>`;
+				hiddenBox.appendChild(showCodeLink$1);
+				hide(pre);
+				wrap.appendChild(hiddenBox);
+				showCodeLink$1.addEventListener("click", (e) => {
+					e.preventDefault();
+					keepShowLongCode = true;
+					show(pre);
+					hide(hiddenBox);
+				});
+			}
+			codePlaneContainer.appendChild(wrap);
+			copyButton.addEventListener("click", () => {
+				if (!pre.textContent) return;
+				navigator.clipboard.writeText(pre.textContent);
+			});
 		}
+		show(codePlaneContainer);
 		hide(codeErrorBox);
 	} catch (error) {
 		codeErrorBox.textContent = `${error.stack}`;
-		codeBox.textContent = "";
-		show(codeBox);
-		hide(codeHiddenBox);
-		hide(codeErrorBox);
+		hide(codePlaneContainer);
+		show(codeErrorBox);
 	}
 	swDetail.lap("UI Update");
-}
-function hexToRgb(hex) {
-	if (hex.startsWith("#")) hex = hex.slice(1);
-	if (hex.length === 3) {
-		const r = parseInt(hex[0] + hex[0], 16);
-		const g = parseInt(hex[1] + hex[1], 16);
-		const b = parseInt(hex[2] + hex[2], 16);
-		return r | g << 8 | b << 16;
-	} else if (hex.length == 6) {
-		const r = parseInt(hex.slice(0, 2), 16);
-		const g = parseInt(hex.slice(2, 4), 16);
-		const b = parseInt(hex.slice(4, 6), 16);
-		return r | g << 8 | b << 16;
-	} else throw new Error("Invalid hex color");
 }
 function onRelayout() {
 	{

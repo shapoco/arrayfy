@@ -8,6 +8,11 @@ export const enum PackUnit {
   ALIGNMENT,
 }
 
+export const enum PlaneType {
+  DIRECT,
+  INDEX_MATCH,
+}
+
 export const enum AlignBoundary {
   NIBBLE = 4,
   BYTE_1 = 8,
@@ -17,9 +22,9 @@ export const enum AlignBoundary {
 }
 
 export class FieldLayout {
-  public srcChannel: number;
-  public pos: number;
-  public width: number;
+  public srcChannel: number = 0;
+  public pos: number = 0;
+  public width: number = 0;
 }
 
 export class PlaneOutput {
@@ -32,6 +37,10 @@ export class PlaneOutput {
 }
 
 export class PlaneArgs {
+  public id: string;
+  public type: PlaneType = PlaneType.DIRECT;
+  public indexMatchValue: number;
+  public postInvert: boolean = false;
   public farPixelFirst: boolean;
   public bigEndian: boolean;
   public packUnit: PackUnit;
@@ -42,44 +51,70 @@ export class PlaneArgs {
   public output: PlaneOutput = new PlaneOutput();
 }
 
-export class ImageArgs {
+export class EncodeArgs {
   public src: ReducedImage;
   public alphaFirst: boolean;
   public colorDescending: boolean;
   public planes: PlaneArgs[] = [];
 }
 
-export function encode(args: ImageArgs): void {
+export function encode(args: EncodeArgs): void {
   const fmt = args.src.format;
-
-  let alphaField: FieldLayout|null = null;
-  if (fmt.hasAlpha) {
-    alphaField = new FieldLayout();
-    alphaField.srcChannel = fmt.numColorChannels;
-    alphaField.width = fmt.alphaBits;
-  }
-
-  // チャネル順の決定
-  if (alphaField && args.alphaFirst) {
-    args.planes[0].output.fields.push(alphaField);
-  }
-  for (let ch = 0; ch < fmt.numColorChannels; ch++) {
-    const field = new FieldLayout();
-    if (args.colorDescending) {
-      field.srcChannel = fmt.numColorChannels - 1 - ch;
-    } else {
-      field.srcChannel = ch;
-    }
-    field.width = fmt.colorBits[field.srcChannel];
-    args.planes[0].output.fields.push(field);
-  }
-  if (alphaField && !args.alphaFirst) {
-    args.planes[0].output.fields.push(alphaField);
-  }
 
   // 構造体の構造を決定
   for (let plane of args.planes) {
     const out = plane.output;
+
+    let alphaField: FieldLayout|null = null;
+    if (fmt.hasAlpha) {
+      alphaField = new FieldLayout();
+      alphaField.srcChannel = fmt.numColorChannels;
+      alphaField.width = fmt.alphaBits;
+    }
+
+    switch (plane.type) {
+      case PlaneType.DIRECT: {
+        // チャネル順の決定
+
+        if (alphaField && args.alphaFirst) {
+          out.fields.push(alphaField);
+        }
+        if (fmt.isIndexed) {
+          const field = new FieldLayout();
+          field.srcChannel = 0;
+          field.width = fmt.indexBits;
+          out.fields.push(field);
+        } else {
+          for (let ch = 0; ch < fmt.numColorChannels; ch++) {
+            const field = new FieldLayout();
+            if (args.colorDescending) {
+              field.srcChannel = fmt.numColorChannels - 1 - ch;
+            } else {
+              field.srcChannel = ch;
+            }
+            field.width = fmt.colorBits[field.srcChannel];
+            out.fields.push(field);
+          }
+        }
+        if (alphaField && !args.alphaFirst) {
+          out.fields.push(alphaField);
+        }
+      } break;
+
+      case PlaneType.INDEX_MATCH: {
+        const field = new FieldLayout();
+        field.width = 1;
+        out.fields.push(field);
+      } break;
+
+      default:
+        throw new Error('Unsupported filter mode');
+    }
+
+    if (out.fields.length == 0) {
+      throw new Error('内部エラー: フィールドが定義されていません。');
+    }
+
     const numCh = out.fields.length;
 
     if (plane.packUnit == PackUnit.UNPACKED) {
@@ -164,6 +199,13 @@ export function encode(args: ImageArgs): void {
     const out = plane.output;
     const numCh = out.fields.length;
 
+    if (!(out.pixelsPerFrag >= 1)) {
+      throw new Error('内部エラー: フラグメントあたりのピクセル数が不正です。');
+    }
+    if (!(out.bytesPerFrag >= 1)) {
+      throw new Error('内部エラー: フラグメントあたりのバイト数が不正です。');
+    }
+
     // エンコードパラメータ
     const fragWidth = plane.vertPack ? 1 : out.pixelsPerFrag;
     const fragHeight = plane.vertPack ? out.pixelsPerFrag : 1;
@@ -172,7 +214,7 @@ export function encode(args: ImageArgs): void {
     const rows = Math.ceil(src.height / fragHeight);
     const numFrags = cols * rows;
 
-    out.blob = new ArrayBlob('imageArray', numFrags * out.bytesPerFrag);
+    out.blob = new ArrayBlob(plane.id, numFrags * out.bytesPerFrag);
     const array = out.blob.array;
     let iByte = 0;
 
@@ -198,10 +240,30 @@ export function encode(args: ImageArgs): void {
         if (y < src.height && x < src.width) {
           // チャネルループ
           const pixOffset = out.pixelStride * iDest;
-          for (const field of out.fields) {
-            const chData = src.data[field.srcChannel][y * src.width + x];
-            const shift = pixOffset + field.pos;
-            fragData |= chData << shift;
+
+          switch (plane.type) {
+            case PlaneType.DIRECT: {
+              for (const field of out.fields) {
+                const chData = src.data[field.srcChannel][y * src.width + x];
+                const shift = pixOffset + field.pos;
+                fragData |= chData << shift;
+              }
+            } break;
+
+            case PlaneType.INDEX_MATCH: {
+              const chData = src.data[0][y * src.width + x];
+              let match = chData == plane.indexMatchValue;
+              if (plane.postInvert) {
+                match = !match;
+              }
+              if (match) {
+                fragData |= 1 << (pixOffset + out.fields[0].pos);
+              }
+
+            } break;
+
+            default:
+              throw new Error('Unsupported filter mode');
           }
         }
       }
@@ -223,6 +285,13 @@ export function encode(args: ImageArgs): void {
     {
       let buff: string[] = [];
       buff.push(`${args.src.width}x${args.src.height}px, ${fmt.toString()}\n`);
+      if (plane.type == PlaneType.INDEX_MATCH) {
+        buff.push(`Plane "${plane.id}", color index=${plane.indexMatchValue}`);
+        if (plane.postInvert) {
+          buff.push(`, Inverted`);
+        }
+        buff.push(`\n`);
+      }
       if (numCh > 1) {
         let chOrderStr = '';
         for (let i = 0; i < numCh; i++) {

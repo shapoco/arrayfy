@@ -11,22 +11,31 @@ export const enum PixelFormat {
   RGB888,
   RGB666,
   RGB565,
-  RGB555,
+  // RGB555,
   RGB444,
   RGB332,
   RGB111,
   GRAY4,
   GRAY2,
   BW,
+  I2_RGB888,
+}
+
+export const enum ChannelOrder {
+  RGBA,
+  BGRA,
+  ARGB,
+  ABGR,
 }
 
 export class PixelFormatInfo {
   public colorSpace: ColorSpace;
   public colorBits: number[];
   public alphaBits = 0;
+  public indexBits = 0;
 
-  constructor(fmt: PixelFormat) {
-    switch (fmt) {
+  constructor(public id: PixelFormat) {
+    switch (id) {
       case PixelFormat.RGBA8888:
         this.colorSpace = ColorSpace.RGB;
         this.colorBits = [8, 8, 8];
@@ -49,10 +58,10 @@ export class PixelFormatInfo {
         this.colorSpace = ColorSpace.RGB;
         this.colorBits = [5, 6, 5];
         break;
-      case PixelFormat.RGB555:
-        this.colorSpace = ColorSpace.RGB;
-        this.colorBits = [5, 5, 5];
-        break;
+      // case PixelFormat.RGB555:
+      //   this.colorSpace = ColorSpace.RGB;
+      //   this.colorBits = [5, 5, 5];
+      //   break;
       case PixelFormat.RGB444:
         this.colorSpace = ColorSpace.RGB;
         this.colorBits = [4, 4, 4];
@@ -77,32 +86,45 @@ export class PixelFormatInfo {
         this.colorSpace = ColorSpace.GRAYSCALE;
         this.colorBits = [1];
         break;
+      case PixelFormat.I2_RGB888:
+        this.colorSpace = ColorSpace.RGB;
+        this.colorBits = [8, 8, 8];
+        this.indexBits = 2;
+        break;
       default:
         throw new Error('Unknown image format');
     }
   }
 
   toString(): string {
-    switch (this.colorSpace) {
-      case ColorSpace.GRAYSCALE:
-        if (this.colorBits[0] == 1) {
-          return 'B/W';
-        } else {
-          return 'Gray' + this.colorBits[0];
-        }
-      case ColorSpace.RGB:
-        if (this.hasAlpha) {
-          return 'RGBA' + this.colorBits.join('') + this.alphaBits.toString();
-        } else {
-          return 'RGB' + this.colorBits.join('');
-        }
-      default:
-        throw new Error('Unknown color space');
+    if (this.isIndexed) {
+      return 'Indexed' + this.indexBits;
+    } else {
+      switch (this.colorSpace) {
+        case ColorSpace.GRAYSCALE:
+          if (this.colorBits[0] == 1) {
+            return 'B/W';
+          } else {
+            return 'Gray' + this.colorBits[0];
+          }
+        case ColorSpace.RGB:
+          if (this.hasAlpha) {
+            return 'RGBA' + this.colorBits.join('') + this.alphaBits.toString();
+          } else {
+            return 'RGB' + this.colorBits.join('');
+          }
+        default:
+          throw new Error('Unknown color space');
+      }
     }
   }
 
   get hasAlpha(): boolean {
     return this.alphaBits > 0;
+  }
+
+  get isIndexed(): boolean {
+    return this.indexBits > 0;
   }
 
   get numTotalChannels(): number {

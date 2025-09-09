@@ -20,7 +20,8 @@ export class Code {
   public numLines: number;
 }
 
-export class Args {
+export class CodeGenArgs {
+  public name: string;
   public src: ReducedImage;
   // public encodeArgs: ImageArgs;
   public blobs: ArrayBlob[];
@@ -30,7 +31,7 @@ export class Args {
   public codes: Code[] = [];
 }
 
-export function generate(args: Args): void {
+export function generate(args: CodeGenArgs): void {
   // インデント決定
   let indent = '  ';
   switch (args.indent) {
@@ -57,15 +58,23 @@ export function generate(args: Args): void {
   }
 
   const fmt = args.src.format;
-  for (let blob of args.blobs) {
+  for (let iBlob = 0; iBlob < args.blobs.length; iBlob++) {
+    const blob = args.blobs[iBlob];
     const array = blob.array;
+
+    let arrayName: string;
+    if (args.blobs.length <= 1) {
+      arrayName = args.name;
+    } else {
+      arrayName = args.name + '_' + blob.name;
+    }
 
     if (args.codeUnit >= CodeUnit.ARRAY_DEF) {
       const lines = blob.comment.trimEnd().split('\n');
       for (let line of lines) {
         codeBuff.push(`// ${line}\n`);
       }
-      codeBuff.push(`const uint8_t ${blob.name}[] = {\n`);
+      codeBuff.push(`const uint8_t ${arrayName}[] = {\n`);
     }
 
     let hexTable: string[] = [];
@@ -85,15 +94,24 @@ export function generate(args: Args): void {
     if (args.codeUnit >= CodeUnit.ARRAY_DEF) {
       codeBuff.push('};\n');
     }
-  }
 
-  const code = new Code();
-  code.name = 'Image Data';
-  code.code = codeBuff.join('');
-  let numLines = 0;
-  for (let s of codeBuff) {
-    if (s.endsWith('\n')) numLines++;
+    if (args.codeUnit < CodeUnit.FILE || iBlob + 1 >= args.blobs.length) {
+      const code = new Code();
+
+      if (args.codeUnit >= CodeUnit.FILE) {
+        code.name = args.name + '.h';
+      } else {
+        code.name = args.name + '_' + blob.name + '.h';
+      }
+      code.code = codeBuff.join('');
+      let numLines = 0;
+      for (let s of codeBuff) {
+        if (s.endsWith('\n')) numLines++;
+      }
+      code.numLines = numLines;
+      args.codes.push(code);
+
+      codeBuff = [];
+    }
   }
-  code.numLines = numLines;
-  args.codes.push(code);
 }

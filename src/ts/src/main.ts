@@ -1,11 +1,15 @@
 import {ArrayBlob} from './Blobs';
 import * as CodeGen from './CodeGen';
+import * as Colors from './Colors';
+import * as Configs from './Configs';
 import * as Encoder from './Encoder';
 import {Point, Rect, Size} from './Geometries';
-import {ColorSpace, NormalizedImage, PixelFormat, PixelFormatInfo, ReducedImage} from './Images';
-import {DitherMethod, FixedPalette, Palette, RoundMethod} from './Palettes';
+import * as Images from './Images';
+import {ChannelOrder, ColorSpace, PixelFormat} from './Images';
+import {DitherMethod, FixedPalette, IndexedPalette, Palette, RoundMethod} from './Palettes';
 import * as Preproc from './Preproc';
 import * as Reducer from './Reducer';
+import * as Ui from './Ui'
 import {clip} from './Utils';
 
 const enum TrimState {
@@ -14,13 +18,6 @@ const enum TrimState {
   DRAG_RIGHT,
   DRAG_BOTTOM,
   DRAG_LEFT,
-}
-
-const enum ChannelOrder {
-  RGBA,
-  BGRA,
-  ARGB,
-  ABGR,
 }
 
 class StopWatch {
@@ -39,251 +36,65 @@ class StopWatch {
   }
 }
 
-class ArrayfyError extends Error {
-  constructor(public element: HTMLElement, message: string) {
-    super(message);
-    this.name = 'ArrayfyError';
+class PlaneUi {
+  public container = document.createElement('div');
+  public planeTypeBox = Ui.makeSelectBox(
+      [
+        {
+          value: Encoder.PlaneType.DIRECT,
+          label: '直接出力',
+          tip: 'ピクセルデータをそのまま出力します。',
+        },
+        {
+          value: Encoder.PlaneType.INDEX_MATCH,
+          label: '色番号を指定',
+          tip: '指定した色番号に一致するピクセルを抽出します。',
+        },
+      ],
+      Encoder.PlaneType.DIRECT);
+  public matchIndexBox = Ui.makeTextBox('0', '', 4);
+  public matchInvertBox = Ui.makeCheckBox('反転');
+  public ul = Ui.makeFloatList([
+    Ui.tip(['種類: ', this.planeTypeBox], 'プレーンの種類を指定します。'),
+    Ui.tip(['色番号: ', this.matchIndexBox], '抽出する色番号を指定します。'),
+    Ui.tip(['反転: ', this.matchInvertBox], '抽出結果を反転します。'),
+  ]);
+
+  constructor(public config: Configs.PlaneConfig) {
+    this.container.appendChild(this.ul);
+    this.planeTypeBox.value = config.planeType.toString();
+    this.matchIndexBox.value = config.matchIndex.toString();
+    this.matchInvertBox.checked = config.matchInvert;
+
+    this.container.querySelectorAll('input, select').forEach((el) => {
+      el.addEventListener('change', () => {
+        requestGenerateCode();
+      });
+      el.addEventListener('input', () => {
+        requestGenerateCode();
+      });
+    });
+  }
+
+  dispose() {
+    this.container.remove();
   }
 }
 
-class Preset {
-  public channelOrder = ChannelOrder.ARGB;
-  public farPixelFirst = false;
-  public bigEndian = false;
-  public packUnit = Encoder.PackUnit.PIXEL;
-  public vertPack = false;
-  public alignBoundary = Encoder.AlignBoundary.BYTE_1;
-  public alignLeft = false;
-  public vertAddr = false;
-  constructor(
-      public label: string, public description: string,
-      public format: PixelFormat, ops = {}) {
-    for (const k of Object.keys(ops)) {
-      if (!(k in this)) {
-        throw new Error(`Unknown property '${k}'`);
-      }
-      (this as any)[k] = (ops as any)[k];
-    }
-  }
-}
-
-let presets: Record<string, Preset> = {
-  argb8888_le: new Preset(
-      'ARGB8888-LE',
-      '透明度付きフルカラー。\nLovyanGFX の pushAlphaImage 関数向け。',
-      PixelFormat.RGBA8888,
-      {
-        channelOrder: ChannelOrder.ARGB,
-      },
-      ),
-  rgb888_be: new Preset(
-      'RGB888-BE',
-      'フルカラー。24bit 液晶用。',
-      PixelFormat.RGB888,
-      {
-        channelOrder: ChannelOrder.ARGB,
-        bigEndian: true,
-      },
-      ),
-  rgb666_be_ra: new Preset(
-      'RGB666-BE-RA',
-      '各バイトにチャネルを下位詰めで配置した RGB666。LovyanGFX 用。',
-      PixelFormat.RGB666,
-      {
-        channelOrder: ChannelOrder.ARGB,
-        packUnit: Encoder.PackUnit.UNPACKED,
-        bigEndian: true,
-      },
-      ),
-  rgb666_be_la: new Preset(
-      'RGB666-BE-LA',
-      '各バイトにチャネルを上位詰めで配置した RGB666。低レベル API の 18bit モード用。',
-      PixelFormat.RGB666,
-      {
-        channelOrder: ChannelOrder.ARGB,
-        packUnit: Encoder.PackUnit.UNPACKED,
-        alignLeft: true,
-        bigEndian: true,
-      },
-      ),
-  rgb565_be: new Preset(
-      'RGB565-BE',
-      'ハイカラー。\n各種 GFX ライブラリでの使用を含め、\n組み込み用途で一般的な形式。',
-      PixelFormat.RGB565,
-      {
-        bigEndian: true,
-      },
-      ),
-  rgb444_be: new Preset(
-      'RGB444-BE',
-      'ST7789 の 12bit モード用の形式。',
-      PixelFormat.RGB444,
-      {
-        packUnit: Encoder.PackUnit.ALIGNMENT,
-        farPixelFirst: true,
-        bigEndian: true,
-        alignBoundary: Encoder.AlignBoundary.BYTE_3,
-      },
-      ),
-  rgb332: new Preset(
-      'RGB332',
-      '各種 GFX ライブラリ用。',
-      PixelFormat.RGB332,
-      ),
-  rgb111_ra: new Preset(
-      'RGB111',
-      'ILI9488 の 8 色モード用。',
-      PixelFormat.RGB111,
-      {
-        packUnit: Encoder.PackUnit.ALIGNMENT,
-        farPixelFirst: true,
-      },
-      ),
-  bw_hscan: new Preset(
-      '白黒 横スキャン',
-      '各種 GFX ライブラリ用。',
-      PixelFormat.BW,
-      {
-        packUnit: Encoder.PackUnit.ALIGNMENT,
-        farPixelFirst: true,
-      },
-      ),
-  bw_vpack: new Preset(
-      '白黒 縦パッキング',
-      'SPI/I2C ドライバを使用して\nSSD1306/1309 等の白黒ディスプレイに直接転送するための形式。',
-      PixelFormat.BW,
-      {
-        packUnit: Encoder.PackUnit.ALIGNMENT,
-        vertPack: true,
-      },
-      ),
-};
-
-function toElementArray(children: any): HTMLElement[] {
-  if (children == null) {
-    return [];
-  }
-  if (!Array.isArray(children)) {
-    children = [children];
-  }
-  for (let i = 0; i < children.length; i++) {
-    if (typeof children[i] === 'string') {
-      children[i] = document.createTextNode(children[i]);
-    } else if (children[i] instanceof Node) {
-      // Do nothing
-    } else {
-      throw new Error('Invalid child element');
-    }
-  }
-  return children;
-}
-
-function makeSection(children: any = []): HTMLDivElement {
-  const div = document.createElement('div');
-  div.classList.add('propertySection');
-  toElementArray(children).forEach(child => div.appendChild(child));
-  return div;
-}
-
-function makeFloatList(
-    children: any = [], sep: boolean = true): HTMLUListElement {
-  const ul = document.createElement('ul');
-  toElementArray(children).forEach(child => {
-    if (!child.classList) {
-      child = makeSpan(child);
-    }
-
-    const li = document.createElement('li');
-    li.appendChild(child);
-    if (sep && child.classList && !child.classList.contains('sectionHeader')) {
-      li.style.marginRight = '20px';
-    }
-    ul.appendChild(li);
-  });
-  return ul;
-}
-
-function makeParagraph(children: any = []): HTMLParagraphElement {
-  const p = document.createElement('p');
-  toElementArray(children).forEach(child => p.appendChild(child));
-  return p;
-}
-
-function makeSpan(children: any = []): HTMLSpanElement {
-  const span = document.createElement('span');
-  toElementArray(children).forEach(child => span.appendChild(child));
-  return span;
-}
-
-function makeNowrap(children: any = []): HTMLSpanElement {
-  const span = document.createElement('span');
-  span.classList.add('nowrap');
-  toElementArray(children).forEach(child => span.appendChild(child));
-  return span;
-}
-
-function makeHeader(text: string): HTMLSpanElement {
-  const span = document.createElement('span');
-  span.classList.add('sectionHeader');
-  span.textContent = text;
-  return span;
-}
-
-function makeTextBox(
-    value = '', placeholder = '', maxLength = 100): HTMLInputElement {
-  const input = document.createElement('input');
-  input.type = 'text';
-  input.value = value;
-  input.placeholder = placeholder;
-  input.style.width = '60px';
-  input.style.textAlign = 'right';
-  input.maxLength = maxLength;
-  input.inputMode = 'decimal';
-  input.addEventListener('focus', () => input.select());
-  return input;
-}
-
-function makeSelectBox(
-    items: {value: number, label: string}[],
-    defaultValue: number): HTMLSelectElement {
-  const select = document.createElement('select');
-  for (const {value, label} of items) {
-    const option = document.createElement('option');
-    option.value = value.toString();
-    option.textContent = label;
-    select.appendChild(option);
-  }
-  select.value = defaultValue.toString();
-  return select;
-}
-
-function makeCheckBox(labelText: string): HTMLInputElement {
-  const label = document.createElement('label');
-  const checkbox = document.createElement('input');
-  checkbox.type = 'checkbox';
-  label.appendChild(checkbox);
-  label.appendChild(document.createTextNode(labelText));
-  return checkbox;
-}
-
-function makeButton(text = ''): HTMLButtonElement {
-  const button = document.createElement('button');
-  button.textContent = text;
-  return button;
-}
-
-function makeSampleImageButton(url: string) {
+export function makeSampleImageButton(url: string) {
+  const fileName = url.split('/').pop() || DEFAULT_INPUT_FILE_NAME;
   const button = document.createElement('button');
   button.classList.add('sampleImageButton');
   button.style.backgroundImage = `url(${url})`;
   button.addEventListener('click', () => {
-    loadFromString(url);
+    loadFromString(fileName, url);
   });
   button.textContent = '';
   return button;
 }
 
-function makePresetButton(id: string, preset: Preset): HTMLButtonElement {
+export function makePresetButton(
+    id: string, preset: Configs.Config): HTMLButtonElement {
   const button = document.createElement('button');
   button.dataset.presetName = id;
   button.classList.add('presetButton');
@@ -297,197 +108,336 @@ function makePresetButton(id: string, preset: Preset): HTMLButtonElement {
   return button;
 }
 
-function basic(elem: HTMLElement): HTMLElement {
-  elem.classList.add('basic');
-  return elem;
-}
-
-function pro(elem: HTMLElement): HTMLElement {
-  elem.classList.add('professional');
-  return elem;
-}
-
-function show(elem: HTMLElement): HTMLElement {
-  elem.classList.remove('hidden');
-  return elem;
-}
-
-function hide(elem: HTMLElement): HTMLElement {
-  elem.classList.add('hidden');
-  return elem;
-}
-
-function setVisible(elem: HTMLElement, visible: boolean): HTMLElement {
-  return visible ? show(elem) : hide(elem);
-}
-
-function tip(children: any, text: string): HTMLElement {
-  let target: HTMLElement;
-  if (children instanceof HTMLElement) {
-    target = children;
-  } else {
-    target = makeSpan(children);
-  }
-  if (text) target.title = text;
-  return target;
-}
-
-function parentLiOf(child: HTMLElement): HTMLLIElement {
-  let parent = child;
-  while (parent && parent.tagName !== 'LI') {
-    parent = parent.parentElement as HTMLElement;
-  }
-  return parent as HTMLLIElement;
-}
-
-function upDown(
-    elem: HTMLElement, min: number, max: number, step: number): HTMLElement {
-  const upDownButton = makeButton('');
-  upDownButton.classList.add('upDown');
-  upDownButton.tabIndex = -1;
-
-  const textBox = elem as HTMLInputElement;
-
-  upDownButton.addEventListener('pointermove', (e) => {
-    e.preventDefault();
-    if (upDownButton.dataset.dragStartY && upDownButton.dataset.dragStartVal) {
-      const y = e.offsetY;
-      const startY = parseFloat(upDownButton.dataset.dragStartY);
-      const startVal = parseFloat(upDownButton.dataset.dragStartVal);
-
-      const n = (max - min) / step;
-      let deltaY = Math.round((y - startY) * n / 512);
-
-      let val = clip(min, max, startVal - deltaY * step);
-      textBox.value = (Math.round(val * 100) / 100).toString();
-      textBox.dispatchEvent(new Event('change'));
-    }
-  });
-  upDownButton.addEventListener('pointerdown', (e) => {
-    e.preventDefault();
-    if (trimViewToNextState(e.offsetX, e.offsetY) != TrimState.IDLE) {
-      const y = e.offsetY;
-      let val: number;
-      if (textBox.value.trim()) {
-        val = parseFloat(textBox.value.trim());
-      } else {
-        val = parseFloat(textBox.placeholder.replaceAll(/[\(\)]/g, '').trim());
-      }
-      val = Math.round(val / step) * step;
-      upDownButton.dataset.dragStartY = y.toString();
-      upDownButton.dataset.dragStartVal = val.toString();
-      upDownButton.style.cursor = 'grabbing';
-      upDownButton.setPointerCapture(e.pointerId);
-    }
-  });
-  upDownButton.addEventListener('pointerup', (e) => {
-    e.preventDefault();
-    delete upDownButton.dataset.dragStartY;
-    delete upDownButton.dataset.dragStartVal;
-    upDownButton.style.cursor = 'ns-resize';
-    upDownButton.releasePointerCapture(e.pointerId);
-  });
-  upDownButton.addEventListener('touchstart', (e) => e.preventDefault());
-  upDownButton.addEventListener('touchmove', (e) => e.preventDefault());
-  upDownButton.addEventListener('touchend', (e) => e.preventDefault());
-
-  return makeSpan([textBox, upDownButton]);
-}
-
 const dropTarget = document.createElement('div');
+dropTarget.classList.add('dropTarget');
+dropTarget.innerHTML = 'ドロップして読み込む';
+document.body.appendChild(dropTarget);
+Ui.hide(dropTarget);
+
+const fileBrowseButton = Ui.makeButton('ファイルを選択');
+
+// 「ファイルが選択されていません」の表示が邪魔なので button で wrap する
 const hiddenFileBox = document.createElement('input');
+hiddenFileBox.type = 'file';
+hiddenFileBox.accept = 'image/*';
+hiddenFileBox.style.display = 'none';
+fileBrowseButton.addEventListener('click', () => {
+  hiddenFileBox.click();
+});
+
 const pasteTarget = document.createElement('input');
-const origCanvas = document.createElement('canvas');
-const resetTrimButton = makeButton('範囲をリセット');
-const alphaProcBox = makeSelectBox(
+pasteTarget.type = 'text';
+pasteTarget.style.textAlign = 'center';
+pasteTarget.style.width = '8em';
+pasteTarget.placeholder = 'ここに貼り付け';
+
+const fileSection = Ui.makeSection(Ui.makeFloatList(
     [
-      {value: Preproc.AlphaProc.KEEP, label: '変更しない'},
-      {value: Preproc.AlphaProc.FILL, label: '背景色を指定'},
-      {value: Preproc.AlphaProc.BINARIZE, label: '二値化'},
-      {value: Preproc.AlphaProc.SET_KEY_COLOR, label: '抜き色指定'},
+      Ui.makeHeader('入力画像'), '画像をドロップ、',
+      Ui.makeSpan([pasteTarget, '、']),
+      Ui.makeSpan(['または ', fileBrowseButton]),
+      Ui.makeSpan(
+          [
+            '（サンプル: ',
+            makeSampleImageButton('./img/sample/gradient.png'),
+            makeSampleImageButton('./img/sample/forest-path.jpg'),
+            makeSampleImageButton('./img/sample/rgb-chan.png'),
+            makeSampleImageButton('./img/sample/rgb-chan-tp.png'),
+            '）',
+          ],
+          )
     ],
-    Preproc.AlphaProc.KEEP);
-const backColorBox = makeTextBox('#00F');
-const keyColorBox = makeTextBox('#00F');
-const keyToleranceBox = makeTextBox('0', '(auto)', 5);
-const alphaThreshBox = makeTextBox('128', '(auto)', 5);
+    false))
+
+const pPresetButtons = Ui.makeParagraph();
+for (const id in Configs.presets) {
+  pPresetButtons.appendChild(makePresetButton(id, Configs.presets[id]));
+}
+
+const presetSection = Ui.makeSection([
+  Ui.makeFloatList([
+    Ui.makeHeader('プリセット'),
+    Ui.makeNowrap('選んでください: '),
+  ]),
+  pPresetButtons,
+]);
+
+const proModeCheckBox = Ui.makeCheckBox('上級者向け設定を表示する');
+proModeCheckBox.addEventListener('change', onProModeChanged);
+
+function onProModeChanged(): void {
+  const pro = proModeCheckBox.checked;
+  history.replaceState(null, '', pro ? '#detail' : '#');
+  document.querySelectorAll('.professional').forEach((el) => {
+    Ui.setVisible(el as HTMLElement, pro);
+    onRelayout();
+  });
+  document.querySelectorAll('.basic').forEach((el) => {
+    Ui.setVisible(el as HTMLElement, !pro);
+    onRelayout();
+  });
+  updateTrimCanvas();
+}
+
+const proModeSection = Ui.makeSection(Ui.makeFloatList([
+  Ui.makeHeader('編集モード'),
+  proModeCheckBox.parentElement,
+]));
+
+const origCanvas = document.createElement('canvas');
+
+const resetTrimButton = Ui.makeButton('範囲をリセット');
+
 const trimCanvas = document.createElement('canvas');
-const hueBox = makeTextBox('0', '(0)', 4);
-const saturationBox = makeTextBox('100', '(100)', 4);
-const lightnessBox = makeTextBox('100', '(100)', 4);
-const gammaBox = makeTextBox('1', '(auto)', 4);
-const brightnessBox = makeTextBox('0', '(auto)', 5);
-const contrastBox = makeTextBox('100', '(auto)', 5);
-const invertBox = makeCheckBox('階調反転');
-const pixelFormatBox = makeSelectBox(
+trimCanvas.style.width = '100%';
+trimCanvas.style.height = '400px';
+trimCanvas.style.boxSizing = 'border-box';
+trimCanvas.style.border = 'solid 1px #444';
+trimCanvas.style.backgroundImage = 'url(./img/checker.png)';
+
+const pTrimCanvas = Ui.makeParagraph(trimCanvas);
+pTrimCanvas.style.textAlign = 'center';
+
+const trimSection = Ui.makeSection([
+  Ui.makeFloatList([
+    Ui.makeHeader('トリミング'),
+    Ui.tip(resetTrimButton, 'トリミングしていない状態に戻します。'),
+  ]),
+  pTrimCanvas,
+])
+
+const alphaModeBox = Ui.makeSelectBox(
+    [
+      {value: Preproc.AlphaMode.KEEP, label: '変更しない'},
+      {value: Preproc.AlphaMode.FILL, label: '背景色を指定'},
+      {value: Preproc.AlphaMode.BINARIZE, label: '二値化'},
+      {value: Preproc.AlphaMode.SET_KEY_COLOR, label: '抜き色指定'},
+    ],
+    Preproc.AlphaMode.KEEP);
+const backColorBox = Ui.makeTextBox('#00F');
+const keyColorBox = Ui.makeTextBox('#00F');
+const keyToleranceBox = Ui.makeTextBox('0', '(auto)', 5);
+const alphaThreshBox = Ui.makeTextBox('128', '(auto)', 5);
+
+const alphaSection = Ui.pro(Ui.makeSection(Ui.makeFloatList(([
+  Ui.makeHeader('透過色'),
+  Ui.tip(
+      ['透過色の扱い: ', alphaModeBox],
+      '入力画像に対する透過色の取り扱いを指定します。'),
+  Ui.tip(
+      ['背景色: ', backColorBox],
+      '画像の透明部分をこの色で塗り潰して不透明化します。'),
+  Ui.tip(['キーカラー: ', keyColorBox], '透明にしたい色を指定します。'),
+  Ui.tip(
+      ['許容誤差: ', Ui.upDown(keyToleranceBox, 0, 255, 1)],
+      'キーカラーからの許容誤差を指定します。'),
+  Ui.tip(
+      ['閾値: ', Ui.upDown(alphaThreshBox, 0, 255, 1)],
+      '透明にするかどうかの閾値を指定します。'),
+]))));
+
+const hueBox = Ui.makeTextBox('0', '(0)', 4);
+const saturationBox = Ui.makeTextBox('100', '(100)', 4);
+const lightnessBox = Ui.makeTextBox('100', '(100)', 4);
+const gammaBox = Ui.makeTextBox('1', '(auto)', 4);
+const brightnessBox = Ui.makeTextBox('0', '(auto)', 5);
+const contrastBox = Ui.makeTextBox('100', '(auto)', 5);
+const invertBox = Ui.makeCheckBox('階調反転');
+
+const colorCorrectSection = Ui.pro(Ui.makeSection(Ui.makeFloatList([
+  Ui.makeHeader('色調補正'),
+  Ui.tip(
+      ['色相: ', Ui.upDown(hueBox, -360, 360, 5), '°'],
+      'デフォルトは 0° です。'),
+  Ui.tip(
+      ['彩度: ', Ui.upDown(saturationBox, 0, 200, 5), '%'],
+      'デフォルトは 100% です。'),
+  Ui.tip(
+      ['明度: ', Ui.upDown(lightnessBox, 0, 200, 5), '%'],
+      'デフォルトは 100% です。'),
+  Ui.tip(
+      ['ガンマ: ', Ui.upDown(gammaBox, 0.1, 2, 0.05)],
+      'デフォルトは 1.0 です。\n空欄にすると、輝度 50% を中心にバランスが取れるように自動調整します。'),
+  Ui.tip(
+      ['輝度: ', Ui.upDown(brightnessBox, -255, 255, 8)],
+      'デフォルトは 0 です。\n空欄にすると、輝度 50% を中心にバランスが取れるように自動調整します。'),
+  Ui.tip(
+      ['コントラスト: ', Ui.upDown(contrastBox, 0, 200, 5), '%'],
+      'デフォルトは 100% です。\n空欄にすると、階調が失われない範囲でダイナミックレンジが最大となるように自動調整します。'),
+  Ui.tip([invertBox.parentElement], '各チャネルの値を大小反転します。'),
+])));
+
+const pixelFormatBox = Ui.makeSelectBox(
     [
       {value: PixelFormat.RGBA8888, label: 'RGBA8888'},
       //{value: PixelFormat.RGBA4444, label: 'RGBA4444'},
       {value: PixelFormat.RGB888, label: 'RGB888'},
       {value: PixelFormat.RGB666, label: 'RGB666'},
       {value: PixelFormat.RGB565, label: 'RGB565'},
-      {value: PixelFormat.RGB555, label: 'RGB555'},
+      //{value: PixelFormat.RGB555, label: 'RGB555'},
       {value: PixelFormat.RGB444, label: 'RGB444'},
       {value: PixelFormat.RGB332, label: 'RGB332'},
       {value: PixelFormat.RGB111, label: 'RGB111'},
       {value: PixelFormat.GRAY4, label: 'Gray4'},
       {value: PixelFormat.GRAY2, label: 'Gray2'},
       {value: PixelFormat.BW, label: 'B/W'},
+      {value: PixelFormat.I2_RGB888, label: 'Index2'},
     ],
     PixelFormat.RGB565);
-const widthBox = makeTextBox('', '(auto)', 4);
-const heightBox = makeTextBox('', '(auto)', 4);
-const scalingMethodBox = makeSelectBox(
+
+const widthBox = Ui.makeTextBox('', '(auto)', 4);
+const heightBox = Ui.makeTextBox('', '(auto)', 4);
+
+const scalingMethodBox = Ui.makeSelectBox(
     [
       {value: Preproc.ScalingMethod.ZOOM, label: 'ズーム'},
       {value: Preproc.ScalingMethod.FIT, label: 'フィット'},
       {value: Preproc.ScalingMethod.STRETCH, label: 'ストレッチ'},
     ],
     Preproc.ScalingMethod.ZOOM);
-const colorDitherBox = makeSelectBox(
+
+const formatSection = Ui.makeSection(Ui.makeFloatList([
+  Ui.makeHeader('出力形式'),
+  Ui.pro(Ui.tip(
+      ['フォーマット: ', pixelFormatBox],
+      'ピクセルフォーマットを指定します。')),
+  Ui.tip(
+      [
+        'サイズ: ',
+        Ui.upDown(widthBox, 1, 1024, 1),
+        ' x ',
+        Ui.upDown(heightBox, 1, 1024, 1),
+        ' px',
+      ],
+      '片方を空欄にすると他方はアスペクト比に基づいて自動的に決定されます。'),
+  Ui.tip(
+      ['拡縮方法: ', scalingMethodBox],
+      'トリミングサイズと出力サイズが異なる場合の拡縮方法を指定します。'),
+]));
+
+
+const csrModeBox = Ui.makeSelectBox(
+    [
+      {
+        value: Preproc.ColorSpaceReductionMode.NONE,
+        label: '縮退しない',
+        tip: '元の色空間をそのまま使います。',
+      },
+      {
+        value: Preproc.ColorSpaceReductionMode.CLIP,
+        label: '切り捨てる',
+        tip: '新しい色空間で表現できない色は最も近い色に変換します。',
+      },
+      {
+        value: Preproc.ColorSpaceReductionMode.FOLD,
+        label: '畳み込む',
+        tip:
+            '新しい色空間で表現できない色は色相環上で折り返して空間内に収めます。',
+      },
+      {
+        value: Preproc.ColorSpaceReductionMode.TRANSFORM,
+        label: '圧縮する',
+        tip: '元の色空間全体を変形してパレットの空間内に収まるようにします。',
+      },
+    ],
+    Preproc.ColorSpaceReductionMode.FOLD);
+const csrHueToleranceBox = Ui.makeTextBox('60', '(60)', 4);
+
+const paletteTable = document.createElement('table');
+
+const paletteSection = Ui.makeSection([
+  Ui.makeFloatList([
+    Ui.makeHeader('パレット'),
+    Ui.tip(
+        ['色空間の縮退方法: ', csrModeBox],
+        'パレット内の色で表現できない色の扱いを指定します。'),
+    Ui.tip(
+        ['許容誤差: ', Ui.upDown(csrHueToleranceBox, 0, 180, 1), '°'],
+        '新しい色空間の外側をどこまで空間内に丸めるかを色相の角度で指定します。'),
+  ]),
+  Ui.pro(paletteTable),
+]);
+
+const colorDitherBox = Ui.makeSelectBox(
     [
       {value: DitherMethod.NONE, label: 'なし'},
       {value: DitherMethod.DIFFUSION, label: '誤差拡散'},
     ],
     DitherMethod.NONE);
-const alphaDitherBox = makeSelectBox(
+const alphaDitherBox = Ui.makeSelectBox(
     [
       {value: DitherMethod.NONE, label: 'なし'},
       {value: DitherMethod.DIFFUSION, label: '誤差拡散'},
     ],
     DitherMethod.NONE);
-const roundMethodBox = makeSelectBox(
+const roundMethodBox = Ui.makeSelectBox(
     [
-      {value: RoundMethod.NEAREST, label: '最も近い輝度'},
-      {value: RoundMethod.EQUAL_DIVISION, label: '均等割り'},
+      {
+        value: RoundMethod.NEAREST,
+        label: '近似値',
+        tip: '元の色の輝度値に最も近い色を選択します。'
+      },
+      {
+        value: RoundMethod.EQUAL_DIVISION,
+        label: '均等割り',
+        tip: '色の範囲を均等に分割します。'
+      },
     ],
     RoundMethod.NEAREST);
 const previewCanvas = document.createElement('canvas');
-const quantizeErrorBox = document.createElement('span');
-const channelOrderBox = makeSelectBox(
+const reductionErrorBox = document.createElement('span');
+
+previewCanvas.style.backgroundImage = 'url(./img/checker.png)';
+reductionErrorBox.style.color = 'red';
+Ui.hide(previewCanvas);
+Ui.hide(reductionErrorBox);
+
+const pPreviewCanvas = Ui.makeParagraph([previewCanvas, reductionErrorBox]);
+pPreviewCanvas.style.height = '400px';
+pPreviewCanvas.style.background = '#444';
+pPreviewCanvas.style.border = 'solid 1px #444';
+pPreviewCanvas.style.textAlign = 'center';
+
+const colorReductionSection = Ui.makeSection([
+  Ui.makeFloatList([
+    Ui.makeHeader('減色'),
+    Ui.pro(Ui.tip(
+        ['丸め方法: ', roundMethodBox],
+        'パレットから色を選択する際の戦略を指定します。\nディザリングを行う場合はあまり関係ありません。')),
+    Ui.tip(
+        ['ディザリング: ', colorDitherBox],
+        'あえてノイズを加えることでできるだけ元画像の色を再現します。'),
+    Ui.pro(Ui.tip(
+        ['透明度のディザ: ', alphaDitherBox],
+        'あえてノイズを加えることでできるだけ元画像の透明度を再現します。')),
+  ]),
+  pPreviewCanvas,
+]);
+
+const channelOrderBox = Ui.makeSelectBox(
     [
-      {value: ChannelOrder.RGBA, label: 'RGBA'},
-      {value: ChannelOrder.BGRA, label: 'BGRA'},
-      {value: ChannelOrder.ARGB, label: 'ARGB'},
-      {value: ChannelOrder.ABGR, label: 'ABGR'},
+      {value: Images.ChannelOrder.RGBA, label: 'RGBA'},
+      {value: Images.ChannelOrder.BGRA, label: 'BGRA'},
+      {value: Images.ChannelOrder.ARGB, label: 'ARGB'},
+      {value: Images.ChannelOrder.ABGR, label: 'ABGR'},
     ],
-    ChannelOrder.RGBA);
-const farPixelFirstBox = makeSelectBox(
+    Images.ChannelOrder.RGBA);
+const farPixelFirstBox = Ui.makeSelectBox(
     [
       {value: 1, label: '上位から'},
       {value: 0, label: '下位から'},
     ],
     1);
-const bigEndianBox = makeCheckBox('ビッグエンディアン');
-const packUnitBox = makeSelectBox(
+const bigEndianBox = Ui.makeCheckBox('ビッグエンディアン');
+const packUnitBox = Ui.makeSelectBox(
     [
       {value: Encoder.PackUnit.UNPACKED, label: 'アンパックド'},
       {value: Encoder.PackUnit.PIXEL, label: '1 ピクセル'},
       {value: Encoder.PackUnit.ALIGNMENT, label: 'アライメント境界'},
     ],
     Encoder.PackUnit.PIXEL);
-const vertPackBox = makeCheckBox('縦パッキング');
-const alignBoundaryBox = makeSelectBox(
+const vertPackBox = Ui.makeCheckBox('縦パッキング');
+const alignBoundaryBox = Ui.makeSelectBox(
     [
       {value: Encoder.AlignBoundary.NIBBLE, label: 'ニブル'},
       {value: Encoder.AlignBoundary.BYTE_1, label: '1 バイト'},
@@ -496,25 +446,77 @@ const alignBoundaryBox = makeSelectBox(
       {value: Encoder.AlignBoundary.BYTE_4, label: '4 バイト'},
     ],
     Encoder.AlignBoundary.BYTE_1);
-const leftAlignBox = makeCheckBox('左詰め');
-const vertAddrBox = makeCheckBox('垂直スキャン');
+const leftAlignBox = Ui.makeCheckBox('左詰め');
+const vertAddrBox = Ui.makeCheckBox('垂直スキャン');
+
+const planeSelectBox = Ui.makeSelectBox([{value: 0, label: 'プレーン0'}], 0);
+const planeGroupBody = Ui.makeGroupBody();
+const planeGroupBox =
+    Ui.makeGroup([Ui.makeGroupTitle([planeSelectBox]), planeGroupBody]);
+
+planeSelectBox.addEventListener('change', onSelectedPlaneChanged);
+
 const structCanvas = document.createElement('canvas');
-const structErrorBox = makeParagraph();
-const codeUnitBox = makeSelectBox(
+structCanvas.style.maxWidth = '100%';
+
+const structErrorBox = Ui.makeParagraph();
+structErrorBox.style.textAlign = 'center';
+structErrorBox.style.color = 'red';
+Ui.hide(structErrorBox);
+
+const pStructCanvas = Ui.makeParagraph([structCanvas, structErrorBox]);
+pStructCanvas.style.textAlign = 'center';
+
+const encodeSection = Ui.makeSection([
+  Ui.makeFloatList([
+    Ui.makeHeader('エンコード'),
+    Ui.basic(Ui.makeSpan('この構造で生成されます:')),
+    Ui.pro(Ui.tip(
+        ['パッキング単位: ', packUnitBox], 'パッキングの単位を指定します。')),
+    Ui.pro(Ui.tip(
+        [vertPackBox.parentElement],
+        '複数ピクセルをパッキングする場合に、縦方向にパッキングします。\n' +
+            'SSD1306/1309 などの一部の白黒ディスプレイに\n' +
+            '直接転送可能なデータを生成する場合はチェックします。')),
+    Ui.pro(Ui.tip(
+        [vertAddrBox.parentElement],
+        'アドレスを縦方向にインクリメントする場合にチェックします。')),
+    Ui.pro(Ui.tip(
+        ['チャネル順: ', channelOrderBox],
+        'RGB のチャネルを並べる順序を指定します。')),
+    Ui.pro(Ui.tip(
+        ['ピクセル順: ', farPixelFirstBox],
+        'バイト内のピクセルの順序を指定します。')),
+    Ui.pro(Ui.tip(
+        ['アライメント境界: ', alignBoundaryBox],
+        'アライメントの境界を指定します。')),
+    Ui.pro(Ui.tip(
+        [leftAlignBox.parentElement],
+        'フィールドをアライメント境界内で左詰めします。')),
+    Ui.pro(Ui.tip(
+        [bigEndianBox.parentElement],
+        'ピクセル内のバイトの順序を指定します。')),
+  ]),
+  Ui.pro(planeGroupBox),
+  pStructCanvas,
+]);
+
+
+const codeUnitBox = Ui.makeSelectBox(
     [
       {value: CodeGen.CodeUnit.FILE, label: 'ファイル全体'},
       {value: CodeGen.CodeUnit.ARRAY_DEF, label: '配列定義'},
       {value: CodeGen.CodeUnit.ELEMENTS, label: '要素のみ'},
     ],
     CodeGen.CodeUnit.FILE)
-const codeColsBox = makeSelectBox(
+const codeColsBox = Ui.makeSelectBox(
     [
       {value: 8, label: '8'},
       {value: 16, label: '16'},
       {value: 32, label: '32'},
     ],
     16);
-const indentBox = makeSelectBox(
+const indentBox = Ui.makeSelectBox(
     [
       {value: CodeGen.Indent.SPACE_X2, label: 'スペース x2'},
       {value: CodeGen.Indent.SPACE_X4, label: 'スペース x4'},
@@ -522,31 +524,29 @@ const indentBox = makeSelectBox(
     ],
     CodeGen.Indent.SPACE_X2);
 
-const codeBox = document.createElement('pre');
+const codePlaneContainer = document.createElement('div');
 
 const showCodeLink = document.createElement('a');
 showCodeLink.href = '#';
 showCodeLink.textContent = '表示する';
 
-const codeHiddenBox = makeParagraph([
-  '生成されたコードが非常に長いので非表示になっています',
-  document.createElement('br'),
-  showCodeLink,
-]);
-codeHiddenBox.classList.add('codeHiddenBox');
-codeHiddenBox.style.textAlign = 'center';
-
-showCodeLink.addEventListener('click', (e) => {
-  e.preventDefault();
-  show(codeBox);
-  hide(codeHiddenBox);
-});
-
-const codeErrorBox = makeParagraph();
+const codeErrorBox = Ui.makeParagraph();
 codeErrorBox.style.textAlign = 'center';
 codeErrorBox.style.color = 'red';
 
-const copyButton = makeButton('コードをコピー');
+Ui.hide(codeErrorBox);
+
+const codeGenSection = Ui.makeSection([
+  Ui.makeFloatList([
+    Ui.makeHeader('コード生成'),
+    Ui.tip(['生成範囲: ', codeUnitBox], '生成するコードの範囲を指定します。'),
+    Ui.tip(['列数: ', codeColsBox], '1 行に詰め込む要素数を指定します。'),
+    Ui.tip(
+        ['インデント: ', indentBox], 'インデントの形式とサイズを指定します。'),
+  ]),
+  codePlaneContainer,
+  codeErrorBox,
+]);
 
 let container: HTMLDivElement;
 
@@ -559,7 +559,9 @@ let trimL = 0, trimT = 0, trimR = 1, trimB = 1;
 
 let trimUiState = TrimState.IDLE;
 
-let reducedImage: ReducedImage|null = null;
+let paletteColor: Uint32Array = new Uint32Array(256);
+let paletteEnabled: boolean[] = new Array(256).fill(false);
+let reducedImage: Images.ReducedImage|null = null;
 
 let trimCanvasWidth = 800;
 let trimCanvasHeight = 400;
@@ -567,321 +569,59 @@ let trimCanvasHeight = 400;
 let previewCanvasWidth = 800;
 let previewCanvasHeight = 400;
 
+let planeUis: Record<string, PlaneUi> = {};
+
+let keepShowLongCode = false;
+
+const DEFAULT_INPUT_FILE_NAME = 'imageArray';
+let inputFileName = DEFAULT_INPUT_FILE_NAME;
+
 async function onLoad() {
   container = document.querySelector('#arrayfyContainer') as HTMLDivElement;
+  container.appendChild(proModeSection);
+  container.appendChild(fileSection);
+  container.appendChild(presetSection);
+  container.appendChild(Ui.pro(trimSection));
+  container.appendChild(alphaSection);
+  container.appendChild(colorCorrectSection);
+  container.appendChild(formatSection);
+  container.appendChild(paletteSection);
+  container.appendChild(colorReductionSection);
+  container.appendChild(encodeSection);
+  container.appendChild(codeGenSection);
 
-  {
-    dropTarget.classList.add('dropTarget');
-    dropTarget.innerHTML = 'ドロップして読み込む';
-    document.body.appendChild(dropTarget);
-    hide(dropTarget);
+  alphaModeBox.addEventListener('change', onAlphaProcChanged);
+  onAlphaProcChanged();
 
-    // 「ファイルが選択されていません」の表示が邪魔なので button で wrap する
-    hiddenFileBox.type = 'file';
-    hiddenFileBox.accept = 'image/*';
-    hiddenFileBox.style.display = 'none';
-    const fileBrowseButton = makeButton('ファイルを選択');
-    fileBrowseButton.addEventListener('click', () => {
-      hiddenFileBox.click();
+  alphaSection.querySelectorAll('input, select').forEach((el) => {
+    el.addEventListener('change', () => {
+      requestUpdateTrimCanvas();
     });
-
-    pasteTarget.type = 'text';
-    pasteTarget.style.textAlign = 'center';
-    pasteTarget.style.width = '8em';
-    pasteTarget.placeholder = 'ここに貼り付け';
-
-    container.appendChild(makeSection(makeFloatList(
-        [
-          makeHeader('入力画像'),
-          '画像をドロップ、',
-          makeSpan([pasteTarget, '、']),
-          makeSpan(['または ', fileBrowseButton]),
-          makeSpan([
-            '（サンプル: ',
-            makeSampleImageButton('./img/sample/gradient.png'),
-            makeSampleImageButton('./img/sample/forest-path.jpg'),
-            makeSampleImageButton('./img/sample/rgb-chan.png'),
-            makeSampleImageButton('./img/sample/rgb-chan-tp.png'),
-            '）',
-          ]),
-        ],
-        false)));
-  }
-
-  {
-    const pPresetButtons = makeParagraph();
-    for (const id in presets) {
-      pPresetButtons.appendChild(makePresetButton(id, presets[id]));
-    }
-    const pNote = makeParagraph([
-      '白黒ディスプレイについては、各種 GFX ライブラリを使用して描画する場合は横スキャンを選択してください。',
-      'I2C や SPI ドライバを用いて直接転送する場合はディスプレイの仕様に従ってください。',
-      'SSD1306/1309 など一部のディスプレイでは縦パッキングされたデータが必要です。',
-    ])
-    pNote.style.fontSize = 'smaller';
-    container.appendChild(makeSection([
-      makeFloatList([
-        makeHeader('プリセット'),
-        makeNowrap('選んでください: '),
-      ]),
-      pPresetButtons,
-      pNote,
-    ]));
-  }
-
-  {
-    const showProButton = document.createElement('a');
-    const hideProButton = document.createElement('a');
-
-    showProButton.textContent = '上級者向け設定を表示する';
-    showProButton.href = '#';
-
-    hideProButton.textContent = '上級者向け設定を隠す';
-    hideProButton.href = '#';
-
-    showProButton.addEventListener('click', (e) => {
-      e.preventDefault();
-      showPro();
-      history.replaceState(null, '', '#detail');
+    el.addEventListener('input', () => {
+      requestUpdateTrimCanvas();
     });
-    hideProButton.addEventListener('click', (e) => {
-      e.preventDefault();
-      hidePro();
-      history.replaceState(null, '', '#');
-    });
+  });
 
-    const section = makeSection([basic(showProButton), pro(hideProButton)]);
-    section.style.textAlign = 'center';
-    section.style.padding = '5px 0';
-    container.appendChild(section);
-  }
-
-  {
-    trimCanvas.style.width = '100%';
-    trimCanvas.style.height = '400px';
-    trimCanvas.style.boxSizing = 'border-box';
-    trimCanvas.style.border = 'solid 1px #444';
-    trimCanvas.style.backgroundImage = 'url(./img/checker.png)';
-
-    const pCanvas = makeParagraph(trimCanvas);
-    pCanvas.style.textAlign = 'center';
-
-    container.appendChild(pro(makeSection([
-      makeFloatList([
-        makeHeader('トリミング'),
-        tip(resetTrimButton, 'トリミングしていない状態に戻します。'),
-      ]),
-      pCanvas,
-    ])));
-  }
-
-  {
-    const section = pro(makeSection(makeFloatList(([
-      makeHeader('透過色'),
-      tip(['透過色の扱い: ', alphaProcBox],
-          '入力画像に対する透過色の取り扱いを指定します。'),
-      tip(['背景色: ', backColorBox],
-          '画像の透明部分をこの色で塗り潰して不透明化します。'),
-      tip(['キーカラー: ', keyColorBox], '透明にしたい色を指定します。'),
-      tip(['許容誤差: ', upDown(keyToleranceBox, 0, 255, 1)],
-          'キーカラーからの許容誤差を指定します。'),
-      tip(['閾値: ', upDown(alphaThreshBox, 0, 255, 1)],
-          '透明にするかどうかの閾値を指定します。'),
-    ]))));
-    container.appendChild(section);
-
-    alphaProcBox.addEventListener('change', onAlphaProcChanged);
-    onAlphaProcChanged();
-
+  const colorReductionSections = [
+    alphaSection,
+    colorCorrectSection,
+    formatSection,
+    paletteSection,
+    colorReductionSection,
+  ];
+  for (const section of colorReductionSections) {
     section.querySelectorAll('input, select').forEach((el) => {
       el.addEventListener('change', () => {
-        requestUpdateTrimCanvas();
-        requestQuantize();
+        requestColorReduction();
       });
       el.addEventListener('input', () => {
-        requestUpdateTrimCanvas();
-        requestQuantize();
+        requestColorReduction();
       });
     });
   }
 
-  {
-    const section = pro(makeSection(makeFloatList([
-      makeHeader('色調補正'),
-      tip(['色相: ', upDown(hueBox, -360, 360, 5), '°'],
-          'デフォルトは 0° です。'),
-      tip(['彩度: ', upDown(saturationBox, 0, 200, 1), '%'],
-          'デフォルトは 100% です。'),
-      tip(['明度: ', upDown(lightnessBox, 0, 200, 1), '%'],
-          'デフォルトは 100% です。'),
-      tip(['ガンマ: ', upDown(gammaBox, 0.1, 2, 0.1)],
-          'デフォルトは 1.0 です。\n空欄にすると、輝度 50% を中心にバランスが取れるように自動調整します。'),
-      tip(['輝度: ', upDown(brightnessBox, -255, 255, 8)],
-          'デフォルトは 0 です。\n空欄にすると、輝度 50% を中心にバランスが取れるように自動調整します。'),
-      tip(['コントラスト: ', upDown(contrastBox, 0, 200, 1), '%'],
-          'デフォルトは 100% です。\n空欄にすると、階調が失われない範囲でダイナミックレンジが最大となるように自動調整します。'),
-      tip([invertBox.parentElement], '各チャネルの値を大小反転します。'),
-    ])));
-    container.appendChild(section);
-
-    section.querySelectorAll('input, select').forEach((el) => {
-      el.addEventListener('change', () => {
-        requestQuantize();
-      });
-      el.addEventListener('input', () => {
-        requestQuantize();
-      });
-    });
-  }
-
-  {
-    const section = makeSection(makeFloatList([
-      makeHeader('出力サイズ'),
-      tip(
-          [
-            upDown(widthBox, 1, 1024, 1),
-            ' x ',
-            upDown(heightBox, 1, 1024, 1),
-            ' px',
-          ],
-          '片方を空欄にすると他方はアスペクト比に基づいて自動的に決定されます。'),
-      tip(['拡縮方法: ', scalingMethodBox],
-          'トリミングサイズと出力サイズが異なる場合の拡縮方法を指定します。'),
-    ]));
-    container.appendChild(section);
-
-    section.querySelectorAll('input, select').forEach((el) => {
-      el.addEventListener('change', () => {
-        requestQuantize();
-      });
-      el.addEventListener('input', () => {
-        requestQuantize();
-      });
-    });
-  }
-
-  {
-    previewCanvas.style.backgroundImage = 'url(./img/checker.png)';
-    quantizeErrorBox.style.color = 'red';
-    hide(previewCanvas);
-    hide(quantizeErrorBox);
-
-    const pCanvas = makeParagraph([previewCanvas, quantizeErrorBox]);
-    pCanvas.style.height = '400px';
-    pCanvas.style.background = '#444';
-    pCanvas.style.border = 'solid 1px #444';
-    pCanvas.style.textAlign = 'center';
-    container.appendChild(pCanvas);
-
-    const section = makeSection([
-      makeFloatList([
-        makeHeader('減色'),
-        pro(
-            tip(['フォーマット: ', pixelFormatBox],
-                'ピクセルフォーマットを指定します。')),
-        pro(tip(
-            ['丸め方法: ', roundMethodBox],
-            'パレットから色を選択する際の戦略を指定します。\nディザリングを行う場合はあまり関係ありません。')),
-        tip(['ディザリング: ', colorDitherBox],
-            'あえてノイズを加えることでできるだけ元画像の色を再現します。'),
-        pro(tip(
-            ['透明度のディザ: ', alphaDitherBox],
-            'あえてノイズを加えることでできるだけ元画像の透明度を再現します。')),
-      ]),
-      pCanvas,
-    ]);
-    container.appendChild(section);
-
-    section.querySelectorAll('input, select').forEach((el) => {
-      el.addEventListener('change', () => {
-        requestQuantize();
-      });
-      el.addEventListener('input', () => {
-        requestQuantize();
-      });
-    });
-  }
-
-  {
-    structCanvas.style.maxWidth = '100%';
-    structErrorBox.style.textAlign = 'center';
-    structErrorBox.style.color = 'red';
-    hide(structErrorBox);
-
-    const pCanvas = makeParagraph([structCanvas, structErrorBox]);
-    pCanvas.style.textAlign = 'center';
-
-    const section = makeSection([
-      makeFloatList([
-        makeHeader('エンコード'),
-        basic(makeSpan('このフォーマットで生成されます:')),
-        pro(
-            tip(['パッキング単位: ', packUnitBox],
-                'パッキングの単位を指定します。')),
-        pro(tip(
-            [vertPackBox.parentElement],
-            '複数ピクセルをパッキングする場合に、縦方向にパッキングします。\n' +
-                'SSD1306/1309 などの一部の白黒ディスプレイに\n' +
-                '直接転送可能なデータを生成する場合はチェックします。')),
-        pro(
-            tip([vertAddrBox.parentElement],
-                'アドレスを縦方向にインクリメントする場合にチェックします。')),
-        pro(
-            tip(['チャネル順: ', channelOrderBox],
-                'RGB のチャネルを並べる順序を指定します。')),
-        pro(
-            tip(['ピクセル順: ', farPixelFirstBox],
-                'バイト内のピクセルの順序を指定します。')),
-        pro(
-            tip(['アライメント境界: ', alignBoundaryBox],
-                'アライメントの境界を指定します。')),
-        pro(
-            tip([leftAlignBox.parentElement],
-                'フィールドをアライメント境界内で左詰めします。')),
-        pro(
-            tip([bigEndianBox.parentElement],
-                'ピクセル内のバイトの順序を指定します。')),
-      ]),
-      pCanvas,
-    ]);
-
-    container.appendChild(section);
-
-    section.querySelectorAll('input, select').forEach((el) => {
-      el.addEventListener('change', () => {
-        requestGenerateCode();
-      });
-      el.addEventListener('input', () => {
-        requestGenerateCode();
-      });
-    });
-  }
-
-  {
-    hide(codeHiddenBox);
-    hide(codeErrorBox);
-
-    const section = makeSection([
-      makeFloatList([
-        makeHeader('コード生成'),
-        tip(['生成範囲: ', codeUnitBox], '生成するコードの範囲を指定します。'),
-        tip(['列数: ', codeColsBox], '1 行に詰め込む要素数を指定します。'),
-        tip(['インデント: ', indentBox],
-            'インデントの形式とサイズを指定します。'),
-        copyButton,
-      ]),
-      codeBox,
-      codeHiddenBox,
-      codeErrorBox,
-    ]);
-
-    container.appendChild(section);
-    const buttonParent = parentLiOf(copyButton);
-    buttonParent.style.float = 'right';
-    buttonParent.style.marginRight = '0';
-    buttonParent.style.paddingRight = '0';
-    buttonParent.style.borderRight = 'none';
-
+  const codeGenSections = [encodeSection, codeGenSection];
+  for (const section of codeGenSections) {
     section.querySelectorAll('input, select').forEach((el) => {
       el.addEventListener('change', () => {
         requestGenerateCode();
@@ -896,7 +636,7 @@ async function onLoad() {
   hiddenFileBox.addEventListener('change', async (e) => {
     const input = e.target as HTMLInputElement;
     if (input.files && input.files[0]) {
-      await loadFromFile(input.files[0]);
+      await loadFromFile(input.files[0].name, input.files[0]);
     }
   });
 
@@ -908,7 +648,7 @@ async function onLoad() {
       if (item.kind === 'file') {
         e.preventDefault();
         e.stopPropagation();
-        show(dropTarget);
+        Ui.show(dropTarget);
         break;
       }
     }
@@ -916,17 +656,18 @@ async function onLoad() {
   dropTarget.addEventListener('dragleave', (e) => {
     e.preventDefault();
     e.stopPropagation();
-    hide(dropTarget);
+    Ui.hide(dropTarget);
   });
   dropTarget.addEventListener('drop', async (e) => {
     if (!e.dataTransfer) return;
-    hide(dropTarget);
+    Ui.hide(dropTarget);
     const items = e.dataTransfer.items;
     for (const item of items) {
       if (item.kind === 'file') {
         e.preventDefault();
         e.stopPropagation();
-        await loadFromFile(item.getAsFile() as File);
+        const file = item.getAsFile() as File;
+        await loadFromFile(file.name, file);
         break;
       }
     }
@@ -940,7 +681,8 @@ async function onLoad() {
       if (item.kind === 'file') {
         e.preventDefault();
         e.stopPropagation();
-        await loadFromFile(item.getAsFile() as File);
+        const file = item.getAsFile() as File;
+        await loadFromFile(file.name, file);
         break;
       }
     }
@@ -996,7 +738,7 @@ async function onLoad() {
           break;
       }
       requestUpdateTrimCanvas();
-      requestQuantize();
+      requestColorReduction();
     }
   });
   trimCanvas.addEventListener('pointerdown', (e) => {
@@ -1027,71 +769,42 @@ async function onLoad() {
     resetTrim();
   });
 
-  // コードのコピー
-  copyButton.addEventListener('click', () => {
-    if (!codeBox.textContent) return;
-    navigator.clipboard.writeText(codeBox.textContent);
-  });
-
-  if (window.location.hash === '#detail') {
-    showPro();
-  } else {
-    hidePro();
-  }
+  proModeCheckBox.checked = (window.location.hash === '#detail');
+  onProModeChanged();
 
   // サンプルのロード
-  await loadFromString('./img/sample/gradient.png');
+  loadPreset(Configs.presets['rgb565_be']);
+  await loadFromString('gradient', './img/sample/gradient.png');
 
   onRelayout();
 }  // main
 
 function onAlphaProcChanged() {
-  hide(parentLiOf(backColorBox));
-  hide(parentLiOf(keyColorBox));
-  hide(parentLiOf(keyToleranceBox));
-  hide(parentLiOf(alphaThreshBox));
-  const alphaProc: Preproc.AlphaProc = parseInt(alphaProcBox.value);
+  Ui.hide(Ui.parentLiOf(backColorBox));
+  Ui.hide(Ui.parentLiOf(keyColorBox));
+  Ui.hide(Ui.parentLiOf(keyToleranceBox));
+  Ui.hide(Ui.parentLiOf(alphaThreshBox));
+  const alphaProc: Preproc.AlphaMode = parseInt(alphaModeBox.value);
   switch (alphaProc) {
-    case Preproc.AlphaProc.FILL:
-      show(parentLiOf(backColorBox));
+    case Preproc.AlphaMode.FILL:
+      Ui.show(Ui.parentLiOf(backColorBox));
       break;
-    case Preproc.AlphaProc.SET_KEY_COLOR:
-      show(parentLiOf(keyColorBox));
-      show(parentLiOf(keyToleranceBox));
+    case Preproc.AlphaMode.SET_KEY_COLOR:
+      Ui.show(Ui.parentLiOf(keyColorBox));
+      Ui.show(Ui.parentLiOf(keyToleranceBox));
       break;
-    case Preproc.AlphaProc.BINARIZE:
-      show(parentLiOf(alphaThreshBox));
+    case Preproc.AlphaMode.BINARIZE:
+      Ui.show(Ui.parentLiOf(alphaThreshBox));
       break;
   }
 }
 
-function showPro(): void {
-  document.querySelectorAll('.professional').forEach((el) => {
-    show(el as HTMLElement);
-    onRelayout();
-  });
-  document.querySelectorAll('.basic').forEach((el) => {
-    hide(el as HTMLElement);
-    onRelayout();
-  });
-  updateTrimCanvas();
-}
-
-function hidePro(): void {
-  document.querySelectorAll('.professional').forEach((el) => {
-    hide(el as HTMLElement);
-  });
-  document.querySelectorAll('.basic').forEach((el) => {
-    show(el as HTMLElement);
-  });
-}
-
-async function loadFromFile(file: File): Promise<void> {
+async function loadFromFile(name: string, file: File): Promise<void> {
   return new Promise<void>((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = async (e) => {
       if (e.target && typeof e.target.result === 'string') {
-        await loadFromString(e.target.result);
+        await loadFromString(name, e.target.result);
       } else {
         throw new Error('Invalid image data');
       }
@@ -1104,10 +817,14 @@ async function loadFromFile(file: File): Promise<void> {
   });
 }
 
-async function loadFromString(s: string): Promise<void> {
+async function loadFromString(
+    fileName: string, blobStr: string): Promise<void> {
+  inputFileName = DEFAULT_INPUT_FILE_NAME;
   return new Promise<void>((resolve, reject) => {
     const img = new Image();
     img.onload = () => {
+      inputFileName = fileName;
+
       origCanvas.width = img.width;
       origCanvas.height = img.height;
       const ctx = origCanvas.getContext('2d', {willReadFrequently: true});
@@ -1117,15 +834,17 @@ async function loadFromString(s: string): Promise<void> {
       }
       ctx.clearRect(0, 0, img.width, img.height);
       ctx.drawImage(img, 0, 0);
+
+      keepShowLongCode = false;
       resetTrim();
-      convert();
+      reduceColor();
       requestUpdateTrimCanvas();
       resolve();
     };
     img.onerror = () => {
       reject(new Error('Failed to load image'));
     };
-    img.src = s;
+    img.src = blobStr;
   });
 }
 
@@ -1136,7 +855,7 @@ function resetTrim(): void {
   trimR = origCanvas.width;
   trimB = origCanvas.height;
   requestUpdateTrimCanvas();
-  requestQuantize();
+  requestColorReduction();
 }
 
 // トリミングUIのビュー領域の取得
@@ -1201,9 +920,6 @@ function updateTrimCanvas(): void {
   const canvasW = trimCanvas.width;
   const canvasH = trimCanvas.height;
 
-  const origW = origCanvas.width;
-  const origH = origCanvas.height;
-
   const view = getTrimViewArea();
 
   if (trimUiState == TrimState.IDLE) {
@@ -1262,7 +978,7 @@ function updateTrimCanvas(): void {
   }
 }
 
-function loadPreset(preset: Preset): void {
+function loadPreset(preset: Configs.Config): void {
   pixelFormatBox.value = preset.format.toString();
   channelOrderBox.value = preset.channelOrder.toString();
   farPixelFirstBox.value = preset.farPixelFirst ? '1' : '0';
@@ -1272,17 +988,78 @@ function loadPreset(preset: Preset): void {
   alignBoundaryBox.value = preset.alignBoundary.toString();
   leftAlignBox.checked = preset.alignLeft;
   vertAddrBox.checked = preset.vertAddr;
-  requestQuantize();
+
+  // パレットのロード
+  paletteTable.innerHTML = '';
+  if (preset.palette) {
+    for (let i = 0; i < 256; i++) {
+      if (i < preset.palette.length) {
+        paletteColor[i] = preset.palette[i];
+        paletteEnabled[i] = true;
+      } else {
+        paletteEnabled[i] = false;
+      }
+    }
+    const headerTr = document.createElement('tr');
+    for (let i = 0; i < preset.palette.length; i++) {
+      const th = document.createElement('th');
+      th.textContent = i.toString();
+      headerTr.appendChild(th);
+    }
+    const colorTr = document.createElement('tr');
+    for (let i = 0; i < preset.palette.length; i++) {
+      const {r, g, b} = Colors.rgbU32ToU8(preset.palette[i]);
+      const colorStr = Colors.rgbToHexStr(preset.palette[i]);
+      const td = document.createElement('td');
+      td.textContent = colorStr;
+      td.style.backgroundColor = colorStr;
+      if (r + g + b < 384) {
+        td.style.color = '#FFF';
+      } else {
+        td.style.color = '#000';
+      }
+      colorTr.appendChild(td);
+    }
+    paletteTable.appendChild(headerTr);
+    paletteTable.appendChild(colorTr);
+  }
+
+  // プレーン設定のロード
+  for (const [key, value] of Object.entries(planeUis)) {
+    value.dispose();
+  }
+  planeUis = {};
+  planeSelectBox.innerHTML = '';
+  for (const planeCfg of preset.planeCfgs) {
+    const planeUi = new PlaneUi(planeCfg);
+    planeUis[planeCfg.id] = planeUi;
+    Ui.hide(planeUi.container);
+    planeGroupBody.appendChild(planeUi.container);
+    const option = document.createElement('option');
+    option.value = planeCfg.id;
+    option.textContent = planeCfg.id + ' プレーン';
+    planeSelectBox.appendChild(option);
+  }
+  (planeSelectBox.firstChild as HTMLOptionElement).selected = true;
+  onSelectedPlaneChanged();
+
+  requestColorReduction();
 }
 
-function requestQuantize(): void {
+function onSelectedPlaneChanged() {
+  for (const [key, value] of Object.entries(planeUis)) {
+    Ui.setVisible(value.container, key === planeSelectBox.value);
+  }
+}
+
+function requestColorReduction(): void {
   if (quantizeTimeoutId >= 0) return;
   quantizeTimeoutId = setTimeout(() => {
-    convert();
+    reduceColor();
   }, 100);
 }
 
-function convert(): void {
+function reduceColor(): void {
   reducedImage = null;
 
   if (quantizeTimeoutId >= 0) {
@@ -1294,9 +1071,45 @@ function convert(): void {
 
   try {
     let outW = -1, outH = -1;
-    let norm: NormalizedImage;
+    let norm: Images.NormalizedImage;
 
-    const fmt = new PixelFormatInfo(parseInt(pixelFormatBox.value));
+    const fmt = new Images.PixelFormatInfo(parseInt(pixelFormatBox.value));
+
+    // 丸めの方法
+    let roundMethod: RoundMethod = RoundMethod.NEAREST;
+    {
+      let maxChannelDepth = 0;
+      for (const depth of fmt.colorBits) {
+        if (depth > maxChannelDepth) {
+          maxChannelDepth = depth;
+        }
+      }
+
+      // 丸め方法の選択はチャンネル深度が 2bit 以上のときのみ有効
+      if (maxChannelDepth > 1 && !fmt.isIndexed) {
+        Ui.show(Ui.parentLiOf(roundMethodBox));
+        roundMethod = parseInt(roundMethodBox.value);
+      } else {
+        Ui.hide(Ui.parentLiOf(roundMethodBox));
+      }
+    }
+
+    // パレットの作成
+    let palette: Palette;
+    if (fmt.isIndexed) {
+      const indexedPalette = new IndexedPalette(fmt.colorBits, fmt.indexBits);
+      palette = indexedPalette;
+      const numColors = (1 << indexedPalette.indexBits);
+      for (let i = 0; i < numColors; i++) {
+        const {r, g, b} = Colors.rgbU32ToF32(paletteColor[i]);
+        indexedPalette.colors[i * 3 + 0] = r;
+        indexedPalette.colors[i * 3 + 1] = g;
+        indexedPalette.colors[i * 3 + 2] = b;
+        indexedPalette.enabled[i] = paletteEnabled[i];
+      }
+    } else {
+      palette = new FixedPalette(fmt.colorBits, roundMethod);
+    }
 
     // 前処理
     {
@@ -1332,22 +1145,23 @@ function convert(): void {
         if (widthBox.value && heightBox.value) {
           outW = parseInt(widthBox.value);
           outH = parseInt(heightBox.value);
-          show(parentLiOf(scalingMethodBox));
+          Ui.show(Ui.parentLiOf(scalingMethodBox));
         } else if (widthBox.value) {
           outW = parseInt(widthBox.value);
           outH = Math.max(1, Math.round(trimH * (outW / trimW)));
-          hide(parentLiOf(scalingMethodBox));
+          Ui.hide(Ui.parentLiOf(scalingMethodBox));
         } else if (heightBox.value) {
           outH = parseInt(heightBox.value);
           outW = Math.max(1, Math.round(trimW * (outH / trimH)));
-          hide(parentLiOf(scalingMethodBox));
+          Ui.hide(Ui.parentLiOf(scalingMethodBox));
         } else {
-          if (outW > 256 || outH > 256) {
-            const scale = Math.min(256 / outW, 256 / outH);
+          const MAX_SIZE = 512;
+          if (outW > MAX_SIZE || outH > MAX_SIZE) {
+            const scale = Math.min(MAX_SIZE / outW, MAX_SIZE / outH);
             outW = Math.floor(outW * scale);
             outH = Math.floor(outH * scale);
           }
-          hide(parentLiOf(scalingMethodBox));
+          Ui.hide(Ui.parentLiOf(scalingMethodBox));
         }
 
         if (outW < 1 || outH < 1) {
@@ -1373,16 +1187,16 @@ function convert(): void {
 
       // 画像補正系のパラメータ決定
       {
-        args.alphaProc = parseInt(alphaProcBox.value);
+        args.alphaProc = parseInt(alphaModeBox.value);
         args.alphaThresh = parseInt(alphaThreshBox.value);
         if (keyColorBox.value) {
-          args.keyColor = hexToRgb(keyColorBox.value);
+          args.keyColor = Colors.hexStrToRgb(keyColorBox.value);
         }
         if (keyToleranceBox.value) {
           args.keyTolerance = parseInt(keyToleranceBox.value);
         }
         if (backColorBox.value) {
-          args.backColor = hexToRgb(backColorBox.value);
+          args.backColor = Colors.hexStrToRgb(backColorBox.value);
         }
         if (hueBox.value && fmt.numColorChannels > 1) {
           args.hue = parseFloat(hueBox.value) / 360;
@@ -1408,8 +1222,105 @@ function convert(): void {
         args.invert = invertBox.checked;
       }
 
-      setVisible(parentLiOf(hueBox), fmt.numColorChannels > 1);
-      setVisible(parentLiOf(saturationBox), fmt.numColorChannels > 1);
+      Ui.setVisible(paletteSection, fmt.isIndexed);
+
+      if (fmt.isIndexed) {
+        args.csrMode = parseInt(csrModeBox.value);
+        args.csrHslRange = palette.getHslRange();
+
+        Ui.setVisible(
+            Ui.parentLiOf(csrHueToleranceBox),
+            args.csrMode == Preproc.ColorSpaceReductionMode.CLIP);
+
+        if (args.csrMode == Preproc.ColorSpaceReductionMode.CLIP) {
+          args.csrHueTolerance = parseFloat(csrHueToleranceBox.value) / 360;
+        } else if (args.csrMode == Preproc.ColorSpaceReductionMode.TRANSFORM) {
+          // パレット内の色を RGB 空間の四隅に割り当てる
+          const indexedPalette = palette as IndexedPalette;
+          const numColors = 1 << indexedPalette.indexBits;
+          const vecs = [[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1]];
+          let remainingVecIndexes:
+              {[key: number]: boolean} = {0: true, 1: true, 2: true, 3: true};
+          let mappedVecIndices: {[key: number]: number} = {};
+          let mappedPalIndices: {[key: number]: number} = {};
+          while (Object.keys(remainingVecIndexes).length > 0) {
+            let bestPalIndex = -1;
+            let bestVecIndex = -1;
+            let bestDist = 999;
+            for (const ivStr in remainingVecIndexes) {
+              const iv = parseInt(ivStr);
+              const vr = vecs[iv][0];
+              const vg = vecs[iv][1];
+              const vb = vecs[iv][2];
+              for (let ip = 0; ip < numColors; ip++) {
+                if (!indexedPalette.enabled[ip]) continue;
+                const pr = indexedPalette.colors[ip * 3 + 0];
+                const pg = indexedPalette.colors[ip * 3 + 1];
+                const pb = indexedPalette.colors[ip * 3 + 2];
+                const dist = Math.abs(pr - vr) * 0.299 +
+                    Math.abs(pg - vg) * 0.587 + Math.abs(pb - vb) * 0.114;
+                if (dist < bestDist && !(ip in mappedPalIndices)) {
+                  bestDist = dist;
+                  bestPalIndex = ip;
+                  bestVecIndex = iv;
+                }
+              }
+            }
+
+            if (bestVecIndex >= 0) {
+              mappedVecIndices[bestVecIndex] = bestPalIndex;
+              mappedPalIndices[bestPalIndex] = bestVecIndex;
+              delete remainingVecIndexes[bestVecIndex];
+            } else {
+              throw new Error('色空間の圧縮には 4 色以上が必要です');
+            }
+          }
+
+          const io = mappedVecIndices[0];
+          const ir = mappedVecIndices[1];
+          const ig = mappedVecIndices[2];
+          const ib = mappedVecIndices[3];
+          const o0 = indexedPalette.colors[io * 3 + 0];
+          const o1 = indexedPalette.colors[io * 3 + 1];
+          const o2 = indexedPalette.colors[io * 3 + 2];
+          const r0 = indexedPalette.colors[ir * 3 + 0] - o0;
+          const r1 = indexedPalette.colors[ir * 3 + 1] - o1;
+          const r2 = indexedPalette.colors[ir * 3 + 2] - o2;
+          const g0 = indexedPalette.colors[ig * 3 + 0] - o0;
+          const g1 = indexedPalette.colors[ig * 3 + 1] - o1;
+          const g2 = indexedPalette.colors[ig * 3 + 2] - o2;
+          const b0 = indexedPalette.colors[ib * 3 + 0] - o0;
+          const b1 = indexedPalette.colors[ib * 3 + 1] - o1;
+          const b2 = indexedPalette.colors[ib * 3 + 2] - o2;
+
+          const dr = Math.sqrt(r0 * r0 + r1 * r1 + r2 * r2) * Math.sqrt(3);
+          const dg = Math.sqrt(g0 * g0 + g1 * g1 + g2 * g2) * Math.sqrt(3);
+          const db = Math.sqrt(b0 * b0 + b1 * b1 + b2 * b2) * Math.sqrt(3);
+
+          const mat = new Float32Array([
+            r0 / dr,
+            g0 / dg,
+            b0 / db,
+            o0,
+            r1 / dr,
+            g1 / dg,
+            b1 / db,
+            o1,
+            r2 / dr,
+            g2 / dg,
+            b2 / db,
+            o2,
+          ]);
+
+          args.csrTransformMatrix = mat;
+        }
+      } else {
+        args.csrMode = Preproc.ColorSpaceReductionMode.NONE;
+        Ui.hide(Ui.parentLiOf(csrHueToleranceBox));
+      }
+
+      Ui.setVisible(Ui.parentLiOf(hueBox), fmt.numColorChannels > 1);
+      Ui.setVisible(Ui.parentLiOf(saturationBox), fmt.numColorChannels > 1);
 
       // 前処理実行
       Preproc.process(args);
@@ -1424,42 +1335,21 @@ function convert(): void {
 
     // 減色の適用
     {
-      let maxChannelDepth = 0;
-      let roundMethod: RoundMethod = RoundMethod.NEAREST;
-      for (const depth of fmt.colorBits) {
-        if (depth > maxChannelDepth) {
-          maxChannelDepth = depth;
-        }
-      }
-      if (maxChannelDepth > 1) {
-        show(parentLiOf(roundMethodBox));
-        roundMethod = parseInt(roundMethodBox.value);
-      } else {
-        // 均等割りはチャンネル深度が2以上でないと意味がないので無効化
-        hide(parentLiOf(roundMethodBox));
-      }
-
-
       const numPixels = outW * outH;
-      const numAllCh = fmt.numTotalChannels;
-      const numColCh = fmt.numColorChannels;
-
 
       // 減色方法の決定
       let minColBits = 999;
       for (const bits of fmt.colorBits) {
         if (bits < minColBits) minColBits = bits;
       }
-      const colReduce = (minColBits < 8);
+      const colReduce = (minColBits < 8) || fmt.isIndexed;
       const alpReduce = fmt.hasAlpha && (fmt.alphaBits < 8);
       const colDither: DitherMethod =
           colReduce ? parseInt(colorDitherBox.value) : DitherMethod.NONE;
       const alpDither: DitherMethod =
           alpReduce ? parseInt(alphaDitherBox.value) : DitherMethod.NONE;
-      setVisible(parentLiOf(colorDitherBox), colReduce);
-      setVisible(parentLiOf(alphaDitherBox), alpReduce);
-
-      const palette = new FixedPalette(fmt.colorBits, roundMethod);
+      Ui.setVisible(Ui.parentLiOf(colorDitherBox), colReduce);
+      Ui.setVisible(Ui.parentLiOf(alphaDitherBox), alpReduce);
 
       // 減色
       const args = new Reducer.Arguments();
@@ -1489,8 +1379,8 @@ function convert(): void {
         ctx.putImageData(previewImageData, 0, 0);
       }
 
-      show(previewCanvas);
-      hide(quantizeErrorBox);
+      Ui.show(previewCanvas);
+      Ui.hide(reductionErrorBox);
 
       swDetail.lap('Update Preview');
 
@@ -1519,13 +1409,12 @@ function convert(): void {
     swDetail.lap('Fix Preview Size');
 
   } catch (error) {
-    hide(previewCanvas);
-    hide(codeBox);
-    hide(codeHiddenBox);
-    show(quantizeErrorBox);
+    Ui.hide(previewCanvas);
+    Ui.hide(codePlaneContainer);
+    Ui.show(reductionErrorBox);
     let e: Error;
 
-    quantizeErrorBox.textContent = `${error.stack}`;
+    reductionErrorBox.textContent = `${error.stack}`;
   }
 }
 
@@ -1543,17 +1432,16 @@ function generateCode(): void {
   const swDetail = new StopWatch(false);
 
   if (!reducedImage) {
-    codeBox.textContent = '';
-    show(codeBox);
-    hide(codeHiddenBox);
-    hide(codeErrorBox);
+    codeErrorBox.textContent = 'まだコードは生成されていません。';
+    Ui.show(codePlaneContainer);
+    Ui.show(codeErrorBox);
     return;
   }
   let blobs: ArrayBlob[] = [];
 
 
   try {
-    const args = new Encoder.ImageArgs();
+    const args = new Encoder.EncodeArgs();
     args.src = reducedImage;
     const chOrder: ChannelOrder = parseInt(channelOrderBox.value);
     switch (chOrder) {
@@ -1576,15 +1464,37 @@ function generateCode(): void {
       default:
         throw new Error('Unsupported channel order');
     }
-    const plane = new Encoder.PlaneArgs();
-    plane.farPixelFirst = parseInt(farPixelFirstBox.value) == 1;
-    plane.bigEndian = bigEndianBox.checked;
-    plane.packUnit = parseInt(packUnitBox.value);
-    plane.vertPack = vertPackBox.checked;
-    plane.alignBoundary = parseInt(alignBoundaryBox.value);
-    plane.alignLeft = leftAlignBox.checked;
-    plane.vertAddr = vertAddrBox.checked;
-    args.planes.push(plane);
+
+    // プレーンの定義
+    for (const [id, planeUi] of Object.entries(planeUis)) {
+      const plane = new Encoder.PlaneArgs();
+
+      plane.id = id;
+      plane.type = parseInt(planeUi.planeTypeBox.value);
+
+      const indexMatchMode = (plane.type == Encoder.PlaneType.INDEX_MATCH);
+      if (indexMatchMode) {
+        plane.indexMatchValue = parseInt(planeUi.matchIndexBox.value);
+        plane.postInvert = planeUi.matchInvertBox.checked;
+      }
+      Ui.setVisible(Ui.parentLiOf(planeUi.matchIndexBox), indexMatchMode);
+      Ui.setVisible(Ui.parentLiOf(planeUi.matchInvertBox), indexMatchMode);
+
+      // 以下は共通
+      plane.farPixelFirst = parseInt(farPixelFirstBox.value) == 1;
+      plane.bigEndian = bigEndianBox.checked;
+      plane.packUnit = parseInt(packUnitBox.value);
+      plane.vertPack = vertPackBox.checked;
+      plane.alignBoundary = parseInt(alignBoundaryBox.value);
+      plane.alignLeft = leftAlignBox.checked;
+      plane.vertAddr = vertAddrBox.checked;
+
+      args.planes.push(plane);
+    }
+
+    if (args.planes.length == 0) {
+      throw new Error('プレーンが定義されていません');
+    }
 
     Encoder.encode(args);
 
@@ -1592,15 +1502,21 @@ function generateCode(): void {
       blobs.push(plane.output.blob);
     }
 
-    setVisible(parentLiOf(leftAlignBox), plane.output.alignRequired);
-    setVisible(parentLiOf(channelOrderBox), plane.output.fields.length > 1);
-    setVisible(parentLiOf(farPixelFirstBox), plane.output.pixelsPerFrag > 1);
-    setVisible(parentLiOf(vertPackBox), plane.output.pixelsPerFrag > 1);
-    setVisible(parentLiOf(bigEndianBox), plane.output.bytesPerFrag > 1);
+    const firstPlane = args.planes[0];
+
+    Ui.setVisible(Ui.parentLiOf(leftAlignBox), firstPlane.output.alignRequired);
+    Ui.setVisible(
+        Ui.parentLiOf(channelOrderBox), firstPlane.output.fields.length > 1);
+    Ui.setVisible(
+        Ui.parentLiOf(farPixelFirstBox), firstPlane.output.pixelsPerFrag > 1);
+    Ui.setVisible(
+        Ui.parentLiOf(vertPackBox), firstPlane.output.pixelsPerFrag > 1);
+    Ui.setVisible(
+        Ui.parentLiOf(bigEndianBox), firstPlane.output.bytesPerFrag > 1);
+
     {
       const fmt = args.src.format;
-      const out = plane.output;
-      const numCh = out.fields.length;
+      const out = firstPlane.output;
 
       const numCols = out.bytesPerFrag * 8;
       const numRows = 3;
@@ -1647,7 +1563,8 @@ function generateCode(): void {
           ctx.fillText(iBit.toString(), x + colW / 2, pad + rowH + rowH / 2);
           if (iBit == 3) {
             const ib = Math.floor((numCols - 1 - i) / 8);
-            const iByte = plane.bigEndian ? (out.bytesPerFrag - 1 - ib) : ib;
+            const iByte =
+                firstPlane.bigEndian ? (out.bytesPerFrag - 1 - ib) : ib;
             ctx.fillText('Byte' + iByte.toString(), x, pad + rowH / 2);
           }
         }
@@ -1663,32 +1580,29 @@ function generateCode(): void {
       }
 
       // 各チャネルの色
-      let rgbColors: string[];
-      switch (fmt.colorSpace) {
-        case ColorSpace.GRAYSCALE:
-          rgbColors = ['rgba(255,255,255,0.8)'];
-          break;
-        case ColorSpace.RGB:
-          rgbColors = [
-            'rgba(255,128,128,0.8)',
-            'rgba(128,255,128,0.8)',
-            'rgba(128,160,255,0.8)',
-            'rgba(192,128,255,0.8)',
-          ];
-          break;
-        default:
-          throw new Error('Unknown color space');
+      let cellColors: string[];
+      if (firstPlane.type == Encoder.PlaneType.DIRECT && !fmt.isIndexed &&
+          fmt.colorSpace == ColorSpace.RGB) {
+        cellColors = [
+          'rgba(255,128,128,0.8)',
+          'rgba(128,255,128,0.8)',
+          'rgba(128,160,255,0.8)',
+          'rgba(192,128,255,0.8)',
+        ];
+      } else {
+        cellColors = ['rgba(255,255,255,0.8)'];
       }
 
       // チャネルの描画
       for (let ip = 0; ip < out.pixelsPerFrag; ip++) {
-        const iPix = plane.farPixelFirst ? (out.pixelsPerFrag - 1 - ip) : ip;
+        const iPix =
+            firstPlane.farPixelFirst ? (out.pixelsPerFrag - 1 - ip) : ip;
         for (const field of out.fields) {
           const r = pad + tableW - (ip * out.pixelStride + field.pos) * colW;
           const w = field.width * colW;
           const x = r - w;
           const y = pad + tableH - rowH;
-          ctx.fillStyle = rgbColors[field.srcChannel];
+          ctx.fillStyle = cellColors[field.srcChannel];
           ctx.fillRect(x, y, w, rowH);
 
           ctx.strokeStyle = '#000';
@@ -1697,28 +1611,37 @@ function generateCode(): void {
           ctx.fillStyle = '#000';
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
-          const label = fmt.channelName(field.srcChannel) +
-              (out.pixelsPerFrag > 1 ? iPix : '');
+          let label: string;
+          if (firstPlane.type == Encoder.PlaneType.INDEX_MATCH) {
+            label = 'C';
+          } else if (fmt.isIndexed) {
+            label = 'Index';
+          } else {
+            label = fmt.channelName(field.srcChannel);
+          }
+          if (out.pixelsPerFrag > 1) {
+            label += iPix.toString();
+          }
           const mtx = ctx.measureText(label);
           ctx.fillText(label, x + w / 2, y + rowH / 2);
         }
       }
     }
-    show(structCanvas);
-    hide(structErrorBox);
+    Ui.show(structCanvas);
+    Ui.hide(structErrorBox);
   } catch (error) {
-    hide(structCanvas);
-    show(structErrorBox);
+    Ui.hide(structCanvas);
+    Ui.show(structErrorBox);
     structErrorBox.textContent = `${error.stack}`;
-    codeBox.textContent = '';
-    show(codeBox);
-    hide(codeHiddenBox);
-    hide(codeErrorBox);
+    codeErrorBox.textContent = 'エンコードのエラーを解消してください。';
+    Ui.hide(codePlaneContainer);
+    Ui.show(codeErrorBox);
     return;
   }
 
   try {
-    const args = new CodeGen.Args();
+    const args = new CodeGen.CodeGenArgs();
+    args.name = inputFileName.split('.')[0].replaceAll(/[-\s]/g, '_');
     args.src = reducedImage;
     args.blobs = blobs;
     args.codeUnit = parseInt(codeUnitBox.value);
@@ -1727,47 +1650,63 @@ function generateCode(): void {
 
     CodeGen.generate(args);
 
-    const code = args.codes[0];
+    codePlaneContainer.innerHTML = '';
+    for (const code of args.codes) {
+      const copyButton = Ui.makeButton('コピー');
+      copyButton.style.float = 'right';
 
-    codeBox.textContent = code.code;
-    if (code.numLines < 1000) {
-      show(codeBox);
-      hide(codeHiddenBox);
-    } else {
-      showCodeLink.textContent = `表示する (${code.numLines} 行)`;
-      hide(codeBox);
-      show(codeHiddenBox);
+      const title = document.createElement('div');
+      title.classList.add('codePlaneTitle');
+      title.appendChild(document.createTextNode(code.name));
+      title.appendChild(copyButton);
+
+      const pre = document.createElement('pre');
+      pre.textContent = code.code;
+
+      const wrap = document.createElement('div');
+      wrap.classList.add('codePlane');
+      wrap.appendChild(title);
+      wrap.appendChild(pre);
+
+      if (code.numLines > 1000 && !keepShowLongCode) {
+        const showCodeLink = document.createElement('a');
+        showCodeLink.href = '#';
+        showCodeLink.textContent = `表示する (${code.numLines} 行)`;
+
+        const hiddenBox = document.createElement('div');
+        hiddenBox.classList.add('codeHiddenBox');
+        hiddenBox.style.textAlign = 'center';
+        hiddenBox.innerHTML =
+            `コードが非常に長いため非表示になっています。<br>`;
+        hiddenBox.appendChild(showCodeLink);
+
+        Ui.hide(pre);
+        wrap.appendChild(hiddenBox);
+
+        showCodeLink.addEventListener('click', (e) => {
+          e.preventDefault();
+          keepShowLongCode = true;
+          Ui.show(pre);
+          Ui.hide(hiddenBox);
+        });
+      }
+      codePlaneContainer.appendChild(wrap);
+
+      copyButton.addEventListener('click', () => {
+        if (!pre.textContent) return;
+        navigator.clipboard.writeText(pre.textContent);
+      });
     }
 
-    hide(codeErrorBox);
+    Ui.show(codePlaneContainer);
+    Ui.hide(codeErrorBox);
   } catch (error) {
     codeErrorBox.textContent = `${error.stack}`;
-    codeBox.textContent = '';
-    show(codeBox);
-    hide(codeHiddenBox);
-    hide(codeErrorBox);
+    Ui.hide(codePlaneContainer);
+    Ui.show(codeErrorBox);
   }
 
   swDetail.lap('UI Update');
-}
-
-function hexToRgb(hex: string): number {
-  if (hex.startsWith('#')) {
-    hex = hex.slice(1);
-  }
-  if (hex.length === 3) {
-    const r = parseInt(hex[0] + hex[0], 16);
-    const g = parseInt(hex[1] + hex[1], 16);
-    const b = parseInt(hex[2] + hex[2], 16);
-    return r | (g << 8) | (b << 16);
-  } else if (hex.length == 6) {
-    const r = parseInt(hex.slice(0, 2), 16);
-    const g = parseInt(hex.slice(2, 4), 16);
-    const b = parseInt(hex.slice(4, 6), 16);
-    return r | (g << 8) | (b << 16);
-  } else {
-    throw new Error('Invalid hex color');
-  }
 }
 
 function onRelayout() {

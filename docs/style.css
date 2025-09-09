@@ -92,8 +92,7 @@ li blockquote:first-child {
 }
 
 table {
-  margin-left: auto;
-  margin-right: auto;
+  margin: 10px auto;
   background: #fff;
   border-collapse: collapse;
   font-size: 80%;
@@ -119,20 +118,19 @@ th {
 }
 
 pre,
-code {
+code,
+.codePlaneTitle {
   font-family: Consolas, 'Courier New', Courier, monospace;
 }
 
 pre,
 .codeHiddenBox {
-  border: solid 1px #ccc;
-  box-sizing: border-box;
   padding: 1ex 1em;
   background: #f8f8f8;
 }
 
 pre {
-  max-height: 50vh;
+  max-height: 200px;
   min-height: 100px;
   overflow: scroll;
   font-size: 80%;
@@ -221,6 +219,24 @@ input[type="checkbox"] {
   padding: 0 10px;
 }
 
+.group {
+  box-sizing: border-box;
+  border: solid 1px #cde;
+  border-radius: 5px;
+  margin: 20px 10px 10px 10px;
+  padding: 00px 10px 10px 10px;
+}
+
+.groupTitle {
+  margin: -20px 0px 10px 0px;
+  line-height: 20px;
+}
+
+.groupBody {
+  margin: 0px;
+  padding: 0px;
+}
+
 .sampleImageButton {
   display: inline-block;
   width: 30px;
@@ -279,4 +295,37 @@ input[type="checkbox"] {
   color: #FFF;
   padding-top: calc(50vh - 2em);
   font-size: 30px;
+}
+
+.codePlane {
+  box-sizing: border-box;
+  margin: 10px;
+  border: solid 1px #cde;
+  border-radius: 5px;
+  overflow: hidden;
+}
+
+.codePlane pre {
+  margin: 0px;
+  padding: 5px;
+}
+
+.codePlaneTitle {
+  background: #cde;
+  height: 30px;
+  line-height: 30px;
+  padding: 0px 10px;
+}
+
+.codePlaneTitle::after {
+  content: "";
+  display: block;
+  clear: both;
+}
+
+.codePlaneTitle button {
+  height: 26px;
+  position: relative;
+  vertical-align: top;
+  top: 2px;
 }

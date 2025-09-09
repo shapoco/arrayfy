@@ -1,8 +1,10 @@
+import * as Colors from './Colors';
 import {Rect, Size} from './Geometries';
 import {ColorSpace, NormalizedImage} from './Images';
+import {Palette} from './Palettes';
 import {clip} from './Utils';
 
-export const enum AlphaProc {
+export const enum AlphaMode {
   KEEP,
   FILL,
   BINARIZE,
@@ -13,6 +15,13 @@ export const enum ScalingMethod {
   ZOOM,
   FIT,
   STRETCH,
+}
+
+export const enum ColorSpaceReductionMode {
+  NONE,
+  CLIP,
+  FOLD,
+  TRANSFORM,
 }
 
 export type ScalarParam = {
@@ -27,14 +36,22 @@ export class Args {
   public outImage: NormalizedImage;
   public colorSpace: ColorSpace;
   public scalingMethod: ScalingMethod = ScalingMethod.ZOOM;
-  public alphaProc: AlphaProc = AlphaProc.KEEP;
+
+  public alphaProc: AlphaMode = AlphaMode.KEEP;
   public alphaThresh: number = 128;
   public keyColor: number = 0x000000;
   public keyTolerance: number = 0;
   public backColor: number = 0x000000;
+
   public hue: number = 0;
   public saturation: number = 1;
   public lightness: number = 1;
+
+  public csrMode: ColorSpaceReductionMode = ColorSpaceReductionMode.NONE;
+  public csrHslRange: Colors.HslRange = new Colors.HslRange();
+  public csrHueTolerance: number = 60 / 360;
+  public csrTransformMatrix: Float32Array = new Float32Array(12);
+
   public gamma: ScalarParam = {value: 1, automatic: true};
   public brightness: ScalarParam = {value: 0, automatic: true};
   public contrast: ScalarParam = {value: 0, automatic: true};
@@ -52,7 +69,7 @@ export function process(args: Args): void {
     args.trimRect = rect;
   }
 
-  if (args.alphaProc == AlphaProc.SET_KEY_COLOR) {
+  if (args.alphaProc == AlphaMode.SET_KEY_COLOR) {
     // 滲みを防ぐためキーカラー処理はリサイズ前に行う
     applyKeyColor(src, args.srcSize, args.keyColor, args.keyTolerance);
   }
@@ -65,14 +82,14 @@ export function process(args: Args): void {
   const img = normalize(resized, args.outSize, args.colorSpace);
 
   // アルファチャンネルの補正
-  if (args.alphaProc == AlphaProc.BINARIZE) {
+  if (args.alphaProc == AlphaMode.BINARIZE) {
     binarizeAlpha(img, args.alphaThresh / 255);
-  } else if (args.alphaProc == AlphaProc.FILL) {
+  } else if (args.alphaProc == AlphaMode.FILL) {
     fillBackground(img, args.backColor);
   }
 
   // 色調補正
-  applyHSL(img, args.hue, args.saturation, args.lightness);
+  correctHSL(img, args.hue, args.saturation, args.lightness);
   args.gamma = correctGamma(img, args.gamma);
   args.brightness = offsetBrightness(img, args.brightness);
   args.contrast = correctContrast(img, args.contrast);
@@ -82,6 +99,19 @@ export function process(args: Args): void {
     for (let i = 0; i < img.color.length; i++) {
       img.color[i] = 1 - img.color[i];
     }
+  }
+
+  // 色空間の縮退
+  switch (args.csrMode) {
+    case ColorSpaceReductionMode.CLIP:
+      clipColorSpace(img, args.csrHslRange, args.csrHueTolerance);
+      break;
+    case ColorSpaceReductionMode.FOLD:
+      foldColorSpace(img, args.csrHslRange);
+      break;
+    case ColorSpaceReductionMode.TRANSFORM:
+      transformColorSpace(img, args.csrTransformMatrix);
+      break;
   }
 
   args.outImage = img;
@@ -164,9 +194,7 @@ function trim(
 
 function applyKeyColor(
     data: Uint8Array, size: Size, key: number, tol: number): void {
-  const keyR = key & 0xff;
-  const keyG = (key >> 8) & 0xff;
-  const keyB = (key >> 16) & 0xff;
+  const {r: keyR, g: keyG, b: keyB} = Colors.rgbU32ToU8(key);
   for (let y = 0; y < size.height; y++) {
     let i = y * size.width * 4;
     for (let x = 0; x < size.width; x++, i += 4) {
@@ -328,7 +356,7 @@ function normalize(
   for (let i = 0; i < numPixels; i++) {
     switch (colorSpace) {
       case ColorSpace.GRAYSCALE:
-        img.color[i] = grayscaleArrayU8(data, i * 4) / 255;
+        img.color[i] = Colors.grayscaleArrayU8(data, i * 4) / 255;
         break;
       case ColorSpace.RGB:
         img.color[i * 3 + 0] = data[i * 4 + 0] / 255;
@@ -343,29 +371,155 @@ function normalize(
   return img;
 }
 
-function applyHSL(img: NormalizedImage, h: number, s: number, l: number): void {
+function correctHSL(
+    img: NormalizedImage, hShift: number, sCoeff: number,
+    lCoeff: number): void {
   const numPixels = img.width * img.height;
   switch (img.colorSpace) {
     case ColorSpace.GRAYSCALE: {
-      if (l == 1) return;
+      if (lCoeff == 1) return;
       for (let i = 0; i < numPixels; i++) {
-        img.color[i] = clip(0, 1, img.color[i] * l);
+        img.color[i] = clip(0, 1, img.color[i] * lCoeff);
       }
     } break;
+
     case ColorSpace.RGB: {
-      if (h == 0 && s == 1 && l == 1) return;
-      const hsl = new Float32Array(3);
+      if (hShift == 0 && sCoeff == 1 && lCoeff == 1) return;
+
+      const hsl = new Float32Array(numPixels * 3);
+      Colors.rgbToHslArrayF32(img.color, 0, hsl, 0, numPixels);
       for (let i = 0; i < numPixels; i++) {
-        rgbToHsl(img.color, i * 3, hsl, 0);
-        const hMod = hsl[0] + h;
-        hsl[0] = hMod - Math.floor(hMod);
-        hsl[1] = clip(0, 1, hsl[1] * s);
-        hsl[2] = clip(0, 1, hsl[2] * l);
-        hslToRgb(hsl, 0, img.color, i * 3);
+        hsl[i * 3 + 0] = Colors.hueAdd(hsl[i * 3 + 0], hShift);
+        hsl[i * 3 + 1] = clip(0, 1, hsl[i * 3 + 1] * sCoeff);
+        hsl[i * 3 + 2] = clip(0, 1, hsl[i * 3 + 2] * lCoeff);
       }
+      Colors.hslToRgbArrayF32(hsl, 0, img.color, 0, numPixels);
     } break;
+
     default:
       throw new Error('Invalid color space');
+  }
+}
+
+function clipColorSpace(
+    img: NormalizedImage, hslRange: Colors.HslRange, hueTolerance: number) {
+  const hMin = Colors.hueWrap(hslRange.hMin);
+  const hRange = clip(0, 1, hslRange.hRange);
+  const sMin = clip(0, 1, hslRange.sMin);
+  const sMax = clip(sMin, 1, hslRange.sMax);
+  const lMin = clip(0, 1, hslRange.lMin);
+  const lMax = clip(lMin, 1, hslRange.lMax);
+  const hReduction = hRange < (1 - 1e-5);
+  const sReduction = sMin != 0 || sMax != 1;
+  const lReduction = lMin != 0 || lMax != 1;
+  const hslReduction = hReduction || sReduction || lReduction;
+
+  const numPixels = img.width * img.height;
+  switch (img.colorSpace) {
+    case ColorSpace.GRAYSCALE: {
+      if (!lReduction) return;
+      for (let i = 0; i < numPixels; i++) {
+        img.color[i] = clip(lMin, lMax, img.color[i]);
+      }
+    } break;
+
+    case ColorSpace.RGB: {
+      if (!hslReduction) return;
+      const hsl = new Float32Array(numPixels * 3);
+      Colors.rgbToHslArrayF32(img.color, 0, hsl, 0, numPixels);
+      for (let i = 0; i < numPixels; i++) {
+        let h = hsl[i * 3 + 0];
+        let s = hsl[i * 3 + 1];
+        let l = hsl[i * 3 + 2];
+        const hClipped = Colors.hueClip(hMin, hRange, h);
+        const hDiff = Math.abs(Colors.hueDiff(hClipped, h));
+        if (hDiff >= hueTolerance) {
+          s = 0;
+        } else {
+          s *= (1 - hDiff / hueTolerance);
+        }
+        hsl[i * 3 + 0] = hClipped;
+        hsl[i * 3 + 1] = clip(sMin, sMax, s);
+        hsl[i * 3 + 2] = clip(lMin, lMax, l);
+      }
+      Colors.hslToRgbArrayF32(hsl, 0, img.color, 0, numPixels);
+    } break;
+
+    default:
+      throw new Error('Invalid color space');
+  }
+}
+
+function foldColorSpace(img: NormalizedImage, hslRange: Colors.HslRange) {
+  const hMin = Colors.hueWrap(hslRange.hMin);
+  const hRange = clip(0, 1, hslRange.hRange);
+  const sMin = clip(0, 1, hslRange.sMin);
+  const sMax = clip(sMin, 1, hslRange.sMax);
+  const lMin = clip(0, 1, hslRange.lMin);
+  const lMax = clip(lMin, 1, hslRange.lMax);
+  const hReduction = hRange < (1 - 1e-5);
+  const sReduction = sMin != 0 || sMax != 1;
+  const lReduction = lMin != 0 || lMax != 1;
+  const hslReduction = hReduction || sReduction || lReduction;
+
+  const numPixels = img.width * img.height;
+  switch (img.colorSpace) {
+    case ColorSpace.GRAYSCALE: {
+      if (!lReduction) return;
+      for (let i = 0; i < numPixels; i++) {
+        let l = img.color[i];
+        l = lMin + (l - lMin) * (lMax - lMin);
+        img.color[i] = clip(0, 1, l);
+      }
+    } break;
+
+    case ColorSpace.RGB: {
+      if (!hslReduction) return;
+      const hHalfRange = hRange / 2;
+      const hCenter = Colors.hueAdd(hMin, hHalfRange);
+      const hsl = new Float32Array(numPixels * 3);
+      Colors.rgbToHslArrayF32(img.color, 0, hsl, 0, numPixels);
+      for (let i = 0; i < numPixels; i++) {
+        let h = hsl[i * 3 + 0];
+        let s = hsl[i * 3 + 1];
+        let l = hsl[i * 3 + 2];
+        if (hHalfRange == 0) {
+          h = hMin;
+        } else {
+          let hDist = Colors.hueDiff(h, hCenter);
+          if (hDist < -hHalfRange || hHalfRange < hDist) {
+            const sign = hDist < 0 ? -1 : 1;
+            hDist = Math.abs(hDist);
+            hDist = (0.5 - hDist) / (0.5 - hHalfRange);
+            hDist *= sign * hHalfRange;
+            h = Colors.hueAdd(hCenter, hDist);
+          }
+        }
+        l = lMin + (l - lMin) * (lMax - lMin);
+        s = sMin + (s - sMin) * (sMax - sMin);
+        hsl[i * 3 + 0] = h;
+        hsl[i * 3 + 1] = clip(0, 1, s);
+        hsl[i * 3 + 2] = clip(0, 1, l);
+      }
+      Colors.hslToRgbArrayF32(hsl, 0, img.color, 0, numPixels);
+    } break;
+
+    default:
+      throw new Error('Invalid color space');
+  }
+}
+
+function transformColorSpace(img: NormalizedImage, matrix: Float32Array) {
+  const numPixels = img.width * img.height;
+  switch (img.colorSpace) {
+    case ColorSpace.RGB: {
+      for (let i = 0; i < numPixels; i++) {
+        Colors.transformColor(matrix, img.color, i * 3);
+      }
+    } break;
+
+    default:
+      throw new Error('Invalid color space for transform');
   }
 }
 
@@ -376,7 +530,7 @@ function makeHistogramF32(
   const numCh = img.numColorChannels;
   for (let i = 0; i < numPixels; i++) {
     if (img.alpha[i] > 0) {
-      const gray = grayscaleArrayF32(img.color, i * numCh);
+      const gray = Colors.grayscaleArrayF32(img.color, i * numCh);
       histogram[Math.round(gray * (histogramSize - 1))]++;
     }
   }
@@ -424,12 +578,10 @@ function fillBackground(img: NormalizedImage, color: number) {
   const numCh = img.numColorChannels;
   let bk = new Float32Array(numCh);
 
-  const backR = (color & 0xff) / 255;
-  const backG = ((color >> 8) & 0xff) / 255;
-  const backB = ((color >> 16) & 0xff) / 255;
+  const {r: backR, g: backG, b: backB} = Colors.rgbU32ToF32(color);
   switch (img.colorSpace) {
     case ColorSpace.GRAYSCALE:
-      bk[0] = grayscale(backR, backG, backB);
+      bk[0] = Colors.grayscale(backR, backG, backB);
       break;
     case ColorSpace.RGB:
       bk[0] = backR;
@@ -507,7 +659,7 @@ function getColorMinMax(img: NormalizedImage): {min: number, max: number} {
   let max = -9999;
   for (let i = 0; i < numPixels; i++) {
     if (img.alpha[i] > 0) {
-      const gray = grayscaleArrayF32(img.color, i * numCh);
+      const gray = Colors.grayscaleArrayF32(img.color, i * numCh);
       min = Math.min(min, gray);
       max = Math.max(max, gray);
     }
@@ -517,96 +669,4 @@ function getColorMinMax(img: NormalizedImage): {min: number, max: number} {
   } else {
     return {min: 0.5, max: 0.5};
   }
-}
-
-function grayscale(r: number, g: number, b: number): number {
-  return 0.299 * r + 0.587 * g + 0.114 * b;
-}
-
-function grayscaleArrayF32(data: Float32Array, offset: number): number {
-  return grayscale(data[offset], data[offset + 1], data[offset + 2]);
-}
-
-function grayscaleArrayU8(data: Uint8Array, offset: number): number {
-  return grayscale(data[offset], data[offset + 1], data[offset + 2]);
-}
-
-function rgbToHsl(
-    src: Float32Array, srcOffset: number, dest: Float32Array,
-    destOffset: number): void {
-  const r = src[srcOffset];
-  const g = src[srcOffset + 1];
-  const b = src[srcOffset + 2];
-  const max = Math.max(r, g, b);
-  const min = Math.min(r, g, b);
-  let h = 0, s = 0, l = (max + min) / 2;
-  if (max != min) {
-    const d = max - min;
-    s = d;
-    // s = (max - min) / (1 - Math.abs(2 * l - 1));
-    switch (max) {
-      case r:
-        h = (g - b) / d + (g < b ? 6 : 0);
-        break;
-      case g:
-        h = (b - r) / d + 2;
-        break;
-      case b:
-        h = (r - g) / d + 4;
-        break;
-    }
-  }
-  h /= 6;
-  dest[destOffset] = h;
-  dest[destOffset + 1] = s;
-  dest[destOffset + 2] = l;
-}
-
-function hslToRgb(
-    src: Float32Array, srcOffset: number, dest: Float32Array,
-    destOffset: number): void {
-  let h = src[srcOffset];
-  let s = src[srcOffset + 1];
-  let l = src[srcOffset + 2];
-  let r: number, g: number, b: number;
-
-  if (s == 0) {
-    r = g = b = l;  // achromatic
-  } else {
-    // const p = s * (1 - Math.abs(2 * l - 1)) / 2;
-    const p = s / 2;
-    const max = l + p;
-    const min = l - p;
-    h -= Math.floor(h);
-    h *= 6;
-    if (h < 1) {
-      r = max;
-      g = min + (max - min) * h;
-      b = min;
-    } else if (h < 2) {
-      r = min + (max - min) * (2 - h);
-      g = max;
-      b = min;
-    } else if (h < 3) {
-      r = min;
-      g = max;
-      b = min + (max - min) * (h - 2);
-    } else if (h < 4) {
-      r = min;
-      g = min + (max - min) * (4 - h);
-      b = max;
-    } else if (h < 5) {
-      r = min + (max - min) * (h - 4);
-      g = min;
-      b = max;
-    } else {
-      r = max;
-      g = min;
-      b = min + (max - min) * (6 - h);
-    }
-  }
-
-  dest[destOffset] = r;
-  dest[destOffset + 1] = g;
-  dest[destOffset + 2] = b;
 }

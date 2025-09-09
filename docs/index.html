@@ -34,10 +34,10 @@
     }
   </script>
 
-  <link rel="stylesheet" href="./style.css?20250906224700" type="text/css">
+  <link rel="stylesheet" href="./style.css?20250909162200" type="text/css">
 
-  <link href="https://www.shapoco.net/navi/style.css?20250906224700" rel="stylesheet" type="text/css">
-  <script src="https://www.shapoco.net/navi/navi.js?20250906224700"></script>
+  <link href="https://www.shapoco.net/navi/style.css?20250909162200" rel="stylesheet" type="text/css">
+  <script src="https://www.shapoco.net/navi/navi.js?20250909162200"></script>
 
   <title>Arrayfy: 画像を配列に変換君 | シャポ庫</title>
 </head>
@@ -51,12 +51,15 @@
         <img src="./img/logo.svg" style="width: 150px; height: auto;">
       </p>
       <h1>Arrayfy: 画像を配列に変換君</h1>
-      <p style="text-align: center;">ver. 1.5</p>
+      <p style="text-align: center;">ver. 1.6</p>
 
       <div id="shpcstamp_wrap" style="text-align: center;"></div>
-      <script async src="./stamp/v1/widget.js?20250906224700"></script>
+      <script async src="./stamp/v1/widget.js?20250909162200"></script>
 
-      <h2>概要</h2>
+      <div id="arrayfyContainer"></div>
+      <script type="module" src="./index.mjs?20250909162200"></script>
+
+      <h2>これは何？</h2>
 
       <p>
         画像データを LCD や OLED 用の C/C++ 配列コードに変換するツールです。
@@ -76,10 +79,6 @@
       <p>
         一連の処理はブラウザ上で行われます。勝手にどこかへ送信されることはありません。
       </p>
-
-      <h2>はじめる</h2>
-      <div id="arrayfyContainer"></div>
-      <script type="module" src="./index.mjs?20250906224700"></script>
 
       <h2>利用規約・免責事項</h2>
       <ul>
@@ -120,13 +119,13 @@
           <td>LovyanGFX + ST7789</td>
         </tr>
         <tr>
-          <td class="nowrap">RGB555</td>
-          <td class="nowrap" style="text-align: center;"></td>
+          <td class="nowrap"><s>RGB555</s></td>
+          <td class="nowrap" style="text-align: center;">廃止</td>
           <td></td>
         </tr>
         <tr>
           <td class="nowrap">RGB444</td>
-          <td class="nowrap" style="text-align: center;">1.5</td>
+          <td class="nowrap" style="text-align: center;">1.6</td>
           <td>自作コード + ST7789</td>
         </tr>
         <tr>
@@ -136,7 +135,7 @@
         </tr>
         <tr>
           <td class="nowrap">RGB111</td>
-          <td class="nowrap" style="text-align: center;">1.5</td>
+          <td class="nowrap" style="text-align: center;">1.6</td>
           <td>自作コード + ILI9488</td>
         </tr>
         <tr>
@@ -151,13 +150,23 @@
         </tr>
         <tr>
           <td class="nowrap">B/W 横スキャン</td>
-          <td class="nowrap" style="text-align: center;">1.5</td>
+          <td class="nowrap" style="text-align: center;">1.6</td>
           <td>LovyanGFX + ST7789</td>
         </tr>
         <tr>
           <td class="nowrap">B/W 縦パック</td>
-          <td class="nowrap" style="text-align: center;">1.5</td>
+          <td class="nowrap" style="text-align: center;">1.6</td>
           <td>自作コード + SSD1306</td>
+        </tr>
+        <tr>
+          <td class="nowrap">黒白赤 (2plane)</td>
+          <td class="nowrap" style="text-align: center;">1.6</td>
+          <td>自作コード + SSD1680</td>
+        </tr>
+        <tr>
+          <td class="nowrap">黒白赤黄 (2bpp)</td>
+          <td class="nowrap" style="text-align: center;"></td>
+          <td></td>
         </tr>
       </table>
 
@@ -197,6 +206,11 @@
           <td class="nowrap" style="text-align: center;">1.5</td>
           <td class="nowrap" style="text-align: center;">2025/09/06</td>
           <td class="nowrap">UI改善、背景色とキーカラーのバグ修正、リファクタリング</td>
+        </tr>
+        <tr>
+          <td class="nowrap" style="text-align: center;">1.6</td>
+          <td class="nowrap" style="text-align: center;">2025/09/09</td>
+          <td class="nowrap">3色/4色 電子ペーパーに対応 (暫定)</td>
         </tr>
       </table>
 
