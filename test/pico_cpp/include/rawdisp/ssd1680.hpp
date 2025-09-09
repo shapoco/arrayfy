@@ -60,7 +60,7 @@ class SSD1680 : public CommandDataDisplay {
   };
 
   enum Plane {
-    PLANE_BLACK = 0,
+    PLANE_WHITE = 0,
     PLANE_RED = 1,
   };
 
@@ -199,7 +199,7 @@ class SSD1680 : public CommandDataDisplay {
 
   void writePixels(const void* data, size_t length, int plane) override {
     uint8_t cmd;
-    if (plane == PLANE_BLACK) {
+    if (plane == PLANE_WHITE) {
       cmd = static_cast<uint8_t>(Command::WRITE_RAM_BLACK);
     } else {
       cmd = static_cast<uint8_t>(Command::WRITE_RAM_RED);

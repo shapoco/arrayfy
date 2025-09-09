@@ -3,7 +3,7 @@
 #include <stdint.h>
 
 // 240x240px, RGB444
-// R:G:B, MSB First, Horizontal Packing, Big Endian, Horizontal Adressing
+// B:G:R, MSB First, Horizontal Packing, Big Endian, Horizontal Adressing
 // 86400 Bytes
 const uint8_t rgb444_be_240x240[] = {
   0xae, 0xfa, 0xdf, 0xae, 0xfa, 0xdf, 0xae, 0xfa, 0xdf, 0xae, 0xfa, 0xdf, 0xae, 0xfa, 0xdf, 0xae,

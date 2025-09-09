@@ -14,11 +14,9 @@
 
 #include "bmp/argb8888_le_240x240.hpp"
 #include "bmp/bw_hs_128x64.hpp"
-#include "bmp/bw_hs_152x296_k.hpp"
-#include "bmp/bw_hs_152x296_r.hpp"
 #include "bmp/bw_vs_128x64.hpp"
-#include "bmp/bw_vs_296x152_k.hpp"
-#include "bmp/bw_vs_296x152_r.hpp"
+#include "bmp/kwr_hs_152x296.hpp"
+#include "bmp/kwr_vs_296x152.hpp"
 #include "bmp/rgb111_480x320.hpp"
 #include "bmp/rgb444_be_240x240.hpp"
 
@@ -223,7 +221,7 @@ void test_ssd1306_lgfx() {
   LGFX_Sprite sprite1306(&lgfx1306);
 
   lgfx1306.begin();
-  lgfx1306.pushGrayscaleImage(0, 0, 128, 64, (uint8_t *)bwHs128x64,
+  lgfx1306.pushGrayscaleImage(0, 0, 128, 64, (uint8_t *)bw_hs_128x64,
                               color_depth_t::grayscale_1bit, 0xFFFFFFu,
                               0x000000u);
 
@@ -246,14 +244,18 @@ void test_ssd1680_raw(int rotation) {
   raw1680.init();
   raw1680.setWindow(0, 0, raw1680.width, raw1680.height);
   if ((rotation & 1) == 0) {
-    raw1680.writePixels((uint8_t *)bw_hs_152x296_k, sizeof(bw_hs_152x296_k),
-                        raw::SSD1680::Plane::PLANE_BLACK);
-    raw1680.writePixels((uint8_t *)bw_hs_152x296_r, sizeof(bw_hs_152x296_r),
+    raw1680.writePixels((uint8_t *)kwr_hs_152x296_white,
+                        sizeof(kwr_hs_152x296_white),
+                        raw::SSD1680::Plane::PLANE_WHITE);
+    raw1680.writePixels((uint8_t *)kwr_hs_152x296_red,
+                        sizeof(kwr_hs_152x296_red),
                         raw::SSD1680::Plane::PLANE_RED);
   } else {
-    raw1680.writePixels((uint8_t *)bw_vs_296x152_k, sizeof(bw_vs_296x152_k),
-                        raw::SSD1680::Plane::PLANE_BLACK);
-    raw1680.writePixels((uint8_t *)bw_vs_296x152_r, sizeof(bw_vs_296x152_r),
+    raw1680.writePixels((uint8_t *)kwr_vs_296x152_white,
+                        sizeof(kwr_vs_296x152_white),
+                        raw::SSD1680::Plane::PLANE_WHITE);
+    raw1680.writePixels((uint8_t *)kwr_vs_296x152_red,
+                        sizeof(kwr_vs_296x152_red),
                         raw::SSD1680::Plane::PLANE_RED);
   }
   raw1680.startUpdateDisplay();
