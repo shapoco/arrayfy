@@ -1161,24 +1161,26 @@ function trim(src, srcSize, trimRect, outSize, scalingMethod) {
 			}
 		} else if (scalingMethod == ScalingMethod.FIT) {
 			if (outAspect > trimAspect) {
-				destW = Math.max(1, Math.round(destH * outW / outH));
-				destX += Math.round((trimRect.width - destW) / 2);
+				trimW = Math.max(1, Math.round(trimH * outW / outH));
+				destW = trimRect.width;
+				destX = Math.round((trimW - trimRect.width) / 2);
 			} else if (outAspect < trimAspect) {
-				destH = Math.max(1, Math.round(destW * outH / outW));
-				destY += Math.round((trimRect.height - destH) / 2);
+				trimH = Math.max(1, Math.round(trimW * outH / outW));
+				destH = trimRect.height;
+				destY = Math.round((trimH - trimRect.height) / 2);
 			}
 		}
 	}
 	const out = new Uint8Array(trimW * trimH * 4);
 	const srcStride = srcW * 4;
 	const destStride = trimW * 4;
-	for (let i = 0; i < destH; i++) {
-		const srcY = trimY + i;
+	for (let y = 0; y < destH; y++) {
+		const srcY = trimY + y;
 		if (srcY < 0 || srcH <= srcY) continue;
 		let iSrc = srcY * srcStride + trimX * 4;
-		let iDest = (destY + i) * destStride + destX * 4;
-		for (let j = 0; j < destW; j++) {
-			const srcX = trimX + j;
+		let iDest = (destY + y) * destStride + destX * 4;
+		for (let x = 0; x < destW; x++) {
+			const srcX = trimX + x;
 			if (0 <= srcX && srcX < srcW) for (let c = 0; c < 4; c++) out[iDest++] = src[iSrc++];
 			else {
 				iDest += 4;
