@@ -71,30 +71,30 @@ class SSD1680 : public CommandDataDisplay {
           int rotation)
       : CommandDataDisplay(bus, cfg), busyPort(busyPort), rotation(rotation) {}
 
-  inline void writeCommand(Command cmd, const uint8_t* data, size_t size) {
+  inline void writeCommandArray(Command cmd, const uint8_t* data, size_t size) {
     bus.writeCommand(static_cast<uint8_t>(cmd), data, size);
   }
 
-  inline void writeCommand(Command cmd) { writeCommand(cmd, nullptr, 0); }
+  inline void writeCommand(Command cmd) { writeCommandArray(cmd, nullptr, 0); }
 
   inline void writeCommand(Command cmd, uint8_t p0) {
-    writeCommand(cmd, &p0, 1);
+    writeCommandArray(cmd, &p0, 1);
   }
 
   inline void writeCommand(Command cmd, uint8_t p0, uint8_t p1) {
     uint8_t params[] = {p0, p1};
-    writeCommand(cmd, params, sizeof(params));
+    writeCommandArray(cmd, params, sizeof(params));
   }
 
   inline void writeCommand(Command cmd, uint8_t p0, uint8_t p1, uint8_t p2) {
     uint8_t params[] = {p0, p1, p2};
-    writeCommand(cmd, params, sizeof(params));
+    writeCommandArray(cmd, params, sizeof(params));
   }
 
   inline void writeCommand(Command cmd, uint8_t p0, uint8_t p1, uint8_t p2,
                            uint8_t p3) {
     uint8_t params[] = {p0, p1, p2, p3};
-    writeCommand(cmd, params, sizeof(params));
+    writeCommandArray(cmd, params, sizeof(params));
   }
 
   bool waitBusy() {
@@ -120,6 +120,7 @@ class SSD1680 : public CommandDataDisplay {
       gpio::write(resetPort, false);
       sleep_ms(10);
       gpio::write(resetPort, true);
+      sleep_ms(1);
       waitBusy();
     }
 

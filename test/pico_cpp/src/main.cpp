@@ -8,6 +8,7 @@
 #include "lgfx/lgfx_st7789.hpp"
 
 #include "rawdisp/ili9488.hpp"
+#include "rawdisp/ist7163.hpp"
 #include "rawdisp/ssd1306.hpp"
 #include "rawdisp/ssd1680.hpp"
 #include "rawdisp/st7789.hpp"
@@ -17,6 +18,7 @@
 #include "bmp/bw_vs_128x64.hpp"
 #include "bmp/kwr_hs_152x296.hpp"
 #include "bmp/kwr_vs_296x152.hpp"
+#include "bmp/kwry_hs_240x416.hpp"
 #include "bmp/rgb111_480x320.hpp"
 #include "bmp/rgb444_be_240x240.hpp"
 
@@ -26,7 +28,7 @@ namespace gpio = raw::gpio;
 using namespace lgfx;
 
 static constexpr uint32_t SPI_FREQ_SSD1680 = 10000000;
-static constexpr uint32_t SPI_FREQ_FAST = 40000000;
+static constexpr uint32_t SPI_FREQ_FAST = 10000000;
 static constexpr int SPI_SCK_PORT = 18;
 static constexpr int SPI_MOSI_PORT = 19;
 
@@ -44,6 +46,7 @@ void test_st7789_raw_rgb444();
 void test_ssd1306_raw();
 void test_ssd1306_lgfx();
 void test_ssd1680_raw(int rotation);
+void test_ist7163_raw(int rotation);
 bool i2cBusReset();
 
 int main(void) {
@@ -116,6 +119,10 @@ int main(void) {
 
       case 3:
         test_ili9488_raw_rgb111();
+        break;
+
+      case 13:
+        test_ist7163_raw(0);
         break;
 
       case 14:
@@ -260,6 +267,22 @@ void test_ssd1680_raw(int rotation) {
   }
   raw1680.startUpdateDisplay();
   raw1680.waitBusy();
+}
+
+void test_ist7163_raw(int rotation) {
+  raw::DisplayConfig cfg = {
+      .width = 240,
+      .height = 416,
+      .format = raw::PixelFormat::KR11,
+      .resetPort = 22,
+  };
+  raw::CommandDataSpi spi(spi0, 2, 8);
+  raw::IST7163 ist7163(cfg, spi, 1, 0, rotation);
+  spi.init();
+  ist7163.writePixels((uint8_t *)kwry_hs_240x416, sizeof(kwry_hs_240x416));
+  ist7163.startUpdateDisplay();
+  ist7163.waitBusy(); 
+  ist7163.powerOff();
 }
 
 bool i2cBusReset() {

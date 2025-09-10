@@ -854,8 +854,8 @@ const epd_kwry = (function() {
 	p.palette = new Uint32Array([
 		hexStrToRgb("#000"),
 		hexStrToRgb("#FFF"),
-		hexStrToRgb("#F00"),
-		hexStrToRgb("#FF0")
+		hexStrToRgb("#FF0"),
+		hexStrToRgb("#F00")
 	]);
 	p.planeCfgs = [makeDirectPlane("index")];
 	return p;

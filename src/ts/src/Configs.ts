@@ -196,8 +196,8 @@ const epd_kwry = (function(): Config {
   p.palette = new Uint32Array([
     Colors.hexStrToRgb('#000'),
     Colors.hexStrToRgb('#FFF'),
-    Colors.hexStrToRgb('#F00'),
     Colors.hexStrToRgb('#FF0'),
+    Colors.hexStrToRgb('#F00'),
   ]);
   p.planeCfgs = [
     makeDirectPlane('index'),
