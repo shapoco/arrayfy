@@ -2823,12 +2823,11 @@ function reduceColor() {
 				widthBox.placeholder = "(" + outW + ")";
 				heightBox.placeholder = "(" + outH + ")";
 				if (outW < 1 || outH < 1) throw new Error("サイズは正の値で指定してください");
-				let tooLarge = false;
-				if (relaxSizeLimitBox.checked) tooLarge = outW * outH > 2048 * 2048;
-				else tooLarge = outW * outH > 1024 * 1024;
-				if (tooLarge) {
+				if (relaxSizeLimitBox.checked) {
+					if (outW * outH > 2048 * 2048) throw new Error("出力サイズが大きすぎます。");
+				} else {
 					show(parentLiOf(relaxSizeLimitBox));
-					throw new Error("出力サイズが大きすぎます。処理が重くなることを承知で制限を緩和するには「サイズ制限緩和」にチェックしてください。");
+					if (outW * outH > 1024 * 1024) throw new Error("出力サイズが大きすぎます。処理が重くなることを承知で制限を緩和するには「サイズ制限緩和」にチェックしてください。");
 				}
 				args.trimRect.x = trimL;
 				args.trimRect.y = trimT;

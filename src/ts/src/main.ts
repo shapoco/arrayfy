@@ -1191,16 +1191,16 @@ function reduceColor(): void {
           throw new Error('サイズは正の値で指定してください');
         }
 
-        let tooLarge = false;
         if (relaxSizeLimitBox.checked) {
-          tooLarge = (outW * outH > 2048 * 2048);
+          if (outW * outH > 2048 * 2048) {
+            throw new Error('出力サイズが大きすぎます。');
+          }
         } else {
-          tooLarge = (outW * outH > 1024 * 1024);
-        }
-        if (tooLarge) {
           Ui.show(Ui.parentLiOf(relaxSizeLimitBox));
-          throw new Error(
-              '出力サイズが大きすぎます。処理が重くなることを承知で制限を緩和するには「サイズ制限緩和」にチェックしてください。');
+          if (outW * outH > 1024 * 1024) {
+            throw new Error(
+                '出力サイズが大きすぎます。処理が重くなることを承知で制限を緩和するには「サイズ制限緩和」にチェックしてください。');
+          }
         }
 
         args.trimRect.x = trimL;
