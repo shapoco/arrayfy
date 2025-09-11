@@ -2068,6 +2068,7 @@ const pixelFormatBox = makeSelectBox([
 ], PixelFormat.RGB565);
 const widthBox = makeTextBox("", "(auto)", 4);
 const heightBox = makeTextBox("", "(auto)", 4);
+const relaxSizeLimitBox = makeCheckBox("サイズ制限緩和");
 const scalingMethodBox = makeSelectBox([
 	{
 		value: ScalingMethod.ZOOM,
@@ -2095,8 +2096,10 @@ const formatSection = makeSection(makeFloatList([
 		upDown(heightBox, 1, 1024, 1),
 		" px"
 	], "片方を空欄にすると他方はアスペクト比に基づいて自動的に決定されます。"),
+	tip([relaxSizeLimitBox.parentElement], "出力サイズの制限を緩和します。処理が重くなる可能性があります。"),
 	tip(["拡縮方法: ", scalingMethodBox], "トリミングサイズと出力サイズが異なる場合の拡縮方法を指定します。")
 ]));
+hide(parentLiOf(relaxSizeLimitBox));
 const csrModeBox = makeSelectBox([
 	{
 		value: ColorSpaceReductionMode.NONE,
@@ -2817,10 +2820,16 @@ function reduceColor() {
 					}
 					hide(parentLiOf(scalingMethodBox));
 				}
-				if (outW < 1 || outH < 1) throw new Error("サイズは正の値で指定してください");
-				if (outW * outH > 1024 * 1024) throw new Error("画像が大きすぎます");
 				widthBox.placeholder = "(" + outW + ")";
 				heightBox.placeholder = "(" + outH + ")";
+				if (outW < 1 || outH < 1) throw new Error("サイズは正の値で指定してください");
+				let tooLarge = false;
+				if (relaxSizeLimitBox.checked) tooLarge = outW * outH > 2048 * 2048;
+				else tooLarge = outW * outH > 1024 * 1024;
+				if (tooLarge) {
+					show(parentLiOf(relaxSizeLimitBox));
+					throw new Error("出力サイズが大きすぎます。処理が重くなることを承知で制限を緩和するには「サイズ制限緩和」にチェックしてください。");
+				}
 				args.trimRect.x = trimL;
 				args.trimRect.y = trimT;
 				args.trimRect.width = trimW;
@@ -3018,7 +3027,8 @@ function reduceColor() {
 		hide(previewCanvas);
 		hide(codePlaneContainer);
 		show(reductionErrorBox);
-		reductionErrorBox.textContent = `${error.stack}`;
+		if (error instanceof Error) reductionErrorBox.textContent = `${error.stack}`;
+		else reductionErrorBox.textContent = String(error);
 	}
 }
 function requestGenerateCode() {
@@ -3174,7 +3184,8 @@ function generateCode() {
 	} catch (error) {
 		hide(structCanvas);
 		show(structErrorBox);
-		structErrorBox.textContent = `${error.stack}`;
+		if (error instanceof Error) structErrorBox.textContent = `${error.stack}`;
+		else structErrorBox.textContent = String(error);
 		codeErrorBox.textContent = "エンコードのエラーを解消してください。";
 		hide(codePlaneContainer);
 		show(codeErrorBox);
@@ -3230,7 +3241,8 @@ function generateCode() {
 		show(codePlaneContainer);
 		hide(codeErrorBox);
 	} catch (error) {
-		codeErrorBox.textContent = `${error.stack}`;
+		if (error instanceof Error) codeErrorBox.textContent = `${error.stack}`;
+		else codeErrorBox.textContent = String(error);
 		hide(codePlaneContainer);
 		show(codeErrorBox);
 	}

@@ -288,6 +288,8 @@ const pixelFormatBox = Ui.makeSelectBox(
 const widthBox = Ui.makeTextBox('', '(auto)', 4);
 const heightBox = Ui.makeTextBox('', '(auto)', 4);
 
+const relaxSizeLimitBox = Ui.makeCheckBox('サイズ制限緩和');
+
 const scalingMethodBox = Ui.makeSelectBox(
     [
       {
@@ -325,17 +327,21 @@ const formatSection = Ui.makeSection(Ui.makeFloatList([
       ],
       '片方を空欄にすると他方はアスペクト比に基づいて自動的に決定されます。'),
   Ui.tip(
+      [relaxSizeLimitBox.parentElement],
+      '出力サイズの制限を緩和します。処理が重くなる可能性があります。'),
+  Ui.tip(
       ['拡縮方法: ', scalingMethodBox],
       'トリミングサイズと出力サイズが異なる場合の拡縮方法を指定します。'),
 ]));
-
+Ui.hide(Ui.parentLiOf(relaxSizeLimitBox));
 
 const csrModeBox = Ui.makeSelectBox(
     [
       {
         value: Preproc.ColorSpaceReductionMode.NONE,
         label: '縮退しない',
-        tip: '元の色を保ったまま減色を行います。誤差拡散と組み合わせると不自然になることがあります。',
+        tip:
+            '元の色を保ったまま減色を行います。誤差拡散と組み合わせると不自然になることがあります。',
       },
       {
         value: Preproc.ColorSpaceReductionMode.CLIP,
@@ -1178,15 +1184,24 @@ function reduceColor(): void {
           Ui.hide(Ui.parentLiOf(scalingMethodBox));
         }
 
+        widthBox.placeholder = '(' + outW + ')';
+        heightBox.placeholder = '(' + outH + ')';
+
         if (outW < 1 || outH < 1) {
           throw new Error('サイズは正の値で指定してください');
         }
-        if (outW * outH > 1024 * 1024) {
-          throw new Error('画像が大きすぎます');
-        }
 
-        widthBox.placeholder = '(' + outW + ')';
-        heightBox.placeholder = '(' + outH + ')';
+        let tooLarge = false;
+        if (relaxSizeLimitBox.checked) {
+          tooLarge = (outW * outH > 2048 * 2048);
+        } else {
+          tooLarge = (outW * outH > 1024 * 1024);
+        }
+        if (tooLarge) {
+          Ui.show(Ui.parentLiOf(relaxSizeLimitBox));
+          throw new Error(
+              '出力サイズが大きすぎます。処理が重くなることを承知で制限を緩和するには「サイズ制限緩和」にチェックしてください。');
+        }
 
         args.trimRect.x = trimL;
         args.trimRect.y = trimT;
@@ -1428,7 +1443,11 @@ function reduceColor(): void {
     Ui.show(reductionErrorBox);
     let e: Error;
 
-    reductionErrorBox.textContent = `${error.stack}`;
+    if (error instanceof Error) {
+      reductionErrorBox.textContent = `${error.stack}`;
+    } else {
+      reductionErrorBox.textContent = String(error);
+    }
   }
 }
 
@@ -1646,7 +1665,11 @@ function generateCode(): void {
   } catch (error) {
     Ui.hide(structCanvas);
     Ui.show(structErrorBox);
-    structErrorBox.textContent = `${error.stack}`;
+    if (error instanceof Error) {
+      structErrorBox.textContent = `${error.stack}`;
+    } else {
+      structErrorBox.textContent = String(error);
+    }
     codeErrorBox.textContent = 'エンコードのエラーを解消してください。';
     Ui.hide(codePlaneContainer);
     Ui.show(codeErrorBox);
@@ -1715,7 +1738,11 @@ function generateCode(): void {
     Ui.show(codePlaneContainer);
     Ui.hide(codeErrorBox);
   } catch (error) {
-    codeErrorBox.textContent = `${error.stack}`;
+    if (error instanceof Error) {
+      codeErrorBox.textContent = `${error.stack}`;
+    } else {
+      codeErrorBox.textContent = String(error);
+    }
     Ui.hide(codePlaneContainer);
     Ui.show(codeErrorBox);
   }

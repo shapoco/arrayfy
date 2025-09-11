@@ -380,7 +380,13 @@
         const ul = document.createElement('ul');
         for (const entry of cts) {
           const li = document.createElement('li');
-          li.innerHTML = escapeForHtml(entry.comment);
+          if (entry.author) {
+            li.classList.add('shpcstamp_comment_author');
+            li.innerHTML = escapeForHtml(`[管理者] ${entry.comment}`);
+          }
+          else {
+            li.innerHTML = escapeForHtml(entry.comment);
+          }
           ul.appendChild(li);
           numComments += 1;
         }
@@ -564,7 +570,7 @@
           this.emojiList.innerHTML = '通信エラー';
         }
       }
-      
+
       this.stampDescDiv.textContent = getStampSendDescription();
 
       // カテゴリの選択肢を生成
@@ -638,7 +644,7 @@
       // コメント入力欄
       this.textarea = document.createElement('textarea');
       this.textarea.style.width = '100%';
-      this.textarea.placeholder = 'ここにコメントも書けます。\n空欄 OK。書くと公開されます。';
+      this.textarea.placeholder = 'ここにコメントも書けます。\n内容は公開されます。空欄 OK。';
       this.textarea.rows = 3;
       this.container.appendChild(this.textarea);
 
