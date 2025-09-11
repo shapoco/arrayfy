@@ -1196,8 +1196,8 @@ function reduceColor(): void {
             throw new Error('出力サイズが大きすぎます。');
           }
         } else {
-          Ui.show(Ui.parentLiOf(relaxSizeLimitBox));
           if (outW * outH > 1024 * 1024) {
+            Ui.show(Ui.parentLiOf(relaxSizeLimitBox));
             throw new Error(
                 '出力サイズが大きすぎます。処理が重くなることを承知で制限を緩和するには「サイズ制限緩和」にチェックしてください。');
           }
