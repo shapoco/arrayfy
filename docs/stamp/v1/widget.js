@@ -7,7 +7,7 @@
   const API_URL_BASE = DEBUG_MODE ?
     `${window.location.href.match(LOCALHOST_PATTERN)[1]}/stamp/v${API_VERSION}` :
     `https://www.shapoco.net/stamp/v${API_VERSION}`;
-  const URL_POSTFIX = '20250426145500';
+  const URL_POSTFIX = '20250912010100';
   const COOKIE_KEY = 'ShapocoNetStamp_clientId';
 
   const CLASS_STAMP_BUTTON = 'shpcstamp_stamp';
