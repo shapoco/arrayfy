@@ -374,7 +374,7 @@
       let numComments = 0;
 
       this.commentListDiv.innerHTML = '';
-      const cts = comments.filter(entry => entry.emoji == emoji);
+      const cts = comments.filter(entry => entry.emoji == emoji).slice().reverse();
       this.commentTitleBar.innerHTML = `${cts.length} 件のコメント`;
       if (cts.length > 0) {
         const ul = document.createElement('ul');
@@ -393,6 +393,7 @@
         this.commentListDiv.appendChild(ul);
         this.commentTitleBar.style.display = 'block';
         this.commentListDiv.style.display = 'block';
+        this.commentListDiv.scrollTop = this.commentListDiv.scrollHeight;
       }
       else {
         this.commentTitleBar.style.display = 'none';
