@@ -2549,7 +2549,7 @@ async function onLoad() {
 	container.appendChild(proModeSection);
 	container.appendChild(fileSection);
 	container.appendChild(presetSection);
-	container.appendChild(pro(trimSection));
+	container.appendChild(trimSection);
 	container.appendChild(alphaSection);
 	container.appendChild(colorCorrectSection);
 	container.appendChild(formatSection);

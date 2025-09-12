@@ -615,7 +615,7 @@ async function onLoad() {
   container.appendChild(proModeSection);
   container.appendChild(fileSection);
   container.appendChild(presetSection);
-  container.appendChild(Ui.pro(trimSection));
+  container.appendChild(trimSection);
   container.appendChild(alphaSection);
   container.appendChild(colorCorrectSection);
   container.appendChild(formatSection);
@@ -1030,7 +1030,7 @@ function updateTrimCanvas(): void {
 
   // トリミングのガイド線描画
   {
-    const lineWidth = 3;
+    const lineWidth = 2;
     ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
     ctx.fillRect(trimViewL - lineWidth - 2, 0, lineWidth + 4, canvasH);
     ctx.fillRect(0, trimViewT - lineWidth - 2, canvasW, lineWidth + 4);
