@@ -636,15 +636,15 @@ async function onLoad() {
   for (const section of resizeSections) {
     section.querySelectorAll('input, select').forEach((el) => {
       el.addEventListener('change', () => {
-        normImageCache = null;
-        requestColorReduction();
+        requestTrimResize();
       });
       el.addEventListener('input', () => {
-        normImageCache = null;
-        requestColorReduction();
+        requestTrimResize();
       });
     });
   }
+
+  pixelFormatBox.addEventListener('change', () => requestTrimResize());
 
   const colorReductionSections = [
     colorCorrectSection,
@@ -865,7 +865,6 @@ async function loadFromFile(name: string, file: File): Promise<void> {
 async function loadFromString(
     fileName: string, blobStr: string): Promise<void> {
   inputFileName = DEFAULT_INPUT_FILE_NAME;
-  normImageCache = null;
   return new Promise<void>((resolve, reject) => {
     const img = new Image();
     img.onload = () => {
@@ -883,8 +882,7 @@ async function loadFromString(
 
       keepShowLongCode = false;
       resetTrim(true);
-      reduceColor();
-      requestUpdateTrimCanvas();
+      requestTrimResize();
       resolve();
     };
     img.onerror = () => {
@@ -974,9 +972,7 @@ function setTrimRect(
   trimT = t;
   trimR = r;
   trimB = b;
-  normImageCache = null;
-  requestUpdateTrimCanvas();
-  requestColorReduction();
+  requestTrimResize();
 }
 
 function requestUpdateTrimCanvas(): void {
@@ -1123,13 +1119,19 @@ function loadPreset(preset: Configs.Config): void {
   (planeSelectBox.firstChild as HTMLOptionElement).selected = true;
   onSelectedPlaneChanged();
 
-  requestColorReduction();
+  requestTrimResize();
 }
 
 function onSelectedPlaneChanged() {
   for (const [key, value] of Object.entries(planeUis)) {
     Ui.setVisible(value.container, key === planeSelectBox.value);
   }
+}
+
+function requestTrimResize(): void {
+  normImageCache = null;
+  requestUpdateTrimCanvas();
+  requestColorReduction();
 }
 
 function requestColorReduction(): void {

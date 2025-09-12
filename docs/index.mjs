@@ -2587,14 +2587,13 @@ async function onLoad() {
 	];
 	for (const section of resizeSections) section.querySelectorAll("input, select").forEach((el) => {
 		el.addEventListener("change", () => {
-			normImageCache = null;
-			requestColorReduction();
+			requestTrimResize();
 		});
 		el.addEventListener("input", () => {
-			normImageCache = null;
-			requestColorReduction();
+			requestTrimResize();
 		});
 	});
+	pixelFormatBox.addEventListener("change", () => requestTrimResize());
 	const colorReductionSections = [
 		colorCorrectSection,
 		paletteSection,
@@ -2781,7 +2780,6 @@ async function loadFromFile(name, file) {
 }
 async function loadFromString(fileName, blobStr) {
 	inputFileName = DEFAULT_INPUT_FILE_NAME;
-	normImageCache = null;
 	return new Promise((resolve, reject) => {
 		const img = new Image();
 		img.onload = () => {
@@ -2797,8 +2795,7 @@ async function loadFromString(fileName, blobStr) {
 			ctx.drawImage(img, 0, 0);
 			keepShowLongCode = false;
 			resetTrim(true);
-			reduceColor();
-			requestUpdateTrimCanvas();
+			requestTrimResize();
 			resolve();
 		};
 		img.onerror = () => {
@@ -2875,9 +2872,7 @@ function setTrimRect(l, t, r, b, forceUpdate = false) {
 	trimT = t;
 	trimR = r;
 	trimB = b;
-	normImageCache = null;
-	requestUpdateTrimCanvas();
-	requestColorReduction();
+	requestTrimResize();
 }
 function requestUpdateTrimCanvas() {
 	if (updateTrimCanvasTimeoutId >= 0) return;
@@ -2988,10 +2983,15 @@ function loadPreset(preset) {
 	}
 	planeSelectBox.firstChild.selected = true;
 	onSelectedPlaneChanged();
-	requestColorReduction();
+	requestTrimResize();
 }
 function onSelectedPlaneChanged() {
 	for (const [key, value] of Object.entries(planeUis)) setVisible(value.container, key === planeSelectBox.value);
+}
+function requestTrimResize() {
+	normImageCache = null;
+	requestUpdateTrimCanvas();
+	requestColorReduction();
 }
 function requestColorReduction() {
 	if (quantizeTimeoutId >= 0) return;
