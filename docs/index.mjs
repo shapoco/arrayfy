@@ -1,3 +1,21 @@
+//#region src/Debug.ts
+var StopWatch = class {
+	lastTime;
+	constructor(report) {
+		this.report = report;
+		this.lastTime = performance.now();
+		this.report = report;
+	}
+	lap(label) {
+		const now = performance.now();
+		const elapsed = now - this.lastTime;
+		if (this.report) console.log(`${elapsed.toFixed(1)} ms: ${label}`);
+		this.lastTime = now;
+		return elapsed;
+	}
+};
+
+//#endregion
 //#region src/CodeGen.ts
 let CodeUnit = /* @__PURE__ */ function(CodeUnit$1) {
 	CodeUnit$1[CodeUnit$1["ELEMENTS"] = 0] = "ELEMENTS";
@@ -12,20 +30,52 @@ let Indent = /* @__PURE__ */ function(Indent$1) {
 	return Indent$1;
 }({});
 var Code = class {
-	name;
-	code;
-	numLines;
+	name = "";
+	code = "";
+	numLines = 0;
 };
 var CodeGenArgs = class {
-	name;
-	src;
-	blobs;
-	codeUnit;
-	indent;
-	arrayCols;
+	name = "";
+	src = null;
+	blobs = [];
+	codeUnit = CodeUnit.FILE;
+	indent = Indent.SPACE_X2;
+	arrayCols = 16;
 	codes = [];
 };
+var StringBuilder = class {
+	buff = [];
+	ptr = 0;
+	constructor(length = 0) {
+		this.length = length;
+		this.buff = Array(length);
+		this.clear();
+	}
+	push(s) {
+		if (this.ptr >= this.length) {
+			this.length = Math.floor(this.length * 1.5) + 10;
+			const newBuff = Array(this.length);
+			for (let i = 0; i < this.ptr; i++) newBuff[i] = this.buff[i];
+			this.buff = newBuff;
+			console.warn("StringBuilder: buffer resized to " + this.length);
+		}
+		this.buff[this.ptr++] = s;
+	}
+	join(sep) {
+		return this.buff.join(sep);
+	}
+	clear() {
+		this.ptr = 0;
+		for (let i = 0; i < this.length; i++) this.buff[i] = "";
+	}
+	numLines() {
+		let n = 0;
+		for (let i = 0; i < this.ptr; i++) if (this.buff[i].endsWith("\n")) n++;
+		return n;
+	}
+};
 function generate(args) {
+	const sw = new StopWatch(false);
 	let indent = "  ";
 	switch (args.indent) {
 		case Indent.SPACE_X2:
@@ -39,14 +89,20 @@ function generate(args) {
 			break;
 		default: throw new Error("Unknown indent type");
 	}
-	let codeBuff = [];
-	if (args.codeUnit >= CodeUnit.FILE) {
-		codeBuff.push(`#pragma once\n`);
-		codeBuff.push(`\n`);
-		codeBuff.push(`#include <stdint.h>\n`);
-		codeBuff.push(`\n`);
+	let hexTable = [];
+	for (let i = 0; i < 256; i++) hexTable.push(`0x${i.toString(16).padStart(2, "0")},`);
+	let buffLen = 100;
+	for (let blob of args.blobs) {
+		const len = blob.array.length;
+		buffLen += 10 + len * 2 + Math.ceil(len / args.arrayCols) * 2;
 	}
-	args.src.format;
+	const buff = new StringBuilder(buffLen);
+	if (args.codeUnit >= CodeUnit.FILE) {
+		buff.push(`#pragma once\n`);
+		buff.push(`\n`);
+		buff.push(`#include <stdint.h>\n`);
+		buff.push(`\n`);
+	}
 	for (let iBlob = 0; iBlob < args.blobs.length; iBlob++) {
 		const blob = args.blobs[iBlob];
 		const array = blob.array;
@@ -55,30 +111,28 @@ function generate(args) {
 		else arrayName = args.name + "_" + blob.name;
 		if (args.codeUnit >= CodeUnit.ARRAY_DEF) {
 			const lines = blob.comment.trimEnd().split("\n");
-			for (let line of lines) codeBuff.push(`// ${line}\n`);
-			codeBuff.push(`const uint8_t ${arrayName}[] = {\n`);
+			for (let line of lines) buff.push(`// ${line}\n`);
+			buff.push(`const uint8_t ${arrayName}[] = {\n`);
 		}
-		let hexTable = [];
-		for (let i = 0; i < 256; i++) hexTable.push("0x" + i.toString(16).padStart(2, "0") + ",");
 		for (let i = 0; i < array.length; i++) {
-			if (i % args.arrayCols == 0) codeBuff.push(indent);
-			codeBuff.push(hexTable[array[i]]);
-			if ((i + 1) % args.arrayCols == 0 || i + 1 == array.length) codeBuff.push("\n");
-			else codeBuff.push(" ");
+			if (i % args.arrayCols == 0) buff.push(indent);
+			buff.push(hexTable[array[i]]);
+			if ((i + 1) % args.arrayCols == 0 || i + 1 == array.length) buff.push("\n");
+			else buff.push(" ");
 		}
-		if (args.codeUnit >= CodeUnit.ARRAY_DEF) codeBuff.push("};\n");
-		if (args.codeUnit < CodeUnit.FILE || iBlob + 1 >= args.blobs.length) {
+		if (args.codeUnit >= CodeUnit.ARRAY_DEF) buff.push("};\n");
+		const lastBlob = iBlob + 1 >= args.blobs.length;
+		if (args.codeUnit < CodeUnit.FILE || lastBlob) {
 			const code = new Code();
 			if (args.codeUnit >= CodeUnit.FILE) code.name = args.name + ".h";
 			else code.name = args.name + "_" + blob.name + ".h";
-			code.code = codeBuff.join("");
-			let numLines = 0;
-			for (let s of codeBuff) if (s.endsWith("\n")) numLines++;
-			code.numLines = numLines;
+			code.code = buff.join("");
+			code.numLines = buff.numLines();
 			args.codes.push(code);
-			codeBuff = [];
+			if (!lastBlob) buff.clear();
 		}
 	}
+	sw.lap("CodeGen.generate()");
 }
 
 //#endregion
@@ -313,33 +367,34 @@ var FieldLayout = class {
 };
 var PlaneOutput = class {
 	fields = [];
-	pixelStride;
-	pixelsPerFrag;
-	bytesPerFrag;
-	alignRequired;
-	blob;
+	pixelStride = 0;
+	pixelsPerFrag = 0;
+	bytesPerFrag = 0;
+	alignRequired = false;
+	blob = null;
 };
 var PlaneArgs = class {
-	id;
+	id = "";
 	type = PlaneType.DIRECT;
-	indexMatchValue;
+	indexMatchValue = 0;
 	postInvert = false;
-	farPixelFirst;
-	bigEndian;
-	packUnit;
-	vertPack;
-	alignBoundary;
-	alignLeft;
-	vertAddr;
+	farPixelFirst = false;
+	bigEndian = false;
+	packUnit = PackUnit.PIXEL;
+	vertPack = false;
+	alignBoundary = AlignBoundary.BYTE_1;
+	alignLeft = false;
+	vertAddr = false;
 	output = new PlaneOutput();
 };
 var EncodeArgs = class {
-	src;
-	alphaFirst;
-	colorDescending;
+	src = null;
+	alphaFirst = false;
+	colorDescending = false;
 	planes = [];
 };
 function encode(args) {
+	const sw = new StopWatch(false);
 	const fmt = args.src.format;
 	for (let plane of args.planes) {
 		const out = plane.output;
@@ -482,7 +537,7 @@ function encode(args) {
 		}
 		{
 			let buff = [];
-			buff.push(`${args.src.width}x${args.src.height}px, ${fmt.toString()}\n`);
+			buff.push(`${src.width}x${src.height}px, ${fmt.toString()}\n`);
 			if (plane.type == PlaneType.INDEX_MATCH) {
 				buff.push(`Plane "${plane.id}", color index=${plane.indexMatchValue}`);
 				if (plane.postInvert) buff.push(`, Inverted`);
@@ -507,6 +562,7 @@ function encode(args) {
 			out.blob.comment = buff.join("");
 		}
 	}
+	sw.lap("Encoder.encode()");
 }
 
 //#endregion
@@ -885,6 +941,7 @@ let RoundMethod = /* @__PURE__ */ function(RoundMethod$1) {
 let DitherMethod = /* @__PURE__ */ function(DitherMethod$1) {
 	DitherMethod$1[DitherMethod$1["NONE"] = 0] = "NONE";
 	DitherMethod$1[DitherMethod$1["DIFFUSION"] = 1] = "DIFFUSION";
+	DitherMethod$1[DitherMethod$1["PATTERN_GRAY"] = 2] = "PATTERN_GRAY";
 	return DitherMethod$1;
 }({});
 var Palette = class {};
@@ -906,6 +963,11 @@ var FixedPalette = class extends Palette {
 			this.inMax[ch] = equDiv ? (numLevel * 2 - 1) / (numLevel * 2) : 1;
 			this.outMax[ch] = numLevel - 1;
 		}
+	}
+	get numColors() {
+		let n = 1;
+		for (let ch = 0; ch < this.channelBits.length; ch++) n *= 1 << this.channelBits[ch];
+		return n;
 	}
 	reduce(src, srcOffset, dest, destOffset, error) {
 		for (let ch = 0; ch < this.channelBits.length; ch++) {
@@ -939,6 +1001,14 @@ var FixedPalette = class extends Palette {
 			lMax: 1
 		};
 	}
+	getAverageStep() {
+		const avgStep = new Float32Array(this.channelBits.length);
+		for (let ch = 0; ch < this.channelBits.length; ch++) {
+			const numLevel = 1 << this.channelBits[ch];
+			avgStep[ch] = 1 / (numLevel - 1);
+		}
+		return avgStep;
+	}
 };
 var IndexedPalette = class extends Palette {
 	colors;
@@ -950,6 +1020,9 @@ var IndexedPalette = class extends Palette {
 		const numColors = 1 << indexBits;
 		this.colors = new Float32Array(numColors * channelBits.length);
 		this.enabled = new Array(numColors).fill(false);
+	}
+	get numColors() {
+		return 1 << this.indexBits;
 	}
 	reduce(src, srcOffset, dest, destOffset, error) {
 		const numCh = this.channelBits.length;
@@ -986,7 +1059,7 @@ var IndexedPalette = class extends Palette {
 		}
 	}
 	getHslRange() {
-		const numColors = this.colors.length / this.channelBits.length;
+		const numColors = this.numColors;
 		let rgbCenter = new Float32Array([
 			0,
 			0,
@@ -1031,6 +1104,22 @@ var IndexedPalette = class extends Palette {
 			lMax
 		};
 	}
+	getAverageStep() {
+		const avgStep = new Float32Array(this.channelBits.length);
+		for (let ch = 0; ch < this.channelBits.length; ch++) {
+			let levels = [];
+			for (let i = 0; i < this.numColors; i++) {
+				if (!this.enabled[i]) continue;
+				const v = this.colors[i * this.channelBits.length + ch];
+				if (!levels.includes(v)) levels.push(v);
+			}
+			levels.sort((a, b) => a - b);
+			let stepSum = 0;
+			for (let i = 1; i < levels.length; i++) stepSum += levels[i] - levels[i - 1];
+			avgStep[ch] = stepSum / Math.max(1, levels.length - 1);
+		}
+		return avgStep;
+	}
 };
 
 //#endregion
@@ -1055,8 +1144,13 @@ let ColorSpaceReductionMode = /* @__PURE__ */ function(ColorSpaceReductionMode$1
 	ColorSpaceReductionMode$1[ColorSpaceReductionMode$1["TRANSFORM"] = 3] = "TRANSFORM";
 	return ColorSpaceReductionMode$1;
 }({});
-var Args = class {
-	srcData;
+let InterpolationMethod = /* @__PURE__ */ function(InterpolationMethod$1) {
+	InterpolationMethod$1[InterpolationMethod$1["NEAREST_NEIGHBOR"] = 0] = "NEAREST_NEIGHBOR";
+	InterpolationMethod$1[InterpolationMethod$1["AVERAGE"] = 1] = "AVERAGE";
+	return InterpolationMethod$1;
+}({});
+var PreProcArgs = class {
+	srcData = new Uint8Array(0);
 	srcSize = {
 		width: 0,
 		height: 0
@@ -1071,9 +1165,10 @@ var Args = class {
 		width: 0,
 		height: 0
 	};
-	outImage;
-	colorSpace;
+	outImage = new NormalizedImage(0, 0, ColorSpace.RGB);
+	colorSpace = ColorSpace.RGB;
 	scalingMethod = ScalingMethod.ZOOM;
+	interpolationMethod = InterpolationMethod.NEAREST_NEIGHBOR;
 	alphaProc = AlphaMode.KEEP;
 	alphaThresh = 128;
 	keyColor = 0;
@@ -1098,9 +1193,10 @@ var Args = class {
 		value: 0,
 		automatic: true
 	};
-	invert;
+	invert = false;
 };
 function process(args) {
+	const sw = new StopWatch(false);
 	let src = args.srcData;
 	{
 		const { data, rect } = trim(src, args.srcSize, args.trimRect, args.outSize, args.scalingMethod);
@@ -1112,7 +1208,16 @@ function process(args) {
 		width: args.trimRect.width,
 		height: args.trimRect.height
 	};
-	const resized = resize(src, trimSize, args.outSize);
+	let resized = src;
+	if (trimSize.width != args.outSize.width || trimSize.height != args.outSize.height) switch (args.interpolationMethod) {
+		case InterpolationMethod.NEAREST_NEIGHBOR:
+			resized = resizeWithNearestNeighbor(src, trimSize, args.outSize);
+			break;
+		case InterpolationMethod.AVERAGE:
+			resized = resizeWithAverage(src, trimSize, args.outSize);
+			break;
+		default: throw new Error("Invalid interpolation method");
+	}
 	const img = normalize(resized, args.outSize, args.colorSpace);
 	if (args.alphaProc == AlphaMode.BINARIZE) binarizeAlpha(img, args.alphaThresh / 255);
 	else if (args.alphaProc == AlphaMode.FILL) fillBackground(img, args.backColor);
@@ -1133,6 +1238,7 @@ function process(args) {
 			break;
 	}
 	args.outImage = img;
+	sw.lap("PreProc.process()");
 }
 function trim(src, srcSize, trimRect, outSize, scalingMethod) {
 	const srcW = srcSize.width;
@@ -1216,13 +1322,31 @@ function applyKeyColor(data, size, key, tol) {
 		}
 	}
 }
-function resize(src, srcSize, outSize) {
+function resizeWithNearestNeighbor(src, srcSize, outSize) {
+	const srcW = srcSize.width;
+	const srcH = srcSize.height;
+	const outW = outSize.width;
+	const outH = outSize.height;
+	const srcStride = srcW * 4;
+	const outStride = outW * 4;
+	const out = new Uint8Array(outStride * outH);
+	for (let outY = 0; outY < outH; outY++) {
+		const srcY = outH <= 1 ? 0 : Math.floor(outY * (srcH - 1) / (outH - 1));
+		let iDest = outY * outStride;
+		for (let outX = 0; outX < outW; outX++) {
+			const srcX = outW <= 1 ? 0 : Math.floor(outX * (srcW - 1) / (outW - 1));
+			const iSrc = srcY * srcStride + srcX * 4;
+			for (let c = 0; c < 4; c++) out[iDest++] = src[iSrc + c];
+		}
+	}
+	return out;
+}
+function resizeWithAverage(src, srcSize, outSize) {
 	let srcW = srcSize.width;
 	let srcH = srcSize.height;
 	const outW = outSize.width;
 	const outH = outSize.height;
 	const srcStride = srcW * 4;
-	if (srcW == outW && srcH == outH) return src;
 	let preW = outW;
 	while (preW * 2 < srcW) preW *= 2;
 	const preStride = preW * 4;
@@ -1563,15 +1687,36 @@ function getColorMinMax(img) {
 
 //#endregion
 //#region src/Reducer.ts
+const ditherPattern = new Float32Array([
+	.5 / 16 - .5,
+	8.5 / 16 - .5,
+	2.5 / 16 - .5,
+	10.5 / 16 - .5,
+	12.5 / 16 - .5,
+	4.5 / 16 - .5,
+	14.5 / 16 - .5,
+	6.5 / 16 - .5,
+	3.5 / 16 - .5,
+	11.5 / 16 - .5,
+	1.5 / 16 - .5,
+	9.5 / 16 - .5,
+	15.5 / 16 - .5,
+	7.5 / 16 - .5,
+	13.5 / 16 - .5,
+	5.5 / 16 - .5
+]);
 var Arguments = class {
-	src;
+	src = null;
 	colorDitherMethod = DitherMethod.NONE;
 	alphaDitherMethod = DitherMethod.NONE;
-	palette;
-	format;
-	output;
+	colorDitherStrength = 1;
+	alphaDitherStrength = 1;
+	palette = null;
+	format = null;
+	output = null;
 };
 function reduce(args) {
+	const sw = new StopWatch(false);
 	const norm = args.src;
 	const outW = norm.width;
 	const outH = norm.height;
@@ -1582,6 +1727,23 @@ function reduce(args) {
 	const outData = args.output.data;
 	const alpErrDiffuse = args.alphaDitherMethod == DitherMethod.DIFFUSION;
 	const colErrDiffuse = args.colorDitherMethod == DitherMethod.DIFFUSION;
+	if (args.colorDitherMethod == DitherMethod.PATTERN_GRAY) {
+		const step = palette.getAverageStep();
+		for (let y = 0; y < outH; y++) {
+			const iPixelStep = y * outW * numColCh;
+			const iPatStep = y % 4 * 4;
+			for (let x = 0; x < outW; x++) {
+				const iPixel = iPixelStep + x * numColCh;
+				const iPat = iPatStep + x % 4;
+				for (let ch = 0; ch < numColCh; ch++) {
+					const s = step[ch];
+					let v = norm.color[iPixel + ch];
+					v += s * ditherPattern[iPat] * args.colorDitherStrength;
+					norm.color[iPixel + ch] = clip(0, 1, v);
+				}
+			}
+		}
+	}
 	const alpOutMax = (1 << fmt.alphaBits) - 1;
 	const colOut = new Uint8Array(numColCh);
 	const colErr = new Float32Array(numColCh);
@@ -1602,9 +1764,16 @@ function reduce(args) {
 		palette.reduce(norm.color, iPix * numColCh, colOut, 0, colErr);
 		for (let ch = 0; ch < numColCh; ch++) outData[ch][iPix] = colOut[ch];
 		if (fmt.hasAlpha) outData[numColCh][iPix] = alpOut;
-		if (alpErrDiffuse && fmt.hasAlpha) diffuseError(norm, true, alpErr, x, y, fwd);
-		if (colErrDiffuse && !transparent) diffuseError(norm, false, colErr, x, y, fwd);
+		if (alpErrDiffuse && fmt.hasAlpha) {
+			if (args.alphaDitherStrength < 1) alpErr[0] *= args.alphaDitherStrength;
+			diffuseError(norm, true, alpErr, x, y, fwd);
+		}
+		if (colErrDiffuse && !transparent) {
+			if (args.colorDitherStrength < 1) for (let ch = 0; ch < numColCh; ch++) colErr[ch] *= args.colorDitherStrength;
+			diffuseError(norm, false, colErr, x, y, fwd);
+		}
 	}
+	sw.lap("Reducer.reduce()");
 }
 function diffuseError(img, alpha, error, x, y, forward) {
 	const target = alpha ? img.alpha : img.color;
@@ -1821,19 +1990,6 @@ var TrimState = /* @__PURE__ */ function(TrimState$1) {
 	TrimState$1[TrimState$1["DRAG_LEFT"] = 4] = "DRAG_LEFT";
 	return TrimState$1;
 }(TrimState || {});
-var StopWatch = class {
-	lastTime;
-	constructor(report) {
-		this.report = report;
-		this.lastTime = performance.now();
-		this.report = report;
-	}
-	lap(label) {
-		const now = performance.now();
-		if (this.report) console.log(`${(now - this.lastTime).toFixed(1)} ms: ${label}`);
-		this.lastTime = now;
-	}
-};
 var PlaneUi = class {
 	container = document.createElement("div");
 	planeTypeBox = makeSelectBox([{
@@ -1946,8 +2102,9 @@ function onProModeChanged() {
 	updateTrimCanvas();
 }
 const proModeSection = makeSection(makeFloatList([makeHeader("編集モード"), proModeCheckBox.parentElement]));
-const origCanvas = document.createElement("canvas");
+let origCanvas = document.createElement("canvas");
 const resetTrimButton = makeButton("範囲をリセット");
+const rotateRightButton = makeButton("90° 回転");
 const trimCanvas = document.createElement("canvas");
 trimCanvas.style.width = "100%";
 trimCanvas.style.height = "400px";
@@ -1956,7 +2113,11 @@ trimCanvas.style.border = "solid 1px #444";
 trimCanvas.style.backgroundImage = "url(./img/checker.png)";
 const pTrimCanvas = makeParagraph(trimCanvas);
 pTrimCanvas.style.textAlign = "center";
-const trimSection = makeSection([makeFloatList([makeHeader("トリミング"), tip(resetTrimButton, "トリミングしていない状態に戻します。")]), pTrimCanvas]);
+const trimSection = makeSection([makeFloatList([
+	makeHeader("トリミング"),
+	tip(resetTrimButton, "トリミングしていない状態に戻します。"),
+	tip(rotateRightButton, "画像を右に 90° 回転します。")
+]), pTrimCanvas]);
 const alphaModeBox = makeSelectBox([
 	{
 		value: AlphaMode.KEEP,
@@ -2086,6 +2247,15 @@ const scalingMethodBox = makeSelectBox([
 		tip: "アスペクト比を無視して、出力画像に合わせて画像を引き伸ばします。"
 	}
 ], ScalingMethod.ZOOM);
+const interpolationMethodBox = makeSelectBox([{
+	value: InterpolationMethod.NEAREST_NEIGHBOR,
+	label: "なし",
+	tip: "ニアレストネイバー法で補間します。"
+}, {
+	value: InterpolationMethod.AVERAGE,
+	label: "高精度",
+	tip: "各出力画素に関係する入力画素を全て平均します。"
+}], InterpolationMethod.AVERAGE);
 const formatSection = makeSection(makeFloatList([
 	makeHeader("出力形式"),
 	pro(tip(["フォーマット: ", pixelFormatBox], "ピクセルフォーマットを指定します。")),
@@ -2097,7 +2267,8 @@ const formatSection = makeSection(makeFloatList([
 		" px"
 	], "片方を空欄にすると他方はアスペクト比に基づいて自動的に決定されます。"),
 	tip([relaxSizeLimitBox.parentElement], "出力サイズの制限を緩和します。処理が重くなる可能性があります。"),
-	tip(["拡縮方法: ", scalingMethodBox], "トリミングサイズと出力サイズが異なる場合の拡縮方法を指定します。")
+	tip(["拡縮方法: ", scalingMethodBox], "トリミングサイズと出力サイズが異なる場合の拡縮方法を指定します。"),
+	tip(["補間方法: ", interpolationMethodBox], "拡縮時の補間方法を指定します。")
 ]));
 hide(parentLiOf(relaxSizeLimitBox));
 const csrModeBox = makeSelectBox([
@@ -2133,20 +2304,36 @@ const paletteSection = makeSection([makeFloatList([
 		"°"
 	], "新しい色空間の外側をどこまで空間内に丸めるかを色相の角度で指定します。")
 ]), pro(paletteTable)]);
-const colorDitherBox = makeSelectBox([{
-	value: DitherMethod.NONE,
-	label: "なし"
-}, {
-	value: DitherMethod.DIFFUSION,
-	label: "誤差拡散"
-}], DitherMethod.NONE);
-const alphaDitherBox = makeSelectBox([{
-	value: DitherMethod.NONE,
-	label: "なし"
-}, {
-	value: DitherMethod.DIFFUSION,
-	label: "誤差拡散"
-}], DitherMethod.NONE);
+const colorDitherMethodBox = makeSelectBox([
+	{
+		value: DitherMethod.NONE,
+		label: "なし"
+	},
+	{
+		value: DitherMethod.DIFFUSION,
+		label: "誤差拡散"
+	},
+	{
+		value: DitherMethod.PATTERN_GRAY,
+		label: "パターン"
+	}
+], DitherMethod.NONE);
+const colorDitherStrengthBox = makeTextBox("100", "(100)", 4);
+const alphaDitherMethodBox = makeSelectBox([
+	{
+		value: DitherMethod.NONE,
+		label: "なし"
+	},
+	{
+		value: DitherMethod.DIFFUSION,
+		label: "誤差拡散"
+	},
+	{
+		value: DitherMethod.PATTERN_GRAY,
+		label: "パターン"
+	}
+], DitherMethod.NONE);
+const alphaDitherStrengthBox = makeTextBox("100", "(100)", 4);
 const roundMethodBox = makeSelectBox([{
 	value: RoundMethod.NEAREST,
 	label: "近似値",
@@ -2170,8 +2357,18 @@ pPreviewCanvas.style.textAlign = "center";
 const colorReductionSection = makeSection([makeFloatList([
 	makeHeader("減色"),
 	pro(tip(["丸め方法: ", roundMethodBox], "パレットから色を選択する際の戦略を指定します。\nディザリングを行う場合はあまり関係ありません。")),
-	tip(["ディザリング: ", colorDitherBox], "あえてノイズを加えることでできるだけ元画像の色を再現します。"),
-	pro(tip(["透明度のディザ: ", alphaDitherBox], "あえてノイズを加えることでできるだけ元画像の透明度を再現します。"))
+	tip(["ディザ: ", colorDitherMethodBox], "あえてノイズを加えることでできるだけ元画像の色を再現します。"),
+	tip([
+		"強度: ",
+		upDown(colorDitherStrengthBox, 0, 100, 10),
+		"%"
+	], "ディザリングの強度を指定します。"),
+	pro(tip(["透明度のディザ: ", alphaDitherMethodBox], "あえてノイズを加えることでできるだけ元画像の透明度を再現します。")),
+	pro(tip([
+		"強度: ",
+		upDown(alphaDitherStrengthBox, 0, 100, 10),
+		"%"
+	], "透明度に対するディザリングの強度を指定します。"))
 ]), pPreviewCanvas]);
 const channelOrderBox = makeSelectBox([
 	{
@@ -2501,6 +2698,7 @@ async function onLoad() {
 		trimCanvas.style.cursor = "default";
 		trimCanvas.releasePointerCapture(e.pointerId);
 		requestUpdateTrimCanvas();
+		requestColorReduction();
 	});
 	trimCanvas.addEventListener("touchstart", (e) => {
 		e.preventDefault();
@@ -2513,6 +2711,9 @@ async function onLoad() {
 	});
 	resetTrimButton.addEventListener("click", () => {
 		resetTrim();
+	});
+	rotateRightButton.addEventListener("click", () => {
+		rotate();
 	});
 	proModeCheckBox.checked = window.location.hash === "#detail";
 	onProModeChanged();
@@ -2585,6 +2786,29 @@ function resetTrim() {
 	trimT = 0;
 	trimR = origCanvas.width;
 	trimB = origCanvas.height;
+	requestUpdateTrimCanvas();
+	requestColorReduction();
+}
+function rotate() {
+	const newTrimL = origCanvas.height - trimB;
+	const newTrimT = trimL;
+	const newTrimR = origCanvas.height - trimT;
+	const newTrimB = trimR;
+	trimL = newTrimL;
+	trimT = newTrimT;
+	trimR = newTrimR;
+	trimB = newTrimB;
+	const tmpCanvas = document.createElement("canvas");
+	tmpCanvas.width = origCanvas.height;
+	tmpCanvas.height = origCanvas.width;
+	const tmpCtx = tmpCanvas.getContext("2d", { willReadFrequently: true });
+	if (!tmpCtx) throw new Error("Failed to get canvas context");
+	tmpCtx.imageSmoothingEnabled = false;
+	tmpCtx.clearRect(0, 0, tmpCanvas.width, tmpCanvas.height);
+	tmpCtx.translate(tmpCanvas.width / 2, tmpCanvas.height / 2);
+	tmpCtx.rotate(Math.PI / 2);
+	tmpCtx.drawImage(origCanvas, -origCanvas.width / 2, -origCanvas.height / 2);
+	origCanvas = tmpCanvas;
 	requestUpdateTrimCanvas();
 	requestColorReduction();
 }
@@ -2780,7 +3004,7 @@ function reduceColor() {
 			}
 		} else palette = new FixedPalette(fmt.colorBits, roundMethod);
 		{
-			let args = new Args();
+			let args = new PreProcArgs();
 			args.colorSpace = fmt.colorSpace;
 			{
 				const srcW = origCanvas.width;
@@ -2799,18 +3023,17 @@ function reduceColor() {
 				const trimH = Math.round(trimB - trimT);
 				outW = trimW;
 				outH = trimH;
+				let aspectChanged = false;
 				if (widthBox.value && heightBox.value) {
 					outW = parseInt(widthBox.value);
 					outH = parseInt(heightBox.value);
-					show(parentLiOf(scalingMethodBox));
+					aspectChanged = true;
 				} else if (widthBox.value) {
 					outW = parseInt(widthBox.value);
 					outH = Math.max(1, Math.round(trimH * (outW / trimW)));
-					hide(parentLiOf(scalingMethodBox));
 				} else if (heightBox.value) {
 					outH = parseInt(heightBox.value);
 					outW = Math.max(1, Math.round(trimW * (outH / trimH)));
-					hide(parentLiOf(scalingMethodBox));
 				} else {
 					const MAX_SIZE = 512;
 					if (outW > MAX_SIZE || outH > MAX_SIZE) {
@@ -2818,8 +3041,10 @@ function reduceColor() {
 						outW = Math.floor(outW * scale);
 						outH = Math.floor(outH * scale);
 					}
-					hide(parentLiOf(scalingMethodBox));
 				}
+				const resizing = outW != trimW || outH != trimH;
+				setVisible(parentLiOf(scalingMethodBox), resizing && aspectChanged);
+				setVisible(parentLiOf(interpolationMethodBox), resizing);
 				widthBox.placeholder = "(" + outW + ")";
 				heightBox.placeholder = "(" + outH + ")";
 				if (outW < 1 || outH < 1) throw new Error("サイズは正の値で指定してください");
@@ -2836,6 +3061,8 @@ function reduceColor() {
 				args.outSize.width = outW;
 				args.outSize.height = outH;
 				args.scalingMethod = parseInt(scalingMethodBox.value);
+				if (trimUiState == TrimState.IDLE) args.interpolationMethod = parseInt(interpolationMethodBox.value);
+				else args.interpolationMethod = InterpolationMethod.NEAREST_NEIGHBOR;
 			}
 			args.alphaProc = parseInt(alphaModeBox.value);
 			args.alphaThresh = parseInt(alphaThreshBox.value);
@@ -2978,16 +3205,20 @@ function reduceColor() {
 			for (const bits of fmt.colorBits) if (bits < minColBits) minColBits = bits;
 			const colReduce = minColBits < 8 || fmt.isIndexed;
 			const alpReduce = fmt.hasAlpha && fmt.alphaBits < 8;
-			const colDither = colReduce ? parseInt(colorDitherBox.value) : DitherMethod.NONE;
-			const alpDither = alpReduce ? parseInt(alphaDitherBox.value) : DitherMethod.NONE;
-			setVisible(parentLiOf(colorDitherBox), colReduce);
-			setVisible(parentLiOf(alphaDitherBox), alpReduce);
+			const colDither = colReduce ? parseInt(colorDitherMethodBox.value) : DitherMethod.NONE;
+			const alpDither = alpReduce ? parseInt(alphaDitherMethodBox.value) : DitherMethod.NONE;
+			setVisible(parentLiOf(colorDitherMethodBox), colReduce);
+			setVisible(parentLiOf(alphaDitherMethodBox), alpReduce);
+			setVisible(parentLiOf(colorDitherStrengthBox), colDither != DitherMethod.NONE);
+			setVisible(parentLiOf(alphaDitherStrengthBox), alpDither != DitherMethod.NONE);
 			const args = new Arguments();
 			args.src = norm;
 			args.format = fmt;
 			args.palette = palette;
 			args.colorDitherMethod = colDither;
+			if (colorDitherStrengthBox.value) args.colorDitherStrength = parseFloat(colorDitherStrengthBox.value) / 100;
 			args.alphaDitherMethod = alpDither;
+			if (alphaDitherStrengthBox.value) args.alphaDitherStrength = parseFloat(alphaDitherStrengthBox.value) / 100;
 			reduce(args);
 			reducedImage = args.output;
 			swDetail.lap("Quantization");
@@ -3019,7 +3250,7 @@ function reduceColor() {
 			previewCanvas.style.width = `${canvasW}px`;
 			previewCanvas.style.height = `${canvasH}px`;
 			previewCanvas.style.marginTop = `${Math.floor((viewH - canvasH) / 2)}px`;
-			previewCanvas.style.imageRendering = "pixelated";
+			previewCanvas.style.imageRendering = zoom$1 < 1 ? "auto" : "pixelated";
 		}
 		swDetail.lap("Fix Preview Size");
 	} catch (error) {

@@ -1,4 +1,5 @@
 import {ArrayBlob} from './Blobs';
+import * as Debug from './Debug';
 import {ReducedImage} from './Images';
 import {intCeil} from './Utils';
 
@@ -29,37 +30,39 @@ export class FieldLayout {
 
 export class PlaneOutput {
   public fields: FieldLayout[] = [];
-  public pixelStride: number;  // ピクセルあたりのビット数 (パディング含む)
-  public pixelsPerFrag: number;  // フラグメントあたりのピクセル数
-  public bytesPerFrag: number;   // フラグメントあたりのバイト数
-  public alignRequired: boolean;
-  public blob: ArrayBlob;
+  public pixelStride: number = 0;  // ピクセルあたりのビット数 (パディング含む)
+  public pixelsPerFrag: number = 0;  // フラグメントあたりのピクセル数
+  public bytesPerFrag: number = 0;  // フラグメントあたりのバイト数
+  public alignRequired: boolean = false;
+  public blob: ArrayBlob|null = null;
 }
 
 export class PlaneArgs {
-  public id: string;
+  public id: string = '';
   public type: PlaneType = PlaneType.DIRECT;
-  public indexMatchValue: number;
+  public indexMatchValue: number = 0;
   public postInvert: boolean = false;
-  public farPixelFirst: boolean;
-  public bigEndian: boolean;
-  public packUnit: PackUnit;
-  public vertPack: boolean;
-  public alignBoundary: AlignBoundary;
-  public alignLeft: boolean;
-  public vertAddr: boolean;
+  public farPixelFirst: boolean = false;
+  public bigEndian: boolean = false;
+  public packUnit: PackUnit = PackUnit.PIXEL;
+  public vertPack: boolean = false;
+  public alignBoundary: AlignBoundary = AlignBoundary.BYTE_1;
+  public alignLeft: boolean = false;
+  public vertAddr: boolean = false;
   public output: PlaneOutput = new PlaneOutput();
 }
 
 export class EncodeArgs {
-  public src: ReducedImage;
-  public alphaFirst: boolean;
-  public colorDescending: boolean;
+  public src: ReducedImage|null = null;
+  public alphaFirst: boolean = false;
+  public colorDescending: boolean = false;
   public planes: PlaneArgs[] = [];
 }
 
 export function encode(args: EncodeArgs): void {
-  const fmt = args.src.format;
+  const sw = new Debug.StopWatch(false);
+
+  const fmt = (args.src as ReducedImage).format;
 
   // 構造体の構造を決定
   for (let plane of args.planes) {
@@ -194,7 +197,7 @@ export function encode(args: EncodeArgs): void {
     }
   }
 
-  const src = args.src;
+  const src = args.src as ReducedImage;
   for (let plane of args.planes) {
     const out = plane.output;
     const numCh = out.fields.length;
@@ -284,7 +287,7 @@ export function encode(args: EncodeArgs): void {
     // コメントの生成
     {
       let buff: string[] = [];
-      buff.push(`${args.src.width}x${args.src.height}px, ${fmt.toString()}\n`);
+      buff.push(`${src.width}x${src.height}px, ${fmt.toString()}\n`);
       if (plane.type == PlaneType.INDEX_MATCH) {
         buff.push(`Plane "${plane.id}", color index=${plane.indexMatchValue}`);
         if (plane.postInvert) {
@@ -314,4 +317,6 @@ export function encode(args: EncodeArgs): void {
     }
 
   }  // for plane
+
+  sw.lap('Encoder.encode()');
 }

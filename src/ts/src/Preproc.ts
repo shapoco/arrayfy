@@ -1,4 +1,5 @@
 import * as Colors from './Colors';
+import * as Debug from './Debug';
 import {Rect, Size} from './Geometries';
 import {ColorSpace, NormalizedImage} from './Images';
 import {Palette} from './Palettes';
@@ -24,18 +25,25 @@ export const enum ColorSpaceReductionMode {
   TRANSFORM,
 }
 
+export const enum InterpolationMethod {
+  NEAREST_NEIGHBOR,
+  AVERAGE,
+}
+
 export type ScalarParam = {
   value: number; automatic: boolean;
 };
 
-export class Args {
-  public srcData: Uint8Array;
+export class PreProcArgs {
+  public srcData: Uint8Array = new Uint8Array(0);
   public srcSize: Size = {width: 0, height: 0};
   public trimRect: Rect = {x: 0, y: 0, width: 0, height: 0};
   public outSize: Size = {width: 0, height: 0};
-  public outImage: NormalizedImage;
-  public colorSpace: ColorSpace;
+  public outImage: NormalizedImage = new NormalizedImage(0, 0, ColorSpace.RGB);
+  public colorSpace: ColorSpace = ColorSpace.RGB;
   public scalingMethod: ScalingMethod = ScalingMethod.ZOOM;
+  public interpolationMethod: InterpolationMethod =
+      InterpolationMethod.NEAREST_NEIGHBOR;
 
   public alphaProc: AlphaMode = AlphaMode.KEEP;
   public alphaThresh: number = 128;
@@ -55,10 +63,12 @@ export class Args {
   public gamma: ScalarParam = {value: 1, automatic: true};
   public brightness: ScalarParam = {value: 0, automatic: true};
   public contrast: ScalarParam = {value: 0, automatic: true};
-  public invert: boolean;
+  public invert: boolean = false;
 }
 
-export function process(args: Args): void {
+export function process(args: PreProcArgs): void {
+  const sw = new Debug.StopWatch(false);
+
   let src = args.srcData;
 
   // 元配列の複製 + トリミング
@@ -76,7 +86,20 @@ export function process(args: Args): void {
 
   // リサイズ
   const trimSize = {width: args.trimRect.width, height: args.trimRect.height};
-  const resized = resize(src, trimSize, args.outSize);
+  let resized = src;
+  if (trimSize.width != args.outSize.width ||
+      trimSize.height != args.outSize.height) {
+    switch (args.interpolationMethod) {
+      case InterpolationMethod.NEAREST_NEIGHBOR:
+        resized = resizeWithNearestNeighbor(src, trimSize, args.outSize);
+        break;
+      case InterpolationMethod.AVERAGE:
+        resized = resizeWithAverage(src, trimSize, args.outSize);
+        break;
+      default:
+        throw new Error('Invalid interpolation method');
+    }
+  }
 
   // 正規化
   const img = normalize(resized, args.outSize, args.colorSpace);
@@ -115,6 +138,8 @@ export function process(args: Args): void {
   }
 
   args.outImage = img;
+
+  sw.lap('PreProc.process()');
 }
 
 function trim(
@@ -215,17 +240,37 @@ function applyKeyColor(
   }
 }
 
-function resize(src: Uint8Array, srcSize: Size, outSize: Size): Uint8Array {
+function resizeWithNearestNeighbor(
+    src: Uint8Array, srcSize: Size, outSize: Size): Uint8Array {
+  const srcW = srcSize.width;
+  const srcH = srcSize.height;
+  const outW = outSize.width;
+  const outH = outSize.height;
+  const srcStride = srcW * 4;
+  const outStride = outW * 4;
+  const out = new Uint8Array(outStride * outH);
+  for (let outY = 0; outY < outH; outY++) {
+    const srcY = outH <= 1 ? 0 : Math.floor(outY * (srcH - 1) / (outH - 1));
+    let iDest = outY * outStride;
+    for (let outX = 0; outX < outW; outX++) {
+      const srcX = outW <= 1 ? 0 : Math.floor(outX * (srcW - 1) / (outW - 1));
+      const iSrc = srcY * srcStride + srcX * 4;
+      for (let c = 0; c < 4; c++) {
+        out[iDest++] = src[iSrc + c];
+      }
+    }
+  }
+  return out;
+}
+
+function resizeWithAverage(
+    src: Uint8Array, srcSize: Size, outSize: Size): Uint8Array {
   let srcW = srcSize.width;
   let srcH = srcSize.height;
   const outW = outSize.width;
   const outH = outSize.height;
 
   const srcStride = srcW * 4;
-
-  if (srcW == outW && srcH == outH) {
-    return src;
-  }
 
   let preW = outW;
   while (preW * 2 < srcW) preW *= 2;

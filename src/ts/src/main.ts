@@ -2,6 +2,7 @@ import {ArrayBlob} from './Blobs';
 import * as CodeGen from './CodeGen';
 import * as Colors from './Colors';
 import * as Configs from './Configs';
+import * as Debug from './Debug';
 import * as Encoder from './Encoder';
 import {Point, Rect, Size} from './Geometries';
 import * as Images from './Images';
@@ -18,22 +19,6 @@ const enum TrimState {
   DRAG_RIGHT,
   DRAG_BOTTOM,
   DRAG_LEFT,
-}
-
-class StopWatch {
-  lastTime: number;
-  constructor(public report: boolean) {
-    this.lastTime = performance.now();
-    this.report = report;
-  }
-
-  lap(label: string) {
-    const now = performance.now();
-    if (this.report) {
-      console.log(`${(now - this.lastTime).toFixed(1)} ms: ${label}`);
-    }
-    this.lastTime = now;
-  }
 }
 
 class PlaneUi {
@@ -184,9 +169,10 @@ const proModeSection = Ui.makeSection(Ui.makeFloatList([
   proModeCheckBox.parentElement,
 ]));
 
-const origCanvas = document.createElement('canvas');
+let origCanvas = document.createElement('canvas');
 
 const resetTrimButton = Ui.makeButton('範囲をリセット');
+const rotateRightButton = Ui.makeButton('90° 回転');
 
 const trimCanvas = document.createElement('canvas');
 trimCanvas.style.width = '100%';
@@ -202,6 +188,7 @@ const trimSection = Ui.makeSection([
   Ui.makeFloatList([
     Ui.makeHeader('トリミング'),
     Ui.tip(resetTrimButton, 'トリミングしていない状態に戻します。'),
+    Ui.tip(rotateRightButton, '画像を右に 90° 回転します。'),
   ]),
   pTrimCanvas,
 ])
@@ -312,6 +299,21 @@ const scalingMethodBox = Ui.makeSelectBox(
     ],
     Preproc.ScalingMethod.ZOOM);
 
+const interpolationMethodBox = Ui.makeSelectBox(
+    [
+      {
+        value: Preproc.InterpolationMethod.NEAREST_NEIGHBOR,
+        label: 'なし',
+        tip: 'ニアレストネイバー法で補間します。'
+      },
+      {
+        value: Preproc.InterpolationMethod.AVERAGE,
+        label: '高精度',
+        tip: '各出力画素に関係する入力画素を全て平均します。',
+      },
+    ],
+    Preproc.InterpolationMethod.AVERAGE);
+
 const formatSection = Ui.makeSection(Ui.makeFloatList([
   Ui.makeHeader('出力形式'),
   Ui.pro(Ui.tip(
@@ -332,6 +334,8 @@ const formatSection = Ui.makeSection(Ui.makeFloatList([
   Ui.tip(
       ['拡縮方法: ', scalingMethodBox],
       'トリミングサイズと出力サイズが異なる場合の拡縮方法を指定します。'),
+  Ui.tip(
+      ['補間方法: ', interpolationMethodBox], '拡縮時の補間方法を指定します。'),
 ]));
 Ui.hide(Ui.parentLiOf(relaxSizeLimitBox));
 
@@ -378,18 +382,22 @@ const paletteSection = Ui.makeSection([
   Ui.pro(paletteTable),
 ]);
 
-const colorDitherBox = Ui.makeSelectBox(
+const colorDitherMethodBox = Ui.makeSelectBox(
     [
       {value: DitherMethod.NONE, label: 'なし'},
       {value: DitherMethod.DIFFUSION, label: '誤差拡散'},
+      {value: DitherMethod.PATTERN_GRAY, label: 'パターン'},
     ],
     DitherMethod.NONE);
-const alphaDitherBox = Ui.makeSelectBox(
+const colorDitherStrengthBox = Ui.makeTextBox('100', '(100)', 4);
+const alphaDitherMethodBox = Ui.makeSelectBox(
     [
       {value: DitherMethod.NONE, label: 'なし'},
       {value: DitherMethod.DIFFUSION, label: '誤差拡散'},
+      {value: DitherMethod.PATTERN_GRAY, label: 'パターン'},
     ],
     DitherMethod.NONE);
+const alphaDitherStrengthBox = Ui.makeTextBox('100', '(100)', 4);
 const roundMethodBox = Ui.makeSelectBox(
     [
       {
@@ -425,11 +433,17 @@ const colorReductionSection = Ui.makeSection([
         ['丸め方法: ', roundMethodBox],
         'パレットから色を選択する際の戦略を指定します。\nディザリングを行う場合はあまり関係ありません。')),
     Ui.tip(
-        ['ディザリング: ', colorDitherBox],
+        ['ディザ: ', colorDitherMethodBox],
         'あえてノイズを加えることでできるだけ元画像の色を再現します。'),
+    Ui.tip(
+        ['強度: ', Ui.upDown(colorDitherStrengthBox, 0, 100, 10), '%'],
+        'ディザリングの強度を指定します。'),
     Ui.pro(Ui.tip(
-        ['透明度のディザ: ', alphaDitherBox],
+        ['透明度のディザ: ', alphaDitherMethodBox],
         'あえてノイズを加えることでできるだけ元画像の透明度を再現します。')),
+    Ui.pro(Ui.tip(
+        ['強度: ', Ui.upDown(alphaDitherStrengthBox, 0, 100, 10), '%'],
+        '透明度に対するディザリングの強度を指定します。')),
   ]),
   pPreviewCanvas,
 ]);
@@ -775,6 +789,7 @@ async function onLoad() {
     trimCanvas.style.cursor = 'default';
     trimCanvas.releasePointerCapture(e.pointerId);
     requestUpdateTrimCanvas();
+    requestColorReduction();
   });
   trimCanvas.addEventListener('touchstart', (e) => {
     e.preventDefault();
@@ -787,6 +802,9 @@ async function onLoad() {
   });
   resetTrimButton.addEventListener('click', () => {
     resetTrim();
+  });
+  rotateRightButton.addEventListener('click', () => {
+    rotate();
   });
 
   proModeCheckBox.checked = (window.location.hash === '#detail');
@@ -874,6 +892,34 @@ function resetTrim(): void {
   trimT = 0;
   trimR = origCanvas.width;
   trimB = origCanvas.height;
+  requestUpdateTrimCanvas();
+  requestColorReduction();
+}
+
+function rotate(): void {
+  const newTrimL = origCanvas.height - trimB;
+  const newTrimT = trimL;
+  const newTrimR = origCanvas.height - trimT;
+  const newTrimB = trimR;
+  trimL = newTrimL;
+  trimT = newTrimT;
+  trimR = newTrimR;
+  trimB = newTrimB;
+
+  const tmpCanvas = document.createElement('canvas');
+  tmpCanvas.width = origCanvas.height;
+  tmpCanvas.height = origCanvas.width;
+  const tmpCtx = tmpCanvas.getContext('2d', {willReadFrequently: true});
+  if (!tmpCtx) {
+    throw new Error('Failed to get canvas context');
+  }
+  tmpCtx.imageSmoothingEnabled = false;
+  tmpCtx.clearRect(0, 0, tmpCanvas.width, tmpCanvas.height);
+  tmpCtx.translate(tmpCanvas.width / 2, tmpCanvas.height / 2);
+  tmpCtx.rotate(Math.PI / 2);
+  tmpCtx.drawImage(origCanvas, -origCanvas.width / 2, -origCanvas.height / 2);
+  origCanvas = tmpCanvas;
+
   requestUpdateTrimCanvas();
   requestColorReduction();
 }
@@ -1087,7 +1133,7 @@ function reduceColor(): void {
     quantizeTimeoutId = -1;
   }
 
-  const swDetail = new StopWatch(false);
+  const swDetail = new Debug.StopWatch(false);
 
   try {
     let outW = -1, outH = -1;
@@ -1133,8 +1179,9 @@ function reduceColor(): void {
 
     // 前処理
     {
-      let args = new Preproc.Args();
+      let args = new Preproc.PreProcArgs();
       args.colorSpace = fmt.colorSpace;
+
 
       // 入力画像の配列化
       {
@@ -1162,18 +1209,17 @@ function reduceColor(): void {
         outH = trimH;
 
         // 出力サイズ決定
+        let aspectChanged = false;
         if (widthBox.value && heightBox.value) {
           outW = parseInt(widthBox.value);
           outH = parseInt(heightBox.value);
-          Ui.show(Ui.parentLiOf(scalingMethodBox));
+          aspectChanged = true;
         } else if (widthBox.value) {
           outW = parseInt(widthBox.value);
           outH = Math.max(1, Math.round(trimH * (outW / trimW)));
-          Ui.hide(Ui.parentLiOf(scalingMethodBox));
         } else if (heightBox.value) {
           outH = parseInt(heightBox.value);
           outW = Math.max(1, Math.round(trimW * (outH / trimH)));
-          Ui.hide(Ui.parentLiOf(scalingMethodBox));
         } else {
           const MAX_SIZE = 512;
           if (outW > MAX_SIZE || outH > MAX_SIZE) {
@@ -1181,8 +1227,12 @@ function reduceColor(): void {
             outW = Math.floor(outW * scale);
             outH = Math.floor(outH * scale);
           }
-          Ui.hide(Ui.parentLiOf(scalingMethodBox));
         }
+
+        const resizing = (outW != trimW || outH != trimH);
+        Ui.setVisible(
+            Ui.parentLiOf(scalingMethodBox), resizing && aspectChanged);
+        Ui.setVisible(Ui.parentLiOf(interpolationMethodBox), resizing);
 
         widthBox.placeholder = '(' + outW + ')';
         heightBox.placeholder = '(' + outH + ')';
@@ -1212,6 +1262,12 @@ function reduceColor(): void {
         args.outSize.height = outH;
 
         args.scalingMethod = parseInt(scalingMethodBox.value);
+        if (trimUiState == TrimState.IDLE) {
+          args.interpolationMethod = parseInt(interpolationMethodBox.value);
+        } else {
+          args.interpolationMethod =
+              Preproc.InterpolationMethod.NEAREST_NEIGHBOR;
+        }
       }
 
       // 画像補正系のパラメータ決定
@@ -1374,11 +1430,18 @@ function reduceColor(): void {
       const colReduce = (minColBits < 8) || fmt.isIndexed;
       const alpReduce = fmt.hasAlpha && (fmt.alphaBits < 8);
       const colDither: DitherMethod =
-          colReduce ? parseInt(colorDitherBox.value) : DitherMethod.NONE;
+          colReduce ? parseInt(colorDitherMethodBox.value) : DitherMethod.NONE;
       const alpDither: DitherMethod =
-          alpReduce ? parseInt(alphaDitherBox.value) : DitherMethod.NONE;
-      Ui.setVisible(Ui.parentLiOf(colorDitherBox), colReduce);
-      Ui.setVisible(Ui.parentLiOf(alphaDitherBox), alpReduce);
+          alpReduce ? parseInt(alphaDitherMethodBox.value) : DitherMethod.NONE;
+      Ui.setVisible(Ui.parentLiOf(colorDitherMethodBox), colReduce);
+      Ui.setVisible(Ui.parentLiOf(alphaDitherMethodBox), alpReduce);
+
+      Ui.setVisible(
+          Ui.parentLiOf(colorDitherStrengthBox),
+          colDither != DitherMethod.NONE);
+      Ui.setVisible(
+          Ui.parentLiOf(alphaDitherStrengthBox),
+          alpDither != DitherMethod.NONE);
 
       // 減色
       const args = new Reducer.Arguments();
@@ -1386,11 +1449,19 @@ function reduceColor(): void {
       args.format = fmt;
       args.palette = palette;
       args.colorDitherMethod = colDither;
+      if (colorDitherStrengthBox.value) {
+        args.colorDitherStrength =
+            parseFloat(colorDitherStrengthBox.value) / 100;
+      }
       args.alphaDitherMethod = alpDither;
+      if (alphaDitherStrengthBox.value) {
+        args.alphaDitherStrength =
+            parseFloat(alphaDitherStrengthBox.value) / 100;
+      }
 
       Reducer.reduce(args);
 
-      reducedImage = args.output;
+      reducedImage = args.output as Images.ReducedImage;
 
       swDetail.lap('Quantization');
 
@@ -1432,7 +1503,7 @@ function reduceColor(): void {
       previewCanvas.style.width = `${canvasW}px`;
       previewCanvas.style.height = `${canvasH}px`;
       previewCanvas.style.marginTop = `${Math.floor((viewH - canvasH) / 2)}px`;
-      previewCanvas.style.imageRendering = 'pixelated';
+      previewCanvas.style.imageRendering = zoom < 1 ? 'auto' : 'pixelated';
     }
 
     swDetail.lap('Fix Preview Size');
@@ -1462,7 +1533,7 @@ function requestGenerateCode(): void {
 }
 
 function generateCode(): void {
-  const swDetail = new StopWatch(false);
+  const swDetail = new Debug.StopWatch(false);
 
   if (!reducedImage) {
     codeErrorBox.textContent = 'まだコードは生成されていません。';
@@ -1532,7 +1603,7 @@ function generateCode(): void {
     Encoder.encode(args);
 
     for (const plane of args.planes) {
-      blobs.push(plane.output.blob);
+      blobs.push(plane.output.blob as ArrayBlob);
     }
 
     const firstPlane = args.planes[0];

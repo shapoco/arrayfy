@@ -1,29 +1,71 @@
+import * as Debug from './Debug';
 import {NormalizedImage, PixelFormatInfo, ReducedImage} from './Images';
 import {DitherMethod, Palette} from './Palettes';
+import {clip} from './Utils';
+
+const ditherPattern = new Float32Array([
+  0.5 / 16 - 0.5,
+  8.5 / 16 - 0.5,
+  2.5 / 16 - 0.5,
+  10.5 / 16 - 0.5,
+  12.5 / 16 - 0.5,
+  4.5 / 16 - 0.5,
+  14.5 / 16 - 0.5,
+  6.5 / 16 - 0.5,
+  3.5 / 16 - 0.5,
+  11.5 / 16 - 0.5,
+  1.5 / 16 - 0.5,
+  9.5 / 16 - 0.5,
+  15.5 / 16 - 0.5,
+  7.5 / 16 - 0.5,
+  13.5 / 16 - 0.5,
+  5.5 / 16 - 0.5,
+]);
 
 export class Arguments {
-  public src: NormalizedImage;
+  public src: NormalizedImage|null = null;
   public colorDitherMethod: DitherMethod = DitherMethod.NONE;
   public alphaDitherMethod: DitherMethod = DitherMethod.NONE;
-  public palette: Palette;
-  public format: PixelFormatInfo;
-  public output: ReducedImage;
+  public colorDitherStrength: number = 1.0;
+  public alphaDitherStrength: number = 1.0;
+  public palette: Palette|null = null;
+  public format: PixelFormatInfo|null = null;
+  public output: ReducedImage|null = null;
 }
 
 export function reduce(args: Arguments) {
-  const norm = args.src;
+  const sw = new Debug.StopWatch(false);
+  const norm = args.src as NormalizedImage;
   const outW = norm.width;
   const outH = norm.height;
 
-  const fmt = args.format;
+  const fmt = args.format as PixelFormatInfo;
   const numColCh = fmt.numColorChannels;
 
-  const palette = args.palette;
+  const palette = args.palette as Palette;
   args.output = new ReducedImage(outW, outH, fmt, palette);
   const outData = args.output.data;
 
   const alpErrDiffuse = args.alphaDitherMethod == DitherMethod.DIFFUSION;
   const colErrDiffuse = args.colorDitherMethod == DitherMethod.DIFFUSION;
+
+  if (args.colorDitherMethod == DitherMethod.PATTERN_GRAY) {
+    const step = palette.getAverageStep();
+    for (let y = 0; y < outH; y++) {
+      const iPixelStep = y * outW * numColCh;
+      const iPatStep = (y % 4) * 4;
+      for (let x = 0; x < outW; x++) {
+        const iPixel = iPixelStep + x * numColCh;
+        const iPat = iPatStep + (x % 4);
+        for (let ch = 0; ch < numColCh; ch++) {
+          const s = step[ch];
+          let v = norm.color[iPixel + ch];
+          v += s * ditherPattern[iPat] * args.colorDitherStrength;
+          norm.color[iPixel + ch] = clip(0, 1, v);
+        }
+      }
+    }
+  }
 
   const alpOutMax = (1 << fmt.alphaBits) - 1;
   const colOut = new Uint8Array(numColCh);
@@ -61,15 +103,25 @@ export function reduce(args: Arguments) {
 
       if (alpErrDiffuse && fmt.hasAlpha) {
         // アルファチャンネルの誤差拡散
+        if (args.alphaDitherStrength < 1.0) {
+          alpErr[0] *= args.alphaDitherStrength;
+        }
         diffuseError(norm, true, alpErr, x, y, fwd);
       }
 
       if (colErrDiffuse && !transparent) {
         // カラーチャンネルの誤差拡散
+        if (args.colorDitherStrength < 1.0) {
+          for (let ch = 0; ch < numColCh; ch++) {
+            colErr[ch] *= args.colorDitherStrength;
+          }
+        }
         diffuseError(norm, false, colErr, x, y, fwd);
       }
     }  // for ix
   }  // for y
+
+  sw.lap('Reducer.reduce()');
 }
 
 function diffuseError(

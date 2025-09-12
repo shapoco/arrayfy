@@ -10,9 +10,13 @@ export const enum RoundMethod {
 export const enum DitherMethod {
   NONE,
   DIFFUSION,
+  PATTERN_GRAY,
 }
 
 export abstract class Palette {
+  // 色数
+  abstract get numColors(): number;
+
   // 減色
   abstract reduce(
       src: Float32Array, srcOffset: number, dest: Uint8Array,
@@ -25,12 +29,15 @@ export abstract class Palette {
 
   // HSL 空間での色範囲を取得
   abstract getHslRange(): Colors.HslRange;
+
+  abstract getAverageStep(): Float32Array;
 }
 
 export class FixedPalette extends Palette {
   public inMin: Float32Array;
   public inMax: Float32Array;
   public outMax: Uint8Array;
+
   constructor(public channelBits: number[], public roundMethod: RoundMethod) {
     super();
     this.inMin = new Float32Array(channelBits.length);
@@ -43,6 +50,14 @@ export class FixedPalette extends Palette {
       this.inMax[ch] = equDiv ? ((numLevel * 2 - 1) / (numLevel * 2)) : 1;
       this.outMax[ch] = numLevel - 1;
     }
+  }
+
+  get numColors(): number {
+    let n = 1;
+    for (let ch = 0; ch < this.channelBits.length; ch++) {
+      n *= (1 << this.channelBits[ch]);
+    }
+    return n;
   }
 
   reduce(
@@ -85,6 +100,15 @@ export class FixedPalette extends Palette {
   getHslRange(): Colors.HslRange {
     return {hMin: 0, hRange: 1, sMin: 0, sMax: 1, lMin: 0, lMax: 1};
   }
+
+  getAverageStep(): Float32Array {
+    const avgStep = new Float32Array(this.channelBits.length);
+    for (let ch = 0; ch < this.channelBits.length; ch++) {
+      const numLevel = 1 << this.channelBits[ch];
+      avgStep[ch] = 1 / (numLevel - 1);
+    }
+    return avgStep;
+  }
 }
 
 export class IndexedPalette extends Palette {
@@ -95,6 +119,10 @@ export class IndexedPalette extends Palette {
     const numColors = 1 << indexBits;
     this.colors = new Float32Array(numColors * channelBits.length);
     this.enabled = new Array(numColors).fill(false);
+  }
+
+  get numColors(): number {
+    return 1 << this.indexBits;
   }
 
   reduce(
@@ -146,7 +174,7 @@ export class IndexedPalette extends Palette {
   }
 
   getHslRange(): Colors.HslRange {
-    const numColors = this.colors.length / this.channelBits.length;
+    const numColors = this.numColors;
 
     // RGB 空間で重心を調べ、その重心の色相を中心とおく
     let rgbCenter = new Float32Array([0, 0, 0]);
@@ -184,5 +212,26 @@ export class IndexedPalette extends Palette {
     const hMin = Colors.hueAdd(centerH, hDistMin);
     const hRange = hDistMax - hDistMin;
     return {hMin, hRange, sMin, sMax, lMin, lMax};
+  }
+
+  getAverageStep(): Float32Array {
+    const avgStep = new Float32Array(this.channelBits.length);
+    for (let ch = 0; ch < this.channelBits.length; ch++) {
+      let levels: number[] = [];
+      for (let i = 0; i < this.numColors; i++) {
+        if (!this.enabled[i]) continue;
+        const v = this.colors[i * this.channelBits.length + ch];
+        if (!levels.includes(v)) {
+          levels.push(v);
+        }
+      }
+      levels.sort((a, b) => a - b);
+      let stepSum = 0;
+      for (let i = 1; i < levels.length; i++) {
+        stepSum += (levels[i] - levels[i - 1]);
+      }
+      avgStep[ch] = stepSum / Math.max(1, levels.length - 1);
+    }
+    return avgStep;
   }
 }
