@@ -65,6 +65,12 @@ export function makeGroupBody(children: any = []): HTMLDivElement {
   return div;
 }
 
+export function makeDiv(children: any = []): HTMLDivElement {
+  const p = document.createElement('div');
+  toElementArray(children).forEach(child => p.appendChild(child));
+  return p;
+}
+
 export function makeParagraph(children: any = []): HTMLParagraphElement {
   const p = document.createElement('p');
   toElementArray(children).forEach(child => p.appendChild(child));

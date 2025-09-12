@@ -420,11 +420,45 @@ reductionErrorBox.style.color = 'red';
 Ui.hide(previewCanvas);
 Ui.hide(reductionErrorBox);
 
-const pPreviewCanvas = Ui.makeParagraph([previewCanvas, reductionErrorBox]);
-pPreviewCanvas.style.height = '400px';
-pPreviewCanvas.style.background = '#444';
-pPreviewCanvas.style.border = 'solid 1px #444';
-pPreviewCanvas.style.textAlign = 'center';
+const previewCopyButton = Ui.makeButton('コピー');
+previewCopyButton.addEventListener('click', () => {
+  previewCanvas.toBlob((blob) => {
+    if (!blob) return;
+    navigator.clipboard.write([new ClipboardItem({'image/png': blob})])
+        .then(() => {
+          console.log('コピー成功');
+        })
+        .catch((err) => {
+          console.error('コピー失敗: ', err);
+        });
+  });
+});
+
+const previewSaveButton = Ui.makeButton('保存');
+previewSaveButton.addEventListener('click', () => {
+  previewCanvas.toBlob((blob) => {
+    if (!blob) return;
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'reducedImage.png';
+    a.click();
+    URL.revokeObjectURL(a.href);
+  });
+});
+
+const previewBlock = Ui.makeParagraph([previewCanvas, reductionErrorBox]);
+previewBlock.style.height = '400px';
+previewBlock.style.background = '#444';
+previewBlock.style.border = 'solid 1px #444';
+previewBlock.style.textAlign = 'center';
+
+const previewToolBar = Ui.makeDiv([previewCopyButton, ' ', previewSaveButton]);
+previewToolBar.style.position = 'absolute';
+previewToolBar.style.top = '0px';
+previewToolBar.style.right = '10px';
+
+const previewContainer = Ui.makeDiv([previewBlock, previewToolBar]);
+previewContainer.style.position = 'relative';
 
 const colorReductionSection = Ui.makeSection([
   Ui.makeFloatList([
@@ -448,7 +482,7 @@ const colorReductionSection = Ui.makeSection([
         ['強度: ', Ui.upDown(alphaDitherStrengthBox, 0, 100, 10), '%'],
         '透明度に対するディザリングの強度を指定します。')),
   ]),
-  pPreviewCanvas,
+  previewContainer,
 ]);
 
 const channelOrderBox = Ui.makeSelectBox(
@@ -1787,10 +1821,16 @@ function generateCode(): void {
     for (const code of args.codes) {
       const copyButton = Ui.makeButton('コピー');
       copyButton.style.float = 'right';
+      copyButton.style.marginRight = '5px';
+
+      const saveButton = Ui.makeButton('保存');
+      saveButton.style.float = 'right';
+      saveButton.style.marginRight = '5px';
 
       const title = document.createElement('div');
       title.classList.add('codePlaneTitle');
       title.appendChild(document.createTextNode(code.name));
+      title.appendChild(saveButton);
       title.appendChild(copyButton);
 
       const pre = document.createElement('pre');
@@ -1827,7 +1867,27 @@ function generateCode(): void {
 
       copyButton.addEventListener('click', () => {
         if (!pre.textContent) return;
-        navigator.clipboard.writeText(pre.textContent);
+        navigator.clipboard.writeText(pre.textContent)
+            .then(() => {
+              console.log('コピー成功');
+            })
+            .catch((err) => {
+              console.error('コピー失敗', err);
+            });
+      });
+
+      saveButton.addEventListener('click', () => {
+        const text = pre.textContent;
+        if (!text) return;
+        const blob = new Blob([text], {type: 'text/plain'});
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = code.name;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
       });
     }
 

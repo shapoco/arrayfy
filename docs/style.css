@@ -253,7 +253,7 @@ input[type="checkbox"] {
 .upDown {
   display: inline-block;
   width: 20px;
-  background-image: url('./img/updown.svg');
+  background-image: url('./img/updown.svg?20250913001300');
   background-color: transparent;
   background-repeat: no-repeat;
   background-position: 50% 50%;
@@ -314,7 +314,7 @@ input[type="checkbox"] {
   background: #cde;
   height: 30px;
   line-height: 30px;
-  padding: 0px 10px;
+  padding: 0 0 0 10px;
 }
 
 .codePlaneTitle::after {
