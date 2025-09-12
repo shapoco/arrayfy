@@ -167,6 +167,13 @@ export class NormalizedImage {
     this.color = new Float32Array(width * height * this.numColorChannels);
     this.alpha = new Float32Array(width * height);
   }
+
+  clone(): NormalizedImage {
+    const img = new NormalizedImage(this.width, this.height, this.colorSpace);
+    img.color.set(this.color);
+    img.alpha.set(this.alpha);
+    return img;
+  }
 };
 
 export class ReducedImage {

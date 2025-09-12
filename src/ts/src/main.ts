@@ -10,6 +10,7 @@ import {ChannelOrder, ColorSpace, PixelFormat} from './Images';
 import {DitherMethod, FixedPalette, IndexedPalette, Palette, RoundMethod} from './Palettes';
 import * as Preproc from './Preproc';
 import * as Reducer from './Reducer';
+import * as Resizer from './Resizer';
 import * as Ui from './Ui'
 import {clip} from './Utils';
 
@@ -231,46 +232,28 @@ const brightnessBox = Ui.makeTextBox('0', '(auto)', 5);
 const contrastBox = Ui.makeTextBox('100', '(auto)', 5);
 const invertBox = Ui.makeCheckBox('階調反転');
 
-const colorCorrectSection = Ui.pro(Ui.makeSection(Ui.makeFloatList([
+const colorCorrectSection = Ui.makeSection(Ui.makeFloatList([
   Ui.makeHeader('色調補正'),
-  Ui.tip(
+  Ui.pro(Ui.tip(
       ['色相: ', Ui.upDown(hueBox, -360, 360, 5), '°'],
-      'デフォルトは 0° です。'),
+      'デフォルトは 0° です。')),
   Ui.tip(
       ['彩度: ', Ui.upDown(saturationBox, 0, 200, 5), '%'],
       'デフォルトは 100% です。'),
-  Ui.tip(
+  Ui.pro(Ui.tip(
       ['明度: ', Ui.upDown(lightnessBox, 0, 200, 5), '%'],
-      'デフォルトは 100% です。'),
+      'デフォルトは 100% です。')),
   Ui.tip(
       ['ガンマ: ', Ui.upDown(gammaBox, 0.1, 2, 0.05)],
       'デフォルトは 1.0 です。\n空欄にすると、輝度 50% を中心にバランスが取れるように自動調整します。'),
-  Ui.tip(
+  Ui.pro(Ui.tip(
       ['輝度: ', Ui.upDown(brightnessBox, -255, 255, 8)],
-      'デフォルトは 0 です。\n空欄にすると、輝度 50% を中心にバランスが取れるように自動調整します。'),
+      'デフォルトは 0 です。\n空欄にすると、輝度 50% を中心にバランスが取れるように自動調整します。')),
   Ui.tip(
       ['コントラスト: ', Ui.upDown(contrastBox, 0, 200, 5), '%'],
       'デフォルトは 100% です。\n空欄にすると、階調が失われない範囲でダイナミックレンジが最大となるように自動調整します。'),
-  Ui.tip([invertBox.parentElement], '各チャネルの値を大小反転します。'),
-])));
-
-const pixelFormatBox = Ui.makeSelectBox(
-    [
-      {value: PixelFormat.RGBA8888, label: 'RGBA8888'},
-      //{value: PixelFormat.RGBA4444, label: 'RGBA4444'},
-      {value: PixelFormat.RGB888, label: 'RGB888'},
-      {value: PixelFormat.RGB666, label: 'RGB666'},
-      {value: PixelFormat.RGB565, label: 'RGB565'},
-      //{value: PixelFormat.RGB555, label: 'RGB555'},
-      {value: PixelFormat.RGB444, label: 'RGB444'},
-      {value: PixelFormat.RGB332, label: 'RGB332'},
-      {value: PixelFormat.RGB111, label: 'RGB111'},
-      {value: PixelFormat.GRAY4, label: 'Gray4'},
-      {value: PixelFormat.GRAY2, label: 'Gray2'},
-      {value: PixelFormat.BW, label: 'B/W'},
-      {value: PixelFormat.I2_RGB888, label: 'Index2'},
-    ],
-    PixelFormat.RGB565);
+  Ui.pro(Ui.tip([invertBox.parentElement], '各チャネルの値を大小反転します。')),
+]));
 
 const widthBox = Ui.makeTextBox('', '(auto)', 4);
 const heightBox = Ui.makeTextBox('', '(auto)', 4);
@@ -280,45 +263,42 @@ const relaxSizeLimitBox = Ui.makeCheckBox('サイズ制限緩和');
 const scalingMethodBox = Ui.makeSelectBox(
     [
       {
-        value: Preproc.ScalingMethod.ZOOM,
+        value: Resizer.ScalingMethod.ZOOM,
         label: 'ズーム',
         tip:
             'アスペクト比を維持したまま、出力画像に余白が出ないように画像をズームします。',
       },
       {
-        value: Preproc.ScalingMethod.FIT,
+        value: Resizer.ScalingMethod.FIT,
         label: 'フィット',
         tip:
             'アスペクト比を維持したまま、画像全体が出力画像に収まるようにズームします。',
       },
       {
-        value: Preproc.ScalingMethod.STRETCH,
+        value: Resizer.ScalingMethod.STRETCH,
         label: 'ストレッチ',
         tip: 'アスペクト比を無視して、出力画像に合わせて画像を引き伸ばします。',
       },
     ],
-    Preproc.ScalingMethod.ZOOM);
+    Resizer.ScalingMethod.ZOOM);
 
-const interpolationMethodBox = Ui.makeSelectBox(
+const interpMethodBox = Ui.makeSelectBox(
     [
       {
-        value: Preproc.InterpolationMethod.NEAREST_NEIGHBOR,
+        value: Resizer.InterpMethod.NEAREST_NEIGHBOR,
         label: 'なし',
         tip: 'ニアレストネイバー法で補間します。'
       },
       {
-        value: Preproc.InterpolationMethod.AVERAGE,
+        value: Resizer.InterpMethod.AVERAGE,
         label: '高精度',
         tip: '各出力画素に関係する入力画素を全て平均します。',
       },
     ],
-    Preproc.InterpolationMethod.AVERAGE);
+    Resizer.InterpMethod.AVERAGE);
 
-const formatSection = Ui.makeSection(Ui.makeFloatList([
-  Ui.makeHeader('出力形式'),
-  Ui.pro(Ui.tip(
-      ['フォーマット: ', pixelFormatBox],
-      'ピクセルフォーマットを指定します。')),
+const resizeSection = Ui.makeSection(Ui.makeFloatList([
+  Ui.makeHeader('出力サイズ'),
   Ui.tip(
       [
         'サイズ: ',
@@ -334,8 +314,8 @@ const formatSection = Ui.makeSection(Ui.makeFloatList([
   Ui.tip(
       ['拡縮方法: ', scalingMethodBox],
       'トリミングサイズと出力サイズが異なる場合の拡縮方法を指定します。'),
-  Ui.tip(
-      ['補間方法: ', interpolationMethodBox], '拡縮時の補間方法を指定します。'),
+  Ui.pro(Ui.tip(
+      ['補間方法: ', interpMethodBox], '拡縮時の補間方法を指定します。')),
 ]));
 Ui.hide(Ui.parentLiOf(relaxSizeLimitBox));
 
@@ -376,11 +356,29 @@ const paletteSection = Ui.makeSection([
         ['色空間の縮退方法: ', csrModeBox],
         'パレット内の色で表現できない色の扱いを指定します。'),
     Ui.tip(
-        ['許容誤差: ', Ui.upDown(csrHueToleranceBox, 0, 180, 1), '°'],
+        ['許容誤差: ', Ui.upDown(csrHueToleranceBox, 0, 180, 5), '°'],
         '新しい色空間の外側をどこまで空間内に丸めるかを色相の角度で指定します。'),
   ]),
   Ui.pro(paletteTable),
 ]);
+
+const pixelFormatBox = Ui.makeSelectBox(
+    [
+      {value: PixelFormat.RGBA8888, label: 'RGBA8888'},
+      //{value: PixelFormat.RGBA4444, label: 'RGBA4444'},
+      {value: PixelFormat.RGB888, label: 'RGB888'},
+      {value: PixelFormat.RGB666, label: 'RGB666'},
+      {value: PixelFormat.RGB565, label: 'RGB565'},
+      //{value: PixelFormat.RGB555, label: 'RGB555'},
+      {value: PixelFormat.RGB444, label: 'RGB444'},
+      {value: PixelFormat.RGB332, label: 'RGB332'},
+      {value: PixelFormat.RGB111, label: 'RGB111'},
+      {value: PixelFormat.GRAY4, label: 'Gray4'},
+      {value: PixelFormat.GRAY2, label: 'Gray2'},
+      {value: PixelFormat.BW, label: 'B/W'},
+      {value: PixelFormat.I2_RGB888, label: 'Index2'},
+    ],
+    PixelFormat.RGB565);
 
 const colorDitherMethodBox = Ui.makeSelectBox(
     [
@@ -389,7 +387,8 @@ const colorDitherMethodBox = Ui.makeSelectBox(
       {value: DitherMethod.PATTERN_GRAY, label: 'パターン'},
     ],
     DitherMethod.NONE);
-const colorDitherStrengthBox = Ui.makeTextBox('100', '(100)', 4);
+const colorDitherStrengthBox =
+    Ui.makeTextBox('80', `(${Reducer.DEFAULT_DITHER_STRENGTH * 100})`, 4);
 const alphaDitherMethodBox = Ui.makeSelectBox(
     [
       {value: DitherMethod.NONE, label: 'なし'},
@@ -397,7 +396,8 @@ const alphaDitherMethodBox = Ui.makeSelectBox(
       {value: DitherMethod.PATTERN_GRAY, label: 'パターン'},
     ],
     DitherMethod.NONE);
-const alphaDitherStrengthBox = Ui.makeTextBox('100', '(100)', 4);
+const alphaDitherStrengthBox =
+    Ui.makeTextBox('80', `(${Reducer.DEFAULT_DITHER_STRENGTH * 100})`, 4);
 const roundMethodBox = Ui.makeSelectBox(
     [
       {
@@ -429,6 +429,9 @@ pPreviewCanvas.style.textAlign = 'center';
 const colorReductionSection = Ui.makeSection([
   Ui.makeFloatList([
     Ui.makeHeader('減色'),
+    Ui.pro(Ui.tip(
+        ['フォーマット: ', pixelFormatBox],
+        'ピクセルフォーマットを指定します。')),
     Ui.pro(Ui.tip(
         ['丸め方法: ', roundMethodBox],
         'パレットから色を選択する際の戦略を指定します。\nディザリングを行う場合はあまり関係ありません。')),
@@ -593,6 +596,8 @@ let trimL = 0, trimT = 0, trimR = 1, trimB = 1;
 
 let trimUiState = TrimState.IDLE;
 
+let normImageCache: Images.NormalizedImage|null = null;
+
 let paletteColor: Uint32Array = new Uint32Array(256);
 let paletteEnabled: boolean[] = new Array(256).fill(false);
 let reducedImage: Images.ReducedImage|null = null;
@@ -616,9 +621,9 @@ async function onLoad() {
   container.appendChild(fileSection);
   container.appendChild(presetSection);
   container.appendChild(trimSection);
+  container.appendChild(resizeSection);
   container.appendChild(alphaSection);
   container.appendChild(colorCorrectSection);
-  container.appendChild(formatSection);
   container.appendChild(paletteSection);
   container.appendChild(colorReductionSection);
   container.appendChild(encodeSection);
@@ -627,19 +632,22 @@ async function onLoad() {
   alphaModeBox.addEventListener('change', onAlphaProcChanged);
   onAlphaProcChanged();
 
-  alphaSection.querySelectorAll('input, select').forEach((el) => {
-    el.addEventListener('change', () => {
-      requestUpdateTrimCanvas();
+  const resizeSections = [trimSection, resizeSection, alphaSection];
+  for (const section of resizeSections) {
+    section.querySelectorAll('input, select').forEach((el) => {
+      el.addEventListener('change', () => {
+        normImageCache = null;
+        requestColorReduction();
+      });
+      el.addEventListener('input', () => {
+        normImageCache = null;
+        requestColorReduction();
+      });
     });
-    el.addEventListener('input', () => {
-      requestUpdateTrimCanvas();
-    });
-  });
+  }
 
   const colorReductionSections = [
-    alphaSection,
     colorCorrectSection,
-    formatSection,
     paletteSection,
     colorReductionSection,
   ];
@@ -759,16 +767,16 @@ async function onLoad() {
       y = Math.round(y);
       switch (trimUiState) {
         case TrimState.DRAG_LEFT:
-          trimL = Math.min(x, trimR - 1);
+          setTrimRect(Math.min(x, trimR - 1), trimT, trimR, trimB);
           break;
         case TrimState.DRAG_TOP:
-          trimT = Math.min(y, trimB - 1);
+          setTrimRect(trimL, Math.min(y, trimB - 1), trimR, trimB);
           break;
         case TrimState.DRAG_RIGHT:
-          trimR = Math.max(x, trimL + 1);
+          setTrimRect(trimL, trimT, Math.max(x, trimL + 1), trimB);
           break;
         case TrimState.DRAG_BOTTOM:
-          trimB = Math.max(y, trimT + 1);
+          setTrimRect(trimL, trimT, trimR, Math.max(y, trimT + 1));
           break;
       }
       requestUpdateTrimCanvas();
@@ -788,8 +796,7 @@ async function onLoad() {
     trimUiState = TrimState.IDLE;
     trimCanvas.style.cursor = 'default';
     trimCanvas.releasePointerCapture(e.pointerId);
-    requestUpdateTrimCanvas();
-    requestColorReduction();
+    setTrimRect(trimL, trimT, trimR, trimB, true);  // 高品質で再描画
   });
   trimCanvas.addEventListener('touchstart', (e) => {
     e.preventDefault();
@@ -858,6 +865,7 @@ async function loadFromFile(name: string, file: File): Promise<void> {
 async function loadFromString(
     fileName: string, blobStr: string): Promise<void> {
   inputFileName = DEFAULT_INPUT_FILE_NAME;
+  normImageCache = null;
   return new Promise<void>((resolve, reject) => {
     const img = new Image();
     img.onload = () => {
@@ -874,7 +882,7 @@ async function loadFromString(
       ctx.drawImage(img, 0, 0);
 
       keepShowLongCode = false;
-      resetTrim();
+      resetTrim(true);
       reduceColor();
       requestUpdateTrimCanvas();
       resolve();
@@ -887,13 +895,8 @@ async function loadFromString(
 }
 
 // トリミングのリセット
-function resetTrim(): void {
-  trimL = 0;
-  trimT = 0;
-  trimR = origCanvas.width;
-  trimB = origCanvas.height;
-  requestUpdateTrimCanvas();
-  requestColorReduction();
+function resetTrim(forceUpdate: boolean = false): void {
+  setTrimRect(0, 0, origCanvas.width, origCanvas.height, forceUpdate);
 }
 
 function rotate(): void {
@@ -901,10 +904,7 @@ function rotate(): void {
   const newTrimT = trimL;
   const newTrimR = origCanvas.height - trimT;
   const newTrimB = trimR;
-  trimL = newTrimL;
-  trimT = newTrimT;
-  trimR = newTrimR;
-  trimB = newTrimB;
+  setTrimRect(newTrimL, newTrimT, newTrimR, newTrimB, true);
 
   const tmpCanvas = document.createElement('canvas');
   tmpCanvas.width = origCanvas.height;
@@ -963,6 +963,20 @@ function trimViewToNextState(x: number, y: number): TrimState {
   if (Math.abs(y - trimViewT) < 10) return TrimState.DRAG_TOP;
   if (Math.abs(y - trimViewB) < 10) return TrimState.DRAG_BOTTOM;
   return TrimState.IDLE;
+}
+
+function setTrimRect(
+    l: number, t: number, r: number, b: number,
+    forceUpdate: boolean = false): void {
+  const changed = (l != trimL || t != trimT || r != trimR || b != trimB);
+  if (!changed && !forceUpdate) return;
+  trimL = l;
+  trimT = t;
+  trimR = r;
+  trimB = b;
+  normImageCache = null;
+  requestUpdateTrimCanvas();
+  requestColorReduction();
 }
 
 function requestUpdateTrimCanvas(): void {
@@ -1177,23 +1191,74 @@ function reduceColor(): void {
       palette = new FixedPalette(fmt.colorBits, roundMethod);
     }
 
-    // 前処理
+    const srcW = origCanvas.width;
+    const srcH = origCanvas.height;
+    const trimW = Math.round(trimR - trimL);
+    const trimH = Math.round(trimB - trimT);
+    outW = trimW;
+    outH = trimH;
+
+    // 出力サイズの決定
     {
-      let args = new Preproc.PreProcArgs();
+      // 出力サイズ決定
+      let aspectChanged = false;
+      if (widthBox.value && heightBox.value) {
+        outW = parseInt(widthBox.value);
+        outH = parseInt(heightBox.value);
+        aspectChanged = true;
+      } else if (widthBox.value) {
+        outW = parseInt(widthBox.value);
+        outH = Math.max(1, Math.round(trimH * (outW / trimW)));
+      } else if (heightBox.value) {
+        outH = parseInt(heightBox.value);
+        outW = Math.max(1, Math.round(trimW * (outH / trimH)));
+      } else {
+        const MAX_SIZE = 512;
+        if (outW > MAX_SIZE || outH > MAX_SIZE) {
+          const scale = Math.min(MAX_SIZE / outW, MAX_SIZE / outH);
+          outW = Math.floor(outW * scale);
+          outH = Math.floor(outH * scale);
+        }
+      }
+
+      const resizing = (outW != trimW || outH != trimH);
+      Ui.setVisible(Ui.parentLiOf(scalingMethodBox), resizing && aspectChanged);
+      Ui.setVisible(Ui.parentLiOf(interpMethodBox), resizing);
+
+      widthBox.placeholder = '(' + outW + ')';
+      heightBox.placeholder = '(' + outH + ')';
+
+      if (outW < 1 || outH < 1) {
+        throw new Error('サイズは正の値で指定してください');
+      }
+
+      if (relaxSizeLimitBox.checked) {
+        if (outW * outH > 2048 * 2048) {
+          throw new Error('出力サイズが大きすぎます。');
+        }
+      } else {
+        if (outW * outH > 1024 * 1024) {
+          Ui.show(Ui.parentLiOf(relaxSizeLimitBox));
+          throw new Error(
+              '出力サイズが大きすぎます。処理が重くなることを承知で制限を緩和するには「サイズ制限緩和」にチェックしてください。');
+        }
+      }
+    }
+
+    // トリミング・リサイズ処理
+    if (normImageCache == null || normImageCache.width != outW ||
+        normImageCache.height != outH) {
+      let args = new Resizer.ResizeArgs();
       args.colorSpace = fmt.colorSpace;
 
+      args.srcSize.width = srcW;
+      args.srcSize.height = srcH;
 
       // 入力画像の配列化
       {
-        const srcW = origCanvas.width;
-        const srcH = origCanvas.height;
-        args.srcSize.width = srcW;
-        args.srcSize.height = srcH;
-
         const origCtx = origCanvas.getContext('2d', {willReadFrequently: true});
         if (!origCtx) throw new Error('Failed to get canvas context');
         const origImageData = origCtx.getImageData(0, 0, srcW, srcH);
-
         const origData = new Uint8Array(srcW * srcH * 4);
         for (let i = 0; i < origImageData.data.length; i++) {
           origData[i] = origImageData.data[i];
@@ -1201,85 +1266,43 @@ function reduceColor(): void {
         args.srcData = origData;
       }
 
-      // トリミング範囲と出力サイズの決定
-      {
-        const trimW = Math.round(trimR - trimL);
-        const trimH = Math.round(trimB - trimT);
-        outW = trimW;
-        outH = trimH;
-
-        // 出力サイズ決定
-        let aspectChanged = false;
-        if (widthBox.value && heightBox.value) {
-          outW = parseInt(widthBox.value);
-          outH = parseInt(heightBox.value);
-          aspectChanged = true;
-        } else if (widthBox.value) {
-          outW = parseInt(widthBox.value);
-          outH = Math.max(1, Math.round(trimH * (outW / trimW)));
-        } else if (heightBox.value) {
-          outH = parseInt(heightBox.value);
-          outW = Math.max(1, Math.round(trimW * (outH / trimH)));
-        } else {
-          const MAX_SIZE = 512;
-          if (outW > MAX_SIZE || outH > MAX_SIZE) {
-            const scale = Math.min(MAX_SIZE / outW, MAX_SIZE / outH);
-            outW = Math.floor(outW * scale);
-            outH = Math.floor(outH * scale);
-          }
-        }
-
-        const resizing = (outW != trimW || outH != trimH);
-        Ui.setVisible(
-            Ui.parentLiOf(scalingMethodBox), resizing && aspectChanged);
-        Ui.setVisible(Ui.parentLiOf(interpolationMethodBox), resizing);
-
-        widthBox.placeholder = '(' + outW + ')';
-        heightBox.placeholder = '(' + outH + ')';
-
-        if (outW < 1 || outH < 1) {
-          throw new Error('サイズは正の値で指定してください');
-        }
-
-        if (relaxSizeLimitBox.checked) {
-          if (outW * outH > 2048 * 2048) {
-            throw new Error('出力サイズが大きすぎます。');
-          }
-        } else {
-          if (outW * outH > 1024 * 1024) {
-            Ui.show(Ui.parentLiOf(relaxSizeLimitBox));
-            throw new Error(
-                '出力サイズが大きすぎます。処理が重くなることを承知で制限を緩和するには「サイズ制限緩和」にチェックしてください。');
-          }
-        }
-
-        args.trimRect.x = trimL;
-        args.trimRect.y = trimT;
-        args.trimRect.width = trimW;
-        args.trimRect.height = trimH;
-
-        args.outSize.width = outW;
-        args.outSize.height = outH;
-
-        args.scalingMethod = parseInt(scalingMethodBox.value);
-        if (trimUiState == TrimState.IDLE) {
-          args.interpolationMethod = parseInt(interpolationMethodBox.value);
-        } else {
-          args.interpolationMethod =
-              Preproc.InterpolationMethod.NEAREST_NEIGHBOR;
-        }
+      args.scalingMethod = parseInt(scalingMethodBox.value);
+      if (trimUiState == TrimState.IDLE) {
+        args.interpMethod = parseInt(interpMethodBox.value);
+      } else {
+        args.interpMethod = Resizer.InterpMethod.NEAREST_NEIGHBOR;
       }
+
+      args.trimRect.x = trimL;
+      args.trimRect.y = trimT;
+      args.trimRect.width = trimW;
+      args.trimRect.height = trimH;
+
+      args.outSize.width = outW;
+      args.outSize.height = outH;
+
+      args.applyKeyColor =
+          (parseInt(alphaModeBox.value) == Preproc.AlphaMode.SET_KEY_COLOR);
+      if (keyColorBox.value) {
+        args.keyColor = Colors.hexStrToRgb(keyColorBox.value);
+      }
+      if (keyToleranceBox.value) {
+        args.keyTolerance = parseInt(keyToleranceBox.value);
+      }
+
+      Resizer.resize(args);
+      normImageCache = args.out;
+    }
+
+    // 補正処理
+    {
+      let args = new Preproc.PreProcArgs();
+      args.src = normImageCache as Images.NormalizedImage;
 
       // 画像補正系のパラメータ決定
       {
         args.alphaProc = parseInt(alphaModeBox.value);
         args.alphaThresh = parseInt(alphaThreshBox.value);
-        if (keyColorBox.value) {
-          args.keyColor = Colors.hexStrToRgb(keyColorBox.value);
-        }
-        if (keyToleranceBox.value) {
-          args.keyTolerance = parseInt(keyToleranceBox.value);
-        }
         if (backColorBox.value) {
           args.backColor = Colors.hexStrToRgb(backColorBox.value);
         }
@@ -1357,7 +1380,7 @@ function reduceColor(): void {
               mappedPalIndices[bestPalIndex] = bestVecIndex;
               delete remainingVecIndexes[bestVecIndex];
             } else {
-              throw new Error('色空間の圧縮には 4 色以上が必要です');
+              throw new Error('色空間の圧縮には 4 色以上のパレットが必要です');
             }
           }
 
@@ -1409,7 +1432,7 @@ function reduceColor(): void {
 
       // 前処理実行
       Preproc.process(args);
-      norm = args.outImage;
+      norm = args.out;
 
       // 自動決定されたパラメータをプレースホルダに反映
       gammaBox.placeholder = `(${args.gamma.value.toFixed(2)})`;

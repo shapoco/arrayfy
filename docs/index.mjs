@@ -712,7 +712,7 @@ var PixelFormatInfo = class {
 		}
 	}
 };
-var NormalizedImage = class {
+var NormalizedImage = class NormalizedImage {
 	color;
 	alpha;
 	numColorChannels;
@@ -731,6 +731,12 @@ var NormalizedImage = class {
 		}
 		this.color = new Float32Array(width * height * this.numColorChannels);
 		this.alpha = new Float32Array(width * height);
+	}
+	clone() {
+		const img = new NormalizedImage(this.width, this.height, this.colorSpace);
+		img.color.set(this.color);
+		img.alpha.set(this.alpha);
+		return img;
 	}
 };
 var ReducedImage = class {
@@ -1131,12 +1137,6 @@ let AlphaMode = /* @__PURE__ */ function(AlphaMode$1) {
 	AlphaMode$1[AlphaMode$1["SET_KEY_COLOR"] = 3] = "SET_KEY_COLOR";
 	return AlphaMode$1;
 }({});
-let ScalingMethod = /* @__PURE__ */ function(ScalingMethod$1) {
-	ScalingMethod$1[ScalingMethod$1["ZOOM"] = 0] = "ZOOM";
-	ScalingMethod$1[ScalingMethod$1["FIT"] = 1] = "FIT";
-	ScalingMethod$1[ScalingMethod$1["STRETCH"] = 2] = "STRETCH";
-	return ScalingMethod$1;
-}({});
 let ColorSpaceReductionMode = /* @__PURE__ */ function(ColorSpaceReductionMode$1) {
 	ColorSpaceReductionMode$1[ColorSpaceReductionMode$1["NONE"] = 0] = "NONE";
 	ColorSpaceReductionMode$1[ColorSpaceReductionMode$1["CLIP"] = 1] = "CLIP";
@@ -1144,35 +1144,10 @@ let ColorSpaceReductionMode = /* @__PURE__ */ function(ColorSpaceReductionMode$1
 	ColorSpaceReductionMode$1[ColorSpaceReductionMode$1["TRANSFORM"] = 3] = "TRANSFORM";
 	return ColorSpaceReductionMode$1;
 }({});
-let InterpolationMethod = /* @__PURE__ */ function(InterpolationMethod$1) {
-	InterpolationMethod$1[InterpolationMethod$1["NEAREST_NEIGHBOR"] = 0] = "NEAREST_NEIGHBOR";
-	InterpolationMethod$1[InterpolationMethod$1["AVERAGE"] = 1] = "AVERAGE";
-	return InterpolationMethod$1;
-}({});
 var PreProcArgs = class {
-	srcData = new Uint8Array(0);
-	srcSize = {
-		width: 0,
-		height: 0
-	};
-	trimRect = {
-		x: 0,
-		y: 0,
-		width: 0,
-		height: 0
-	};
-	outSize = {
-		width: 0,
-		height: 0
-	};
-	outImage = new NormalizedImage(0, 0, ColorSpace.RGB);
-	colorSpace = ColorSpace.RGB;
-	scalingMethod = ScalingMethod.ZOOM;
-	interpolationMethod = InterpolationMethod.NEAREST_NEIGHBOR;
+	src = null;
 	alphaProc = AlphaMode.KEEP;
 	alphaThresh = 128;
-	keyColor = 0;
-	keyTolerance = 0;
 	backColor = 0;
 	hue = 0;
 	saturation = 1;
@@ -1194,31 +1169,11 @@ var PreProcArgs = class {
 		automatic: true
 	};
 	invert = false;
+	out = new NormalizedImage(0, 0, ColorSpace.RGB);
 };
 function process(args) {
 	const sw = new StopWatch(false);
-	let src = args.srcData;
-	{
-		const { data, rect } = trim(src, args.srcSize, args.trimRect, args.outSize, args.scalingMethod);
-		src = data;
-		args.trimRect = rect;
-	}
-	if (args.alphaProc == AlphaMode.SET_KEY_COLOR) applyKeyColor(src, args.srcSize, args.keyColor, args.keyTolerance);
-	const trimSize = {
-		width: args.trimRect.width,
-		height: args.trimRect.height
-	};
-	let resized = src;
-	if (trimSize.width != args.outSize.width || trimSize.height != args.outSize.height) switch (args.interpolationMethod) {
-		case InterpolationMethod.NEAREST_NEIGHBOR:
-			resized = resizeWithNearestNeighbor(src, trimSize, args.outSize);
-			break;
-		case InterpolationMethod.AVERAGE:
-			resized = resizeWithAverage(src, trimSize, args.outSize);
-			break;
-		default: throw new Error("Invalid interpolation method");
-	}
-	const img = normalize(resized, args.outSize, args.colorSpace);
+	const img = args.src.clone();
 	if (args.alphaProc == AlphaMode.BINARIZE) binarizeAlpha(img, args.alphaThresh / 255);
 	else if (args.alphaProc == AlphaMode.FILL) fillBackground(img, args.backColor);
 	correctHSL(img, args.hue, args.saturation, args.lightness);
@@ -1237,221 +1192,8 @@ function process(args) {
 			transformColorSpace(img, args.csrTransformMatrix);
 			break;
 	}
-	args.outImage = img;
+	args.out = img;
 	sw.lap("PreProc.process()");
-}
-function trim(src, srcSize, trimRect, outSize, scalingMethod) {
-	const srcW = srcSize.width;
-	const srcH = srcSize.height;
-	const outW = outSize.width;
-	const outH = outSize.height;
-	let trimX = trimRect.x;
-	let trimY = trimRect.y;
-	let trimW = trimRect.width;
-	let trimH = trimRect.height;
-	let destX = 0;
-	let destY = 0;
-	let destW = trimW;
-	let destH = trimH;
-	if (srcW < 1 || srcH < 1 || trimW < 1 || trimH < 1 || outW < 1 || outH < 1) throw new Error("画像サイズは正の値でなければなりません");
-	{
-		const outAspect = outW / outH;
-		const trimAspect = trimW / trimH;
-		if (scalingMethod == ScalingMethod.ZOOM) {
-			if (outAspect > trimAspect) {
-				trimH = Math.max(1, Math.round(trimW * outH / outW));
-				trimY += Math.round((trimRect.height - trimH) / 2);
-			} else if (outAspect < trimAspect) {
-				trimW = Math.max(1, Math.round(trimH * outW / outH));
-				trimX += Math.round((trimRect.width - trimW) / 2);
-			}
-		} else if (scalingMethod == ScalingMethod.FIT) {
-			if (outAspect > trimAspect) {
-				trimW = Math.max(1, Math.round(trimH * outW / outH));
-				destW = trimRect.width;
-				destX = Math.round((trimW - trimRect.width) / 2);
-			} else if (outAspect < trimAspect) {
-				trimH = Math.max(1, Math.round(trimW * outH / outW));
-				destH = trimRect.height;
-				destY = Math.round((trimH - trimRect.height) / 2);
-			}
-		}
-	}
-	const out = new Uint8Array(trimW * trimH * 4);
-	const srcStride = srcW * 4;
-	const destStride = trimW * 4;
-	for (let y = 0; y < destH; y++) {
-		const srcY = trimY + y;
-		if (srcY < 0 || srcH <= srcY) continue;
-		let iSrc = srcY * srcStride + trimX * 4;
-		let iDest = (destY + y) * destStride + destX * 4;
-		for (let x = 0; x < destW; x++) {
-			const srcX = trimX + x;
-			if (0 <= srcX && srcX < srcW) for (let c = 0; c < 4; c++) out[iDest++] = src[iSrc++];
-			else {
-				iDest += 4;
-				iSrc += 4;
-			}
-		}
-	}
-	trimRect.x = trimX;
-	trimRect.y = trimY;
-	trimRect.width = trimW;
-	trimRect.height = trimH;
-	return {
-		data: out,
-		rect: trimRect
-	};
-}
-function applyKeyColor(data, size, key, tol) {
-	const { r: keyR, g: keyG, b: keyB } = rgbU32ToU8(key);
-	for (let y = 0; y < size.height; y++) {
-		let i = y * size.width * 4;
-		for (let x = 0; x < size.width; x++, i += 4) {
-			const r = data[i];
-			const g = data[i + 1];
-			const b = data[i + 2];
-			data[i + 3];
-			const d = Math.abs(r - keyR) + Math.abs(g - keyG) + Math.abs(b - keyB);
-			if (d <= tol) {
-				data[i] = 0;
-				data[i + 1] = 0;
-				data[i + 2] = 0;
-				data[i + 3] = 0;
-			}
-		}
-	}
-}
-function resizeWithNearestNeighbor(src, srcSize, outSize) {
-	const srcW = srcSize.width;
-	const srcH = srcSize.height;
-	const outW = outSize.width;
-	const outH = outSize.height;
-	const srcStride = srcW * 4;
-	const outStride = outW * 4;
-	const out = new Uint8Array(outStride * outH);
-	for (let outY = 0; outY < outH; outY++) {
-		const srcY = outH <= 1 ? 0 : Math.floor(outY * (srcH - 1) / (outH - 1));
-		let iDest = outY * outStride;
-		for (let outX = 0; outX < outW; outX++) {
-			const srcX = outW <= 1 ? 0 : Math.floor(outX * (srcW - 1) / (outW - 1));
-			const iSrc = srcY * srcStride + srcX * 4;
-			for (let c = 0; c < 4; c++) out[iDest++] = src[iSrc + c];
-		}
-	}
-	return out;
-}
-function resizeWithAverage(src, srcSize, outSize) {
-	let srcW = srcSize.width;
-	let srcH = srcSize.height;
-	const outW = outSize.width;
-	const outH = outSize.height;
-	const srcStride = srcW * 4;
-	let preW = outW;
-	while (preW * 2 < srcW) preW *= 2;
-	const preStride = preW * 4;
-	const pre = new Uint8Array(preStride * srcH);
-	for (let srcY = 0; srcY < srcH; srcY++) {
-		let iDest = srcY * preStride;
-		if (preW == srcW) {
-			let iSrc = srcY * srcStride;
-			for (let i = 0; i < preW * 4; i++) pre[iDest++] = src[iSrc++];
-		} else {
-			const iSrcOffset = srcY * srcStride;
-			for (let destX = 0; destX < preW; destX++, iDest += 4) {
-				const srcFracX = destX * (srcW - 1) / (preW - 1);
-				let srcIntX = Math.floor(srcFracX);
-				let coeff = srcFracX - srcIntX;
-				if (srcIntX >= srcW - 1) {
-					srcIntX -= 1;
-					coeff = 1;
-				}
-				let iSrc = iSrcOffset + srcIntX * 4;
-				blend(src, iSrc, iSrc + 4, pre, iDest, coeff);
-			}
-		}
-	}
-	while (preW > outW) {
-		preW = Math.round(preW / 2);
-		for (let y = 0; y < srcH; y++) {
-			let iDest = y * preStride;
-			let iSrc = y * preStride;
-			for (let x = 0; x < preW; x++, iDest += 4, iSrc += 8) blend(pre, iSrc, iSrc + 4, pre, iDest, .5);
-		}
-	}
-	if (srcH == outH && preStride == outW * 4) return pre;
-	let postH = outH;
-	while (postH * 2 < srcH) postH *= 2;
-	const postStride = outW * 4;
-	const post = new Uint8Array(postStride * postH);
-	for (let destY = 0; destY < postH; destY++) {
-		let iDest = destY * postStride;
-		if (postH == srcH) {
-			let iSrc = destY * preStride;
-			for (let i = 0; i < postStride; i++) post[iDest++] = pre[iSrc++];
-		} else {
-			const srcFracY = destY * (srcH - 1) / (postH - 1);
-			let srcIntY = Math.floor(srcFracY);
-			let coeff = srcFracY - srcIntY;
-			if (srcIntY >= srcH - 1) {
-				srcIntY -= 1;
-				coeff = 1;
-			}
-			let iSrc = srcIntY * preStride;
-			for (let destX = 0; destX < outW; destX++, iDest += 4, iSrc += 4) blend(pre, iSrc, iSrc + preStride, post, iDest, coeff);
-		}
-	}
-	while (postH > outH) {
-		postH = Math.round(postH / 2);
-		for (let y = 0; y < postH; y++) {
-			let iDest = y * postStride;
-			let iSrc = y * postStride * 2;
-			for (let x = 0; x < outW; x++, iDest += 4, iSrc += 4) blend(post, iSrc, iSrc + postStride, post, iDest, .5);
-		}
-	}
-	if (postH == outH) return post;
-	else {
-		const ret = new Uint8Array(outW * outH * 4);
-		for (let i = 0; i < ret.length; i++) ret[i] = post[i];
-		return ret;
-	}
-}
-function blend(src, si0, si1, dest, di, coeff1) {
-	let coeff0 = 1 - coeff1;
-	const a0 = src[si0 + 3];
-	const a1 = src[si1 + 3];
-	const a = a0 * coeff0 + a1 * coeff1;
-	coeff0 *= a0 / 255;
-	coeff1 *= a1 / 255;
-	if (coeff0 + coeff1 > 0) {
-		const norm = 1 / (coeff0 + coeff1);
-		coeff0 *= norm;
-		coeff1 *= norm;
-	}
-	for (let c = 0; c < 3; c++) {
-		const m = src[si0++] * coeff0 + src[si1++] * coeff1;
-		dest[di++] = clip(0, 255, Math.round(m));
-	}
-	dest[di] = clip(0, 255, Math.round(a));
-}
-function normalize(data, size, colorSpace) {
-	const numPixels = size.width * size.height;
-	const img = new NormalizedImage(size.width, size.height, colorSpace);
-	for (let i = 0; i < numPixels; i++) {
-		switch (colorSpace) {
-			case ColorSpace.GRAYSCALE:
-				img.color[i] = grayscaleArrayU8(data, i * 4) / 255;
-				break;
-			case ColorSpace.RGB:
-				img.color[i * 3 + 0] = data[i * 4 + 0] / 255;
-				img.color[i * 3 + 1] = data[i * 4 + 1] / 255;
-				img.color[i * 3 + 2] = data[i * 4 + 2] / 255;
-				break;
-			default: throw new Error("Invalid color space");
-		}
-		img.alpha[i] = data[i * 4 + 3] / 255;
-	}
-	return img;
 }
 function correctHSL(img, hShift, sCoeff, lCoeff) {
 	const numPixels = img.width * img.height;
@@ -1705,12 +1447,13 @@ const ditherPattern = new Float32Array([
 	13.5 / 16 - .5,
 	5.5 / 16 - .5
 ]);
+const DEFAULT_DITHER_STRENGTH = .8;
 var Arguments = class {
 	src = null;
 	colorDitherMethod = DitherMethod.NONE;
 	alphaDitherMethod = DitherMethod.NONE;
-	colorDitherStrength = 1;
-	alphaDitherStrength = 1;
+	colorDitherStrength = DEFAULT_DITHER_STRENGTH;
+	alphaDitherStrength = DEFAULT_DITHER_STRENGTH;
 	palette = null;
 	format = null;
 	output = null;
@@ -1801,6 +1544,283 @@ function diffuseError(img, alpha, error, x, y, forward) {
 			}
 		}
 	}
+}
+
+//#endregion
+//#region src/Resizer.ts
+let ScalingMethod = /* @__PURE__ */ function(ScalingMethod$1) {
+	ScalingMethod$1[ScalingMethod$1["ZOOM"] = 0] = "ZOOM";
+	ScalingMethod$1[ScalingMethod$1["FIT"] = 1] = "FIT";
+	ScalingMethod$1[ScalingMethod$1["STRETCH"] = 2] = "STRETCH";
+	return ScalingMethod$1;
+}({});
+let InterpMethod = /* @__PURE__ */ function(InterpMethod$1) {
+	InterpMethod$1[InterpMethod$1["NEAREST_NEIGHBOR"] = 0] = "NEAREST_NEIGHBOR";
+	InterpMethod$1[InterpMethod$1["AVERAGE"] = 1] = "AVERAGE";
+	return InterpMethod$1;
+}({});
+var ResizeArgs = class {
+	srcData = new Uint8Array(0);
+	srcSize = {
+		width: 0,
+		height: 0
+	};
+	trimRect = {
+		x: 0,
+		y: 0,
+		width: 0,
+		height: 0
+	};
+	outSize = {
+		width: 0,
+		height: 0
+	};
+	colorSpace = ColorSpace.RGB;
+	scalingMethod = ScalingMethod.ZOOM;
+	interpMethod = InterpMethod.NEAREST_NEIGHBOR;
+	applyKeyColor = false;
+	keyColor = 0;
+	keyTolerance = 0;
+	out = null;
+};
+function resize(args) {
+	const sw = new StopWatch(false);
+	let src = args.srcData;
+	{
+		const { data, rect } = trim(src, args.srcSize, args.trimRect, args.outSize, args.scalingMethod);
+		src = data;
+		args.trimRect = rect;
+	}
+	if (args.applyKeyColor) applyKeyColor(src, args.srcSize, args.keyColor, args.keyTolerance);
+	const trimSize = {
+		width: args.trimRect.width,
+		height: args.trimRect.height
+	};
+	let resized = src;
+	if (trimSize.width != args.outSize.width || trimSize.height != args.outSize.height) switch (args.interpMethod) {
+		case InterpMethod.NEAREST_NEIGHBOR:
+			resized = resizeWithNearestNeighbor(src, trimSize, args.outSize);
+			break;
+		case InterpMethod.AVERAGE:
+			resized = resizeWithAverage(src, trimSize, args.outSize);
+			break;
+		default: throw new Error("Invalid interpolation method");
+	}
+	args.out = normalize(resized, args.outSize, args.colorSpace);
+	sw.lap("Resizer.resize()");
+}
+function trim(src, srcSize, trimRect, outSize, scalingMethod) {
+	const srcW = srcSize.width;
+	const srcH = srcSize.height;
+	const outW = outSize.width;
+	const outH = outSize.height;
+	let trimX = trimRect.x;
+	let trimY = trimRect.y;
+	let trimW = trimRect.width;
+	let trimH = trimRect.height;
+	let destX = 0;
+	let destY = 0;
+	let destW = trimW;
+	let destH = trimH;
+	if (srcW < 1 || srcH < 1 || trimW < 1 || trimH < 1 || outW < 1 || outH < 1) throw new Error("画像サイズは正の値でなければなりません");
+	{
+		const outAspect = outW / outH;
+		const trimAspect = trimW / trimH;
+		if (scalingMethod == ScalingMethod.ZOOM) {
+			if (outAspect > trimAspect) {
+				trimH = Math.max(1, Math.round(trimW * outH / outW));
+				trimY += Math.round((trimRect.height - trimH) / 2);
+			} else if (outAspect < trimAspect) {
+				trimW = Math.max(1, Math.round(trimH * outW / outH));
+				trimX += Math.round((trimRect.width - trimW) / 2);
+			}
+		} else if (scalingMethod == ScalingMethod.FIT) {
+			if (outAspect > trimAspect) {
+				trimW = Math.max(1, Math.round(trimH * outW / outH));
+				destW = trimRect.width;
+				destX = Math.round((trimW - trimRect.width) / 2);
+			} else if (outAspect < trimAspect) {
+				trimH = Math.max(1, Math.round(trimW * outH / outW));
+				destH = trimRect.height;
+				destY = Math.round((trimH - trimRect.height) / 2);
+			}
+		}
+	}
+	const out = new Uint8Array(trimW * trimH * 4);
+	const srcStride = srcW * 4;
+	const destStride = trimW * 4;
+	for (let y = 0; y < destH; y++) {
+		const srcY = trimY + y;
+		if (srcY < 0 || srcH <= srcY) continue;
+		let iSrc = srcY * srcStride + trimX * 4;
+		let iDest = (destY + y) * destStride + destX * 4;
+		for (let x = 0; x < destW; x++) {
+			const srcX = trimX + x;
+			if (0 <= srcX && srcX < srcW) for (let c = 0; c < 4; c++) out[iDest++] = src[iSrc++];
+			else {
+				iDest += 4;
+				iSrc += 4;
+			}
+		}
+	}
+	trimRect.x = trimX;
+	trimRect.y = trimY;
+	trimRect.width = trimW;
+	trimRect.height = trimH;
+	return {
+		data: out,
+		rect: trimRect
+	};
+}
+function applyKeyColor(data, size, key, tol) {
+	const { r: keyR, g: keyG, b: keyB } = rgbU32ToU8(key);
+	for (let y = 0; y < size.height; y++) {
+		let i = y * size.width * 4;
+		for (let x = 0; x < size.width; x++, i += 4) {
+			const r = data[i];
+			const g = data[i + 1];
+			const b = data[i + 2];
+			data[i + 3];
+			const d = Math.abs(r - keyR) + Math.abs(g - keyG) + Math.abs(b - keyB);
+			if (d <= tol) {
+				data[i] = 0;
+				data[i + 1] = 0;
+				data[i + 2] = 0;
+				data[i + 3] = 0;
+			}
+		}
+	}
+}
+function resizeWithNearestNeighbor(src, srcSize, outSize) {
+	const srcW = srcSize.width;
+	const srcH = srcSize.height;
+	const outW = outSize.width;
+	const outH = outSize.height;
+	const srcStride = srcW * 4;
+	const outStride = outW * 4;
+	const out = new Uint8Array(outStride * outH);
+	for (let outY = 0; outY < outH; outY++) {
+		const srcY = outH <= 1 ? 0 : Math.floor(outY * (srcH - 1) / (outH - 1));
+		let iDest = outY * outStride;
+		for (let outX = 0; outX < outW; outX++) {
+			const srcX = outW <= 1 ? 0 : Math.floor(outX * (srcW - 1) / (outW - 1));
+			const iSrc = srcY * srcStride + srcX * 4;
+			for (let c = 0; c < 4; c++) out[iDest++] = src[iSrc + c];
+		}
+	}
+	return out;
+}
+function resizeWithAverage(src, srcSize, outSize) {
+	let srcW = srcSize.width;
+	let srcH = srcSize.height;
+	const outW = outSize.width;
+	const outH = outSize.height;
+	const srcStride = srcW * 4;
+	let preW = outW;
+	while (preW * 2 < srcW) preW *= 2;
+	const preStride = preW * 4;
+	const pre = new Uint8Array(preStride * srcH);
+	for (let srcY = 0; srcY < srcH; srcY++) {
+		let iDest = srcY * preStride;
+		if (preW == srcW) {
+			let iSrc = srcY * srcStride;
+			for (let i = 0; i < preW * 4; i++) pre[iDest++] = src[iSrc++];
+		} else {
+			const iSrcOffset = srcY * srcStride;
+			for (let destX = 0; destX < preW; destX++, iDest += 4) {
+				const srcFracX = destX * (srcW - 1) / (preW - 1);
+				let srcIntX = Math.floor(srcFracX);
+				let coeff = srcFracX - srcIntX;
+				if (srcIntX >= srcW - 1) {
+					srcIntX -= 1;
+					coeff = 1;
+				}
+				let iSrc = iSrcOffset + srcIntX * 4;
+				blend(src, iSrc, iSrc + 4, pre, iDest, coeff);
+			}
+		}
+	}
+	while (preW > outW) {
+		preW = Math.round(preW / 2);
+		for (let y = 0; y < srcH; y++) {
+			let iDest = y * preStride;
+			let iSrc = y * preStride;
+			for (let x = 0; x < preW; x++, iDest += 4, iSrc += 8) blend(pre, iSrc, iSrc + 4, pre, iDest, .5);
+		}
+	}
+	if (srcH == outH && preStride == outW * 4) return pre;
+	let postH = outH;
+	while (postH * 2 < srcH) postH *= 2;
+	const postStride = outW * 4;
+	const post = new Uint8Array(postStride * postH);
+	for (let destY = 0; destY < postH; destY++) {
+		let iDest = destY * postStride;
+		if (postH == srcH) {
+			let iSrc = destY * preStride;
+			for (let i = 0; i < postStride; i++) post[iDest++] = pre[iSrc++];
+		} else {
+			const srcFracY = destY * (srcH - 1) / (postH - 1);
+			let srcIntY = Math.floor(srcFracY);
+			let coeff = srcFracY - srcIntY;
+			if (srcIntY >= srcH - 1) {
+				srcIntY -= 1;
+				coeff = 1;
+			}
+			let iSrc = srcIntY * preStride;
+			for (let destX = 0; destX < outW; destX++, iDest += 4, iSrc += 4) blend(pre, iSrc, iSrc + preStride, post, iDest, coeff);
+		}
+	}
+	while (postH > outH) {
+		postH = Math.round(postH / 2);
+		for (let y = 0; y < postH; y++) {
+			let iDest = y * postStride;
+			let iSrc = y * postStride * 2;
+			for (let x = 0; x < outW; x++, iDest += 4, iSrc += 4) blend(post, iSrc, iSrc + postStride, post, iDest, .5);
+		}
+	}
+	if (postH == outH) return post;
+	else {
+		const ret = new Uint8Array(outW * outH * 4);
+		for (let i = 0; i < ret.length; i++) ret[i] = post[i];
+		return ret;
+	}
+}
+function blend(src, si0, si1, dest, di, coeff1) {
+	let coeff0 = 1 - coeff1;
+	const a0 = src[si0 + 3];
+	const a1 = src[si1 + 3];
+	const a = a0 * coeff0 + a1 * coeff1;
+	coeff0 *= a0 / 255;
+	coeff1 *= a1 / 255;
+	if (coeff0 + coeff1 > 0) {
+		const norm = 1 / (coeff0 + coeff1);
+		coeff0 *= norm;
+		coeff1 *= norm;
+	}
+	for (let c = 0; c < 3; c++) {
+		const m = src[si0++] * coeff0 + src[si1++] * coeff1;
+		dest[di++] = clip(0, 255, Math.round(m));
+	}
+	dest[di] = clip(0, 255, Math.round(a));
+}
+function normalize(data, size, colorSpace) {
+	const numPixels = size.width * size.height;
+	const img = new NormalizedImage(size.width, size.height, colorSpace);
+	for (let i = 0; i < numPixels; i++) {
+		switch (colorSpace) {
+			case ColorSpace.GRAYSCALE:
+				img.color[i] = grayscaleArrayU8(data, i * 4) / 255;
+				break;
+			case ColorSpace.RGB:
+				img.color[i * 3 + 0] = data[i * 4 + 0] / 255;
+				img.color[i * 3 + 1] = data[i * 4 + 1] / 255;
+				img.color[i * 3 + 2] = data[i * 4 + 2] / 255;
+				break;
+			default: throw new Error("Invalid color space");
+		}
+		img.alpha[i] = data[i * 4 + 3] / 255;
+	}
+	return img;
 }
 
 //#endregion
@@ -2155,32 +2175,108 @@ const gammaBox = makeTextBox("1", "(auto)", 4);
 const brightnessBox = makeTextBox("0", "(auto)", 5);
 const contrastBox = makeTextBox("100", "(auto)", 5);
 const invertBox = makeCheckBox("階調反転");
-const colorCorrectSection = pro(makeSection(makeFloatList([
+const colorCorrectSection = makeSection(makeFloatList([
 	makeHeader("色調補正"),
-	tip([
+	pro(tip([
 		"色相: ",
 		upDown(hueBox, -360, 360, 5),
 		"°"
-	], "デフォルトは 0° です。"),
+	], "デフォルトは 0° です。")),
 	tip([
 		"彩度: ",
 		upDown(saturationBox, 0, 200, 5),
 		"%"
 	], "デフォルトは 100% です。"),
-	tip([
+	pro(tip([
 		"明度: ",
 		upDown(lightnessBox, 0, 200, 5),
 		"%"
-	], "デフォルトは 100% です。"),
+	], "デフォルトは 100% です。")),
 	tip(["ガンマ: ", upDown(gammaBox, .1, 2, .05)], "デフォルトは 1.0 です。\n空欄にすると、輝度 50% を中心にバランスが取れるように自動調整します。"),
-	tip(["輝度: ", upDown(brightnessBox, -255, 255, 8)], "デフォルトは 0 です。\n空欄にすると、輝度 50% を中心にバランスが取れるように自動調整します。"),
+	pro(tip(["輝度: ", upDown(brightnessBox, -255, 255, 8)], "デフォルトは 0 です。\n空欄にすると、輝度 50% を中心にバランスが取れるように自動調整します。")),
 	tip([
 		"コントラスト: ",
 		upDown(contrastBox, 0, 200, 5),
 		"%"
 	], "デフォルトは 100% です。\n空欄にすると、階調が失われない範囲でダイナミックレンジが最大となるように自動調整します。"),
-	tip([invertBox.parentElement], "各チャネルの値を大小反転します。")
-])));
+	pro(tip([invertBox.parentElement], "各チャネルの値を大小反転します。"))
+]));
+const widthBox = makeTextBox("", "(auto)", 4);
+const heightBox = makeTextBox("", "(auto)", 4);
+const relaxSizeLimitBox = makeCheckBox("サイズ制限緩和");
+const scalingMethodBox = makeSelectBox([
+	{
+		value: ScalingMethod.ZOOM,
+		label: "ズーム",
+		tip: "アスペクト比を維持したまま、出力画像に余白が出ないように画像をズームします。"
+	},
+	{
+		value: ScalingMethod.FIT,
+		label: "フィット",
+		tip: "アスペクト比を維持したまま、画像全体が出力画像に収まるようにズームします。"
+	},
+	{
+		value: ScalingMethod.STRETCH,
+		label: "ストレッチ",
+		tip: "アスペクト比を無視して、出力画像に合わせて画像を引き伸ばします。"
+	}
+], ScalingMethod.ZOOM);
+const interpMethodBox = makeSelectBox([{
+	value: InterpMethod.NEAREST_NEIGHBOR,
+	label: "なし",
+	tip: "ニアレストネイバー法で補間します。"
+}, {
+	value: InterpMethod.AVERAGE,
+	label: "高精度",
+	tip: "各出力画素に関係する入力画素を全て平均します。"
+}], InterpMethod.AVERAGE);
+const resizeSection = makeSection(makeFloatList([
+	makeHeader("出力サイズ"),
+	tip([
+		"サイズ: ",
+		upDown(widthBox, 1, 1024, 1),
+		" x ",
+		upDown(heightBox, 1, 1024, 1),
+		" px"
+	], "片方を空欄にすると他方はアスペクト比に基づいて自動的に決定されます。"),
+	tip([relaxSizeLimitBox.parentElement], "出力サイズの制限を緩和します。処理が重くなる可能性があります。"),
+	tip(["拡縮方法: ", scalingMethodBox], "トリミングサイズと出力サイズが異なる場合の拡縮方法を指定します。"),
+	pro(tip(["補間方法: ", interpMethodBox], "拡縮時の補間方法を指定します。"))
+]));
+hide(parentLiOf(relaxSizeLimitBox));
+const csrModeBox = makeSelectBox([
+	{
+		value: ColorSpaceReductionMode.NONE,
+		label: "縮退しない",
+		tip: "元の色を保ったまま減色を行います。誤差拡散と組み合わせると不自然になることがあります。"
+	},
+	{
+		value: ColorSpaceReductionMode.CLIP,
+		label: "切り捨てる",
+		tip: "新しい色空間で表現できない色は彩度を下げて灰色にします。"
+	},
+	{
+		value: ColorSpaceReductionMode.FOLD,
+		label: "折り畳む",
+		tip: "新しい色空間で表現できない色は色相環上で折り返して空間内に収めます。"
+	},
+	{
+		value: ColorSpaceReductionMode.TRANSFORM,
+		label: "圧縮する",
+		tip: "元の色空間全体を変形してパレットの空間内に収まるようにします。"
+	}
+], ColorSpaceReductionMode.FOLD);
+const csrHueToleranceBox = makeTextBox("60", "(60)", 4);
+const paletteTable = document.createElement("table");
+const paletteSection = makeSection([makeFloatList([
+	makeHeader("パレット"),
+	tip(["色空間の縮退方法: ", csrModeBox], "パレット内の色で表現できない色の扱いを指定します。"),
+	tip([
+		"許容誤差: ",
+		upDown(csrHueToleranceBox, 0, 180, 5),
+		"°"
+	], "新しい色空間の外側をどこまで空間内に丸めるかを色相の角度で指定します。")
+]), pro(paletteTable)]);
 const pixelFormatBox = makeSelectBox([
 	{
 		value: PixelFormat.RGBA8888,
@@ -2227,83 +2323,6 @@ const pixelFormatBox = makeSelectBox([
 		label: "Index2"
 	}
 ], PixelFormat.RGB565);
-const widthBox = makeTextBox("", "(auto)", 4);
-const heightBox = makeTextBox("", "(auto)", 4);
-const relaxSizeLimitBox = makeCheckBox("サイズ制限緩和");
-const scalingMethodBox = makeSelectBox([
-	{
-		value: ScalingMethod.ZOOM,
-		label: "ズーム",
-		tip: "アスペクト比を維持したまま、出力画像に余白が出ないように画像をズームします。"
-	},
-	{
-		value: ScalingMethod.FIT,
-		label: "フィット",
-		tip: "アスペクト比を維持したまま、画像全体が出力画像に収まるようにズームします。"
-	},
-	{
-		value: ScalingMethod.STRETCH,
-		label: "ストレッチ",
-		tip: "アスペクト比を無視して、出力画像に合わせて画像を引き伸ばします。"
-	}
-], ScalingMethod.ZOOM);
-const interpolationMethodBox = makeSelectBox([{
-	value: InterpolationMethod.NEAREST_NEIGHBOR,
-	label: "なし",
-	tip: "ニアレストネイバー法で補間します。"
-}, {
-	value: InterpolationMethod.AVERAGE,
-	label: "高精度",
-	tip: "各出力画素に関係する入力画素を全て平均します。"
-}], InterpolationMethod.AVERAGE);
-const formatSection = makeSection(makeFloatList([
-	makeHeader("出力形式"),
-	pro(tip(["フォーマット: ", pixelFormatBox], "ピクセルフォーマットを指定します。")),
-	tip([
-		"サイズ: ",
-		upDown(widthBox, 1, 1024, 1),
-		" x ",
-		upDown(heightBox, 1, 1024, 1),
-		" px"
-	], "片方を空欄にすると他方はアスペクト比に基づいて自動的に決定されます。"),
-	tip([relaxSizeLimitBox.parentElement], "出力サイズの制限を緩和します。処理が重くなる可能性があります。"),
-	tip(["拡縮方法: ", scalingMethodBox], "トリミングサイズと出力サイズが異なる場合の拡縮方法を指定します。"),
-	tip(["補間方法: ", interpolationMethodBox], "拡縮時の補間方法を指定します。")
-]));
-hide(parentLiOf(relaxSizeLimitBox));
-const csrModeBox = makeSelectBox([
-	{
-		value: ColorSpaceReductionMode.NONE,
-		label: "縮退しない",
-		tip: "元の色を保ったまま減色を行います。誤差拡散と組み合わせると不自然になることがあります。"
-	},
-	{
-		value: ColorSpaceReductionMode.CLIP,
-		label: "切り捨てる",
-		tip: "新しい色空間で表現できない色は彩度を下げて灰色にします。"
-	},
-	{
-		value: ColorSpaceReductionMode.FOLD,
-		label: "折り畳む",
-		tip: "新しい色空間で表現できない色は色相環上で折り返して空間内に収めます。"
-	},
-	{
-		value: ColorSpaceReductionMode.TRANSFORM,
-		label: "圧縮する",
-		tip: "元の色空間全体を変形してパレットの空間内に収まるようにします。"
-	}
-], ColorSpaceReductionMode.FOLD);
-const csrHueToleranceBox = makeTextBox("60", "(60)", 4);
-const paletteTable = document.createElement("table");
-const paletteSection = makeSection([makeFloatList([
-	makeHeader("パレット"),
-	tip(["色空間の縮退方法: ", csrModeBox], "パレット内の色で表現できない色の扱いを指定します。"),
-	tip([
-		"許容誤差: ",
-		upDown(csrHueToleranceBox, 0, 180, 1),
-		"°"
-	], "新しい色空間の外側をどこまで空間内に丸めるかを色相の角度で指定します。")
-]), pro(paletteTable)]);
 const colorDitherMethodBox = makeSelectBox([
 	{
 		value: DitherMethod.NONE,
@@ -2318,7 +2337,7 @@ const colorDitherMethodBox = makeSelectBox([
 		label: "パターン"
 	}
 ], DitherMethod.NONE);
-const colorDitherStrengthBox = makeTextBox("100", "(100)", 4);
+const colorDitherStrengthBox = makeTextBox("80", `(${DEFAULT_DITHER_STRENGTH * 100})`, 4);
 const alphaDitherMethodBox = makeSelectBox([
 	{
 		value: DitherMethod.NONE,
@@ -2333,7 +2352,7 @@ const alphaDitherMethodBox = makeSelectBox([
 		label: "パターン"
 	}
 ], DitherMethod.NONE);
-const alphaDitherStrengthBox = makeTextBox("100", "(100)", 4);
+const alphaDitherStrengthBox = makeTextBox("80", `(${DEFAULT_DITHER_STRENGTH * 100})`, 4);
 const roundMethodBox = makeSelectBox([{
 	value: RoundMethod.NEAREST,
 	label: "近似値",
@@ -2356,6 +2375,7 @@ pPreviewCanvas.style.border = "solid 1px #444";
 pPreviewCanvas.style.textAlign = "center";
 const colorReductionSection = makeSection([makeFloatList([
 	makeHeader("減色"),
+	pro(tip(["フォーマット: ", pixelFormatBox], "ピクセルフォーマットを指定します。")),
 	pro(tip(["丸め方法: ", roundMethodBox], "パレットから色を選択する際の戦略を指定します。\nディザリングを行う場合はあまり関係ありません。")),
 	tip(["ディザ: ", colorDitherMethodBox], "あえてノイズを加えることでできるだけ元画像の色を再現します。"),
 	tip([
@@ -2533,6 +2553,7 @@ let generateCodeTimeoutId = -1;
 let worldX0 = 0, worldY0 = 0, zoom = 1;
 let trimL = 0, trimT = 0, trimR = 1, trimB = 1;
 let trimUiState = TrimState.IDLE;
+let normImageCache = null;
 let paletteColor = new Uint32Array(256);
 let paletteEnabled = new Array(256).fill(false);
 let reducedImage = null;
@@ -2550,27 +2571,32 @@ async function onLoad() {
 	container.appendChild(fileSection);
 	container.appendChild(presetSection);
 	container.appendChild(trimSection);
+	container.appendChild(resizeSection);
 	container.appendChild(alphaSection);
 	container.appendChild(colorCorrectSection);
-	container.appendChild(formatSection);
 	container.appendChild(paletteSection);
 	container.appendChild(colorReductionSection);
 	container.appendChild(encodeSection);
 	container.appendChild(codeGenSection);
 	alphaModeBox.addEventListener("change", onAlphaProcChanged);
 	onAlphaProcChanged();
-	alphaSection.querySelectorAll("input, select").forEach((el) => {
+	const resizeSections = [
+		trimSection,
+		resizeSection,
+		alphaSection
+	];
+	for (const section of resizeSections) section.querySelectorAll("input, select").forEach((el) => {
 		el.addEventListener("change", () => {
-			requestUpdateTrimCanvas();
+			normImageCache = null;
+			requestColorReduction();
 		});
 		el.addEventListener("input", () => {
-			requestUpdateTrimCanvas();
+			normImageCache = null;
+			requestColorReduction();
 		});
 	});
 	const colorReductionSections = [
-		alphaSection,
 		colorCorrectSection,
-		formatSection,
 		paletteSection,
 		colorReductionSection
 	];
@@ -2668,16 +2694,16 @@ async function onLoad() {
 			y = Math.round(y);
 			switch (trimUiState) {
 				case TrimState.DRAG_LEFT:
-					trimL = Math.min(x, trimR - 1);
+					setTrimRect(Math.min(x, trimR - 1), trimT, trimR, trimB);
 					break;
 				case TrimState.DRAG_TOP:
-					trimT = Math.min(y, trimB - 1);
+					setTrimRect(trimL, Math.min(y, trimB - 1), trimR, trimB);
 					break;
 				case TrimState.DRAG_RIGHT:
-					trimR = Math.max(x, trimL + 1);
+					setTrimRect(trimL, trimT, Math.max(x, trimL + 1), trimB);
 					break;
 				case TrimState.DRAG_BOTTOM:
-					trimB = Math.max(y, trimT + 1);
+					setTrimRect(trimL, trimT, trimR, Math.max(y, trimT + 1));
 					break;
 			}
 			requestUpdateTrimCanvas();
@@ -2697,8 +2723,7 @@ async function onLoad() {
 		trimUiState = TrimState.IDLE;
 		trimCanvas.style.cursor = "default";
 		trimCanvas.releasePointerCapture(e.pointerId);
-		requestUpdateTrimCanvas();
-		requestColorReduction();
+		setTrimRect(trimL, trimT, trimR, trimB, true);
 	});
 	trimCanvas.addEventListener("touchstart", (e) => {
 		e.preventDefault();
@@ -2756,6 +2781,7 @@ async function loadFromFile(name, file) {
 }
 async function loadFromString(fileName, blobStr) {
 	inputFileName = DEFAULT_INPUT_FILE_NAME;
+	normImageCache = null;
 	return new Promise((resolve, reject) => {
 		const img = new Image();
 		img.onload = () => {
@@ -2770,7 +2796,7 @@ async function loadFromString(fileName, blobStr) {
 			ctx.clearRect(0, 0, img.width, img.height);
 			ctx.drawImage(img, 0, 0);
 			keepShowLongCode = false;
-			resetTrim();
+			resetTrim(true);
 			reduceColor();
 			requestUpdateTrimCanvas();
 			resolve();
@@ -2781,23 +2807,15 @@ async function loadFromString(fileName, blobStr) {
 		img.src = blobStr;
 	});
 }
-function resetTrim() {
-	trimL = 0;
-	trimT = 0;
-	trimR = origCanvas.width;
-	trimB = origCanvas.height;
-	requestUpdateTrimCanvas();
-	requestColorReduction();
+function resetTrim(forceUpdate = false) {
+	setTrimRect(0, 0, origCanvas.width, origCanvas.height, forceUpdate);
 }
 function rotate() {
 	const newTrimL = origCanvas.height - trimB;
 	const newTrimT = trimL;
 	const newTrimR = origCanvas.height - trimT;
 	const newTrimB = trimR;
-	trimL = newTrimL;
-	trimT = newTrimT;
-	trimR = newTrimR;
-	trimB = newTrimB;
+	setTrimRect(newTrimL, newTrimT, newTrimR, newTrimB, true);
 	const tmpCanvas = document.createElement("canvas");
 	tmpCanvas.width = origCanvas.height;
 	tmpCanvas.height = origCanvas.width;
@@ -2850,6 +2868,17 @@ function trimViewToNextState(x, y) {
 	if (Math.abs(y - trimViewB) < 10) return TrimState.DRAG_BOTTOM;
 	return TrimState.IDLE;
 }
+function setTrimRect(l, t, r, b, forceUpdate = false) {
+	const changed = l != trimL || t != trimT || r != trimR || b != trimB;
+	if (!changed && !forceUpdate) return;
+	trimL = l;
+	trimT = t;
+	trimR = r;
+	trimB = b;
+	normImageCache = null;
+	requestUpdateTrimCanvas();
+	requestColorReduction();
+}
 function requestUpdateTrimCanvas() {
 	if (updateTrimCanvasTimeoutId >= 0) return;
 	updateTrimCanvasTimeoutId = setTimeout(() => {
@@ -2895,7 +2924,7 @@ function updateTrimCanvas() {
 		ctx.imageSmoothingEnabled = true;
 	}
 	{
-		const lineWidth = 3;
+		const lineWidth = 2;
 		ctx.fillStyle = "rgba(0, 0, 0, 0.5)";
 		ctx.fillRect(trimViewL - lineWidth - 2, 0, lineWidth + 4, canvasH);
 		ctx.fillRect(0, trimViewT - lineWidth - 2, canvasW, lineWidth + 4);
@@ -3003,14 +3032,51 @@ function reduceColor() {
 				indexedPalette.enabled[i] = paletteEnabled[i];
 			}
 		} else palette = new FixedPalette(fmt.colorBits, roundMethod);
+		const srcW = origCanvas.width;
+		const srcH = origCanvas.height;
+		const trimW = Math.round(trimR - trimL);
+		const trimH = Math.round(trimB - trimT);
+		outW = trimW;
+		outH = trimH;
 		{
-			let args = new PreProcArgs();
+			let aspectChanged = false;
+			if (widthBox.value && heightBox.value) {
+				outW = parseInt(widthBox.value);
+				outH = parseInt(heightBox.value);
+				aspectChanged = true;
+			} else if (widthBox.value) {
+				outW = parseInt(widthBox.value);
+				outH = Math.max(1, Math.round(trimH * (outW / trimW)));
+			} else if (heightBox.value) {
+				outH = parseInt(heightBox.value);
+				outW = Math.max(1, Math.round(trimW * (outH / trimH)));
+			} else {
+				const MAX_SIZE = 512;
+				if (outW > MAX_SIZE || outH > MAX_SIZE) {
+					const scale = Math.min(MAX_SIZE / outW, MAX_SIZE / outH);
+					outW = Math.floor(outW * scale);
+					outH = Math.floor(outH * scale);
+				}
+			}
+			const resizing = outW != trimW || outH != trimH;
+			setVisible(parentLiOf(scalingMethodBox), resizing && aspectChanged);
+			setVisible(parentLiOf(interpMethodBox), resizing);
+			widthBox.placeholder = "(" + outW + ")";
+			heightBox.placeholder = "(" + outH + ")";
+			if (outW < 1 || outH < 1) throw new Error("サイズは正の値で指定してください");
+			if (relaxSizeLimitBox.checked) {
+				if (outW * outH > 2048 * 2048) throw new Error("出力サイズが大きすぎます。");
+			} else if (outW * outH > 1024 * 1024) {
+				show(parentLiOf(relaxSizeLimitBox));
+				throw new Error("出力サイズが大きすぎます。処理が重くなることを承知で制限を緩和するには「サイズ制限緩和」にチェックしてください。");
+			}
+		}
+		if (normImageCache == null || normImageCache.width != outW || normImageCache.height != outH) {
+			let args = new ResizeArgs();
 			args.colorSpace = fmt.colorSpace;
+			args.srcSize.width = srcW;
+			args.srcSize.height = srcH;
 			{
-				const srcW = origCanvas.width;
-				const srcH = origCanvas.height;
-				args.srcSize.width = srcW;
-				args.srcSize.height = srcH;
 				const origCtx = origCanvas.getContext("2d", { willReadFrequently: true });
 				if (!origCtx) throw new Error("Failed to get canvas context");
 				const origImageData = origCtx.getImageData(0, 0, srcW, srcH);
@@ -3018,56 +3084,26 @@ function reduceColor() {
 				for (let i = 0; i < origImageData.data.length; i++) origData[i] = origImageData.data[i];
 				args.srcData = origData;
 			}
-			{
-				const trimW = Math.round(trimR - trimL);
-				const trimH = Math.round(trimB - trimT);
-				outW = trimW;
-				outH = trimH;
-				let aspectChanged = false;
-				if (widthBox.value && heightBox.value) {
-					outW = parseInt(widthBox.value);
-					outH = parseInt(heightBox.value);
-					aspectChanged = true;
-				} else if (widthBox.value) {
-					outW = parseInt(widthBox.value);
-					outH = Math.max(1, Math.round(trimH * (outW / trimW)));
-				} else if (heightBox.value) {
-					outH = parseInt(heightBox.value);
-					outW = Math.max(1, Math.round(trimW * (outH / trimH)));
-				} else {
-					const MAX_SIZE = 512;
-					if (outW > MAX_SIZE || outH > MAX_SIZE) {
-						const scale = Math.min(MAX_SIZE / outW, MAX_SIZE / outH);
-						outW = Math.floor(outW * scale);
-						outH = Math.floor(outH * scale);
-					}
-				}
-				const resizing = outW != trimW || outH != trimH;
-				setVisible(parentLiOf(scalingMethodBox), resizing && aspectChanged);
-				setVisible(parentLiOf(interpolationMethodBox), resizing);
-				widthBox.placeholder = "(" + outW + ")";
-				heightBox.placeholder = "(" + outH + ")";
-				if (outW < 1 || outH < 1) throw new Error("サイズは正の値で指定してください");
-				if (relaxSizeLimitBox.checked) {
-					if (outW * outH > 2048 * 2048) throw new Error("出力サイズが大きすぎます。");
-				} else if (outW * outH > 1024 * 1024) {
-					show(parentLiOf(relaxSizeLimitBox));
-					throw new Error("出力サイズが大きすぎます。処理が重くなることを承知で制限を緩和するには「サイズ制限緩和」にチェックしてください。");
-				}
-				args.trimRect.x = trimL;
-				args.trimRect.y = trimT;
-				args.trimRect.width = trimW;
-				args.trimRect.height = trimH;
-				args.outSize.width = outW;
-				args.outSize.height = outH;
-				args.scalingMethod = parseInt(scalingMethodBox.value);
-				if (trimUiState == TrimState.IDLE) args.interpolationMethod = parseInt(interpolationMethodBox.value);
-				else args.interpolationMethod = InterpolationMethod.NEAREST_NEIGHBOR;
-			}
-			args.alphaProc = parseInt(alphaModeBox.value);
-			args.alphaThresh = parseInt(alphaThreshBox.value);
+			args.scalingMethod = parseInt(scalingMethodBox.value);
+			if (trimUiState == TrimState.IDLE) args.interpMethod = parseInt(interpMethodBox.value);
+			else args.interpMethod = InterpMethod.NEAREST_NEIGHBOR;
+			args.trimRect.x = trimL;
+			args.trimRect.y = trimT;
+			args.trimRect.width = trimW;
+			args.trimRect.height = trimH;
+			args.outSize.width = outW;
+			args.outSize.height = outH;
+			args.applyKeyColor = parseInt(alphaModeBox.value) == AlphaMode.SET_KEY_COLOR;
 			if (keyColorBox.value) args.keyColor = hexStrToRgb(keyColorBox.value);
 			if (keyToleranceBox.value) args.keyTolerance = parseInt(keyToleranceBox.value);
+			resize(args);
+			normImageCache = args.out;
+		}
+		{
+			let args = new PreProcArgs();
+			args.src = normImageCache;
+			args.alphaProc = parseInt(alphaModeBox.value);
+			args.alphaThresh = parseInt(alphaThreshBox.value);
 			if (backColorBox.value) args.backColor = hexStrToRgb(backColorBox.value);
 			if (hueBox.value && fmt.numColorChannels > 1) args.hue = parseFloat(hueBox.value) / 360;
 			if (saturationBox.value && fmt.numColorChannels > 1) args.saturation = parseFloat(saturationBox.value) / 100;
@@ -3150,7 +3186,7 @@ function reduceColor() {
 							mappedVecIndices[bestVecIndex] = bestPalIndex;
 							mappedPalIndices[bestPalIndex] = bestVecIndex;
 							delete remainingVecIndexes[bestVecIndex];
-						} else throw new Error("色空間の圧縮には 4 色以上が必要です");
+						} else throw new Error("色空間の圧縮には 4 色以上のパレットが必要です");
 					}
 					const io = mappedVecIndices[0];
 					const ir = mappedVecIndices[1];
@@ -3194,7 +3230,7 @@ function reduceColor() {
 			setVisible(parentLiOf(hueBox), fmt.numColorChannels > 1);
 			setVisible(parentLiOf(saturationBox), fmt.numColorChannels > 1);
 			process(args);
-			norm = args.outImage;
+			norm = args.out;
 			gammaBox.placeholder = `(${args.gamma.value.toFixed(2)})`;
 			brightnessBox.placeholder = `(${Math.round(args.brightness.value * 255)})`;
 			contrastBox.placeholder = `(${Math.round(args.contrast.value * 100)})`;

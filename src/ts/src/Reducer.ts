@@ -22,12 +22,14 @@ const ditherPattern = new Float32Array([
   5.5 / 16 - 0.5,
 ]);
 
+export const DEFAULT_DITHER_STRENGTH = 0.8;
+
 export class Arguments {
   public src: NormalizedImage|null = null;
   public colorDitherMethod: DitherMethod = DitherMethod.NONE;
   public alphaDitherMethod: DitherMethod = DitherMethod.NONE;
-  public colorDitherStrength: number = 1.0;
-  public alphaDitherStrength: number = 1.0;
+  public colorDitherStrength: number = DEFAULT_DITHER_STRENGTH;
+  public alphaDitherStrength: number = DEFAULT_DITHER_STRENGTH;
   public palette: Palette|null = null;
   public format: PixelFormatInfo|null = null;
   public output: ReducedImage|null = null;
