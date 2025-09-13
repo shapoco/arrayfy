@@ -8,13 +8,13 @@
 
 namespace rawdisp {
 
-class IST7163 : public CommandDataDisplay {
+class JD79667AA : public CommandDataDisplay {
  public:
   enum class Command : uint8_t {
     PANEL_SETTING = 0x00,
     POWER_SETTING = 0x01,
     POWER_OFF = 0x02,
-    POWER_SEQUENCE_SETTING = 0x03,
+    UNKNOWN_0x03 = 0x03,
     POWER_ON = 0x04,
     BOOSTER_SOFT_START = 0x06,
     DEEP_SLEEP = 0x07,
@@ -24,43 +24,38 @@ class IST7163 : public CommandDataDisplay {
     AUTO_SEQUENCE = 0x17,
     PLL_CONTROL = 0x30,
     TEMPERATURE_SENSOR_COMMAND = 0x40,
-    TEMPERATURE_SENSOR_ENABLE = 0x41,
-    GPIO_INPUT = 0x44,
+    TEMPERATURE_SENSOR_CALIB = 0x41,
+    TEMPERATURE_SENSOR_WRITE = 0x42,
+    TEMPERATURE_SENSOR_READ = 0x43,
+    UNKNOWN_0x4D = 0x4D,
     VCOM_AND_DATA_INTERVAL_SETTING = 0x50,
     LOWER_POWER_DETECTION = 0x51,
     TCON_SETTING = 0x60,
     RESOLUTION_SETTING = 0x61,
     GATE_SOURCE_START_SETTING = 0x65,
+    UNKNOWN_0x66 = 0x66,
     CHIP_REVISION = 0x70,
     AUTO_MEASURE_VCOM = 0x80,
     VCOM_VALUE = 0x81,
     VCOM_DC_SETTING = 0x82,
+    PARTIAL_WINDOW = 0x83,
     PROGRAM_MODE = 0x90,
     ACTIVE_PROGRAM = 0x91,
-    READ_OTP_DATA = 0x92,
-    READ_SRAM = 0x93,
-    OTP_PROGRAM_CONFIG = 0xA2,
-    VDHROS_EN = 0xA8,
-    GDROTP = 0xC9,
-    CPCK_SET_ENABLE = 0xDC,
-    CPCK_PWH_SET = 0xDD,
-    CPCK_PWL_SET = 0xDE,
-    CHIP_TEMPERATURE_INPUT_SELECT = 0xE0,
+    READ_MTP_DATA = 0x92,
+    UNKNOWN_0xB4 = 0xB4,
+    UNKNOWN_0xB6 = 0xB6,
     POWER_SAVING = 0xE3,
     LVD_VOLTAGE_SELECT = 0xE4,
-    FORCE_TEMPERATURE = 0xE6,
-    VDHOS_SELECT = 0xE8,
-    TEST_POWER_PWM = 0xEF,
-    VDHOS_EN = 0xFD,
-    TEST_MODE = 0xFF,
+    UNKNOWN_0xE7 = 0xE7,
+    UNKNOWN_0xE9 = 0xE9,
   };
 
   const int busyPort;
   const int pwrPort;
   const int rotation;
 
-  IST7163(const DisplayConfig& cfg, CommandDataSpi& bus, int busyPort,
-          int pwrPort, int rotation)
+  JD79667AA(const DisplayConfig& cfg, CommandDataSpi& bus, int busyPort,
+            int pwrPort, int rotation)
       : CommandDataDisplay(bus, cfg),
         busyPort(busyPort),
         pwrPort(pwrPort),
@@ -117,24 +112,25 @@ class IST7163 : public CommandDataDisplay {
       sleep_ms(2);
       gpio::write(resetPort, true);
       sleep_ms(200);
-      waitBusy();
     }
+
+    {
+      const uint8_t params[] = {0x49, 0x55, 0x13, 0x5D, 0x05, 0x10};
+      writeCommandArray(Command::UNKNOWN_0x66, params, sizeof(params));
+    }
+
+    writeCommand(Command::UNKNOWN_0x4D, 0x78);
 
     writeCommand(Command::PANEL_SETTING, 0x0F, 0x29);
+    writeCommand(Command::POWER_SETTING, 0x07, 0x00);
+    writeCommand(Command::UNKNOWN_0x03, 0x10, 0x54, 0x44);
+
     {
-      const uint8_t params[] = {0x07, 0x00, 0x22, 0x78, 0x0A, 0x22};
-      writeCommandArray(Command::POWER_SETTING, params, sizeof(params));
+      const uint8_t params[] = {0x0F, 0x0A, 0x2F, 0x25, 0x22, 0x2E, 0x21};
+      writeCommandArray(Command::BOOSTER_SOFT_START, params, sizeof(params));
     }
 
-    writeCommand(Command::POWER_SEQUENCE_SETTING, 0x10, 0x54, 0x44);
-    writeCommand(Command::BOOSTER_SOFT_START, 0xC0, 0xC0, 0xC0);
-
-    writeCommand(Command::PLL_CONTROL, 0x08);
-
-    writeCommand(Command::TEMPERATURE_SENSOR_ENABLE, 0x00);
-
     writeCommand(Command::VCOM_AND_DATA_INTERVAL_SETTING, 0x37);
-
     writeCommand(Command::TCON_SETTING, 0x02, 0x02);
 
     {
@@ -145,55 +141,15 @@ class IST7163 : public CommandDataDisplay {
       writeCommand(Command::RESOLUTION_SETTING, wh, wl, hh, hl);
     }
 
-    writeCommand(Command::GATE_SOURCE_START_SETTING, 0x00, 0x00, 0x00, 0x00);
+    writeCommand(Command::UNKNOWN_0xE7, 0x1C);
+    writeCommand(Command::POWER_SAVING, 0x22);
+    writeCommand(Command::UNKNOWN_0xB6, 0x6F);
+    writeCommand(Command::UNKNOWN_0xB4, 0xD0);
+    writeCommand(Command::UNKNOWN_0xE9, 0x01);
 
-    writeCommand(static_cast<Command>(0xE7), 0x1C);  // Unknown
-    writeCommand(Command::POWER_SAVING, 0x22);  // Unknown
-
-    writeCommand(Command::TEST_MODE, 0xA5);
-    {
-      const uint8_t params[] = {0x01, 0x1E, 0x0A, 0x1B, 0x0B, 0x17};
-      writeCommandArray(Command::TEST_POWER_PWM, params, sizeof(params));
-    }
-
-    writeCommand(static_cast<Command>(0xC3), 0xFD);  // Unknown
-    writeCommand(static_cast<Command>(0xDC), 0x01);  // Unknown
-    writeCommand(static_cast<Command>(0xDD), 0x08);  // Unknown
-    writeCommand(static_cast<Command>(0xDE), 0x41);  // Unknown
-
-    writeCommand(Command::VDHOS_EN, 0x01);
-    writeCommand(Command::VDHOS_SELECT, 0x03);
-
-    writeCommand(static_cast<Command>(0xDA), 0x07);  // Unknown
-
-    writeCommand(Command::GDROTP, 0x00);
-    writeCommand(Command::VDHROS_EN, 0x0F);
-
-    writeCommand(Command::TEST_MODE, 0xE3);
-
-    writeCommand(static_cast<Command>(0xE9), 0x01);  // Unknown
-
+    writeCommand(Command::PLL_CONTROL, 0x08);
     writeCommand(Command::POWER_ON);
     waitBusy();
-
-    writeCommand(Command::TEST_MODE, 0xA5);
-    {
-      const uint8_t params[] = {0x03, 0x1E, 0x0A, 0x1B, 0x0E, 0x15};
-      writeCommandArray(Command::TEST_POWER_PWM, params, sizeof(params));
-    }
-
-    writeCommand(Command::CPCK_SET_ENABLE, 0x01);
-    writeCommand(Command::CPCK_PWH_SET, 0x08);
-    writeCommand(Command::CPCK_PWL_SET, 0x41);
-
-    writeCommand(Command::TEST_MODE, 0xE3);
-
-#if 0
-     writeCommand(Command::CHIP_TEMPERATURE_INPUT_SELECT, 0x02);
-     writeCommand(Command::FORCE_TEMPERATURE, 0x5B);
-     writeCommand(static_cast<Command>(0xA5), 0x00);  // Unknown
-     waitBusy();
-#endif
   }
 
   void setWindow(int x, int y, int w, int h) override {
@@ -209,9 +165,7 @@ class IST7163 : public CommandDataDisplay {
     bus.writeEnd();
   }
 
-  void startUpdateDisplay() {
-    writeCommand(Command::DISPLAY_REFRESH, 0x00);
-  }
+  void startUpdateDisplay() { writeCommand(Command::DISPLAY_REFRESH, 0x00); }
 
   void powerOff() {
     writeCommand(Command::POWER_OFF, 0x00);

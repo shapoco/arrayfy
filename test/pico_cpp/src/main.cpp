@@ -9,6 +9,7 @@
 
 #include "rawdisp/ili9488.hpp"
 #include "rawdisp/ist7163.hpp"
+#include "rawdisp/jd79667aa.hpp"
 #include "rawdisp/ssd1306.hpp"
 #include "rawdisp/ssd1680.hpp"
 #include "rawdisp/st7789.hpp"
@@ -19,6 +20,7 @@
 #include "bmp/kwr_hs_152x296.hpp"
 #include "bmp/kwr_vs_296x152.hpp"
 #include "bmp/kwry_hs_240x416.hpp"
+#include "bmp/kwry_hs_184x384.hpp"
 #include "bmp/rgb111_480x320.hpp"
 #include "bmp/rgb444_be_240x240.hpp"
 
@@ -47,6 +49,7 @@ void test_ssd1306_raw();
 void test_ssd1306_lgfx();
 void test_ssd1680_raw(int rotation);
 void test_ist7163_raw(int rotation);
+void test_jd79667aa_raw(int rotation);
 bool i2cBusReset();
 
 int main(void) {
@@ -122,7 +125,8 @@ int main(void) {
         break;
 
       case 13:
-        test_ist7163_raw(0);
+        //test_ist7163_raw(0);
+        test_jd79667aa_raw(0);
         break;
 
       case 14:
@@ -279,10 +283,28 @@ void test_ist7163_raw(int rotation) {
   raw::CommandDataSpi spi(spi0, 2, 8);
   raw::IST7163 ist7163(cfg, spi, 1, 0, rotation);
   spi.init();
+  ist7163.init();
   ist7163.writePixels((uint8_t *)kwry_hs_240x416, sizeof(kwry_hs_240x416));
   ist7163.startUpdateDisplay();
   ist7163.waitBusy(); 
   ist7163.powerOff();
+}
+
+void test_jd79667aa_raw(int rotation) {
+  raw::DisplayConfig cfg = {
+      .width = 184,
+      .height = 384,
+      .format = raw::PixelFormat::KR11,
+      .resetPort = 22,
+  };
+  raw::CommandDataSpi spi(spi0, 2, 8);
+  raw::JD79667AA jd79667aa(cfg, spi, 1, 0, rotation);
+  spi.init();
+  jd79667aa.init();
+  jd79667aa.writePixels((uint8_t *)kwry_hs_184x384, sizeof(kwry_hs_184x384));
+  jd79667aa.startUpdateDisplay();
+  jd79667aa.waitBusy(); 
+  jd79667aa.powerOff();
 }
 
 bool i2cBusReset() {
