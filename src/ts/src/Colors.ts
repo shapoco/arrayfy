@@ -9,7 +9,7 @@ export class HslRange {
   public lMax: number = 1;
 }
 
-export function hexStrToRgb(hex: string): number {
+export function strToU32(hex: string): number {
   if (hex.startsWith('#')) {
     hex = hex.slice(1);
   }
@@ -28,8 +28,8 @@ export function hexStrToRgb(hex: string): number {
   }
 }
 
-export function rgbToHexStr(rgb: number): string {
-  const {r, g, b} = rgbU32ToU8(rgb);
+export function u32ToHexStr(rgb: number): string {
+  const {r, g, b} = unpackU32ToU8(rgb);
   const chVals = [r, g, b];
   let longFormat = false;
   for (let i = 0; i < 3; i++) {
@@ -49,7 +49,8 @@ export function rgbToHexStr(rgb: number): string {
   }
 }
 
-export function rgbU32ToU8(color: number): {r: number, g: number, b: number} {
+export function unpackU32ToU8(color: number):
+    {r: number, g: number, b: number} {
   const r = color & 0xff;
   const g = (color >> 8) & 0xff;
   const b = (color >> 16) & 0xff;
@@ -65,6 +66,11 @@ export function rgbU32ToF32(color: number): {r: number, g: number, b: number} {
 
 export function grayscale(r: number, g: number, b: number): number {
   return 0.299 * r + 0.587 * g + 0.114 * b;
+}
+
+export function grayscaleU32(color: number): number {
+  const {r, g, b} = unpackU32ToU8(color);
+  return grayscale(r, g, b);
 }
 
 export function grayscaleArrayF32(data: Float32Array, offset: number): number {
@@ -205,73 +211,75 @@ export function hueClip(min: number, range: number, hue: number): number {
   }
 }
 
-// 内積
-function dot(a: Float32Array, ia: number, b: Float32Array, ib: number): number {
-  return a[ia + 0] * b[ib + 0] + a[ia + 1] * b[ib + 1] + a[ia + 2] * b[ib + 2];
-}
-
-// 色変換行列の生成
-export function createTransformMatrix(
-    src: Float32Array, iO: number, iR: number, iG: number,
-    iB: number): Float32Array {
-  const o0 = src[iO + 0];
-  const o1 = src[iO + 1];
-  const o2 = src[iO + 2];
-  let r0 = src[iR + 0] - o0;
-  let r1 = src[iR + 1] - o1;
-  let r2 = src[iR + 2] - o2;
-  let g0 = src[iG + 0] - o0;
-  let g1 = src[iG + 1] - o1;
-  let g2 = src[iG + 2] - o2;
-  let b0 = src[iB + 0] - o0;
-  let b1 = src[iB + 1] - o1;
-  let b2 = src[iB + 2] - o2;
-  const dr = Math.sqrt(r0 * r0 + r1 * r1 + r2 * r2);
-  const dg = Math.sqrt(g0 * g0 + g1 * g1 + g2 * g2);
-  const db = Math.sqrt(b0 * b0 + b1 * b1 + b2 * b2);
-  r0 /= dr;
-  r1 /= dr;
-  r2 /= dr;
-  g0 /= dg;
-  g1 /= dg;
-  g2 /= dg;
-  b0 /= db;
-  b1 /= db;
-  b2 /= db;
-
-  console.log('o:', o0, o1, o2);
-  console.log('R:', r0, r1, r2);
-  console.log('G:', g0, g1, g2);
-  console.log('B:', b0, b1, b2);
-
-  const det = r0 * (g1 * b2 - g2 * b1) - r1 * (g0 * b2 - g2 * b0) +
-      r2 * (g0 * b1 - g1 * b0);
-
-  if (Math.abs(det) < 1e-12) throw new Error('行列が特異です');
-
-  // 逆行列計算 + 転置
-  return new Float32Array([
-    (g1 * b2 - g2 * b1) / det,  // 0
-    (g2 * b0 - g0 * b2) / det,  // 3
-    (g0 * b1 - g1 * b0) / det,  // 6
-    o0,
-    (r2 * b1 - r1 * b2) / det,  // 1
-    (r0 * b2 - r2 * b0) / det,  // 4
-    (r1 * b0 - r0 * b1) / det,  // 7
-    o1,
-    (r1 * g2 - r2 * g1) / det,  // 2
-    (r2 * g0 - r0 * g2) / det,  // 5
-    (r0 * g1 - r1 * g0) / det,  // 8
-    o2,
-  ]);
-}
-
-export function transformColor(
-    mat: Float32Array, v: Float32Array, iv: number): void {
-  const r = dot(mat, 0, v, iv + 0) + mat[3];
-  const g = dot(mat, 4, v, iv + 0) + mat[7];
-  const b = dot(mat, 8, v, iv + 0) + mat[11];
-  v[iv + 0] = clip(0, 1, r);
-  v[iv + 1] = clip(0, 1, g);
-  v[iv + 2] = clip(0, 1, b);
-}
+//// 内積
+// function dot(a: Float32Array, ia: number, b: Float32Array, ib: number):
+// number {
+//   return a[ia + 0] * b[ib + 0] + a[ia + 1] * b[ib + 1] + a[ia + 2] * b[ib +
+//   2];
+// }
+//
+//// 色変換行列の生成
+// export function createTransformMatrix(
+//     src: Float32Array, iO: number, iR: number, iG: number,
+//     iB: number): Float32Array {
+//   const o0 = src[iO + 0];
+//   const o1 = src[iO + 1];
+//   const o2 = src[iO + 2];
+//   let r0 = src[iR + 0] - o0;
+//   let r1 = src[iR + 1] - o1;
+//   let r2 = src[iR + 2] - o2;
+//   let g0 = src[iG + 0] - o0;
+//   let g1 = src[iG + 1] - o1;
+//   let g2 = src[iG + 2] - o2;
+//   let b0 = src[iB + 0] - o0;
+//   let b1 = src[iB + 1] - o1;
+//   let b2 = src[iB + 2] - o2;
+//   const dr = Math.sqrt(r0 * r0 + r1 * r1 + r2 * r2);
+//   const dg = Math.sqrt(g0 * g0 + g1 * g1 + g2 * g2);
+//   const db = Math.sqrt(b0 * b0 + b1 * b1 + b2 * b2);
+//   r0 /= dr;
+//   r1 /= dr;
+//   r2 /= dr;
+//   g0 /= dg;
+//   g1 /= dg;
+//   g2 /= dg;
+//   b0 /= db;
+//   b1 /= db;
+//   b2 /= db;
+//
+//   console.log('o:', o0, o1, o2);
+//   console.log('R:', r0, r1, r2);
+//   console.log('G:', g0, g1, g2);
+//   console.log('B:', b0, b1, b2);
+//
+//   const det = r0 * (g1 * b2 - g2 * b1) - r1 * (g0 * b2 - g2 * b0) +
+//       r2 * (g0 * b1 - g1 * b0);
+//
+//   if (Math.abs(det) < 1e-12) throw new Error('行列が特異です');
+//
+//   // 逆行列計算 + 転置
+//   return new Float32Array([
+//     (g1 * b2 - g2 * b1) / det,  // 0
+//     (g2 * b0 - g0 * b2) / det,  // 3
+//     (g0 * b1 - g1 * b0) / det,  // 6
+//     o0,
+//     (r2 * b1 - r1 * b2) / det,  // 1
+//     (r0 * b2 - r2 * b0) / det,  // 4
+//     (r1 * b0 - r0 * b1) / det,  // 7
+//     o1,
+//     (r1 * g2 - r2 * g1) / det,  // 2
+//     (r2 * g0 - r0 * g2) / det,  // 5
+//     (r0 * g1 - r1 * g0) / det,  // 8
+//     o2,
+//   ]);
+// }
+//
+// export function transformColor(
+//     mat: Float32Array, v: Float32Array, iv: number): void {
+//   const r = dot(mat, 0, v, iv + 0) + mat[3];
+//   const g = dot(mat, 4, v, iv + 0) + mat[7];
+//   const b = dot(mat, 8, v, iv + 0) + mat[11];
+//   v[iv + 0] = clip(0, 1, r);
+//   v[iv + 1] = clip(0, 1, g);
+//   v[iv + 2] = clip(0, 1, b);
+// }

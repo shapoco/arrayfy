@@ -1,4 +1,8 @@
+import {Point} from './Geometries';
+import {Vec3} from './Math3D';
 import {Palette} from './Palettes';
+import {clip} from './Utils';
+import {XorShift32} from './XorShifts';
 
 export const enum ColorSpace {
   GRAYSCALE,
@@ -19,6 +23,8 @@ export const enum PixelFormat {
   GRAY2,
   BW,
   I2_RGB888,
+  I4_RGB888,
+  I6_RGB888,
 }
 
 export const enum ChannelOrder {
@@ -91,6 +97,16 @@ export class PixelFormatInfo {
         this.colorBits = [8, 8, 8];
         this.indexBits = 2;
         break;
+      case PixelFormat.I4_RGB888:
+        this.colorSpace = ColorSpace.RGB;
+        this.colorBits = [8, 8, 8];
+        this.indexBits = 4;
+        break;
+      case PixelFormat.I6_RGB888:
+        this.colorSpace = ColorSpace.RGB;
+        this.colorBits = [8, 8, 8];
+        this.indexBits = 6;
+        break;
       default:
         throw new Error('Unknown image format');
     }
@@ -147,10 +163,78 @@ export class PixelFormatInfo {
   }
 }
 
+export class PixelInfo {
+  public color = new Vec3();
+  public pos: Point = {x: 0, y: 0};
+  public tag: number = 0;
+
+  public clone(): PixelInfo {
+    const p = new PixelInfo();
+    p.color.copyFrom(this.color);
+    p.pos.x = this.pos.x;
+    p.pos.y = this.pos.y;
+    p.tag = this.tag;
+    return p;
+  }
+}
+
+export class CharacteristicPixelDetector {
+  private keyColors = [
+    new Vec3(0, 0, 0),
+    new Vec3(0.5, 0.5, 0.5),
+    new Vec3(1, 1, 1),
+    new Vec3(0, 0, 1),
+    new Vec3(0, 1, 0),
+    new Vec3(0, 1, 1),
+    new Vec3(1, 0, 0),
+    new Vec3(1, 0, 1),
+    new Vec3(1, 1, 0),
+  ];
+
+  private bestPixels = new Array<PixelInfo>(this.keyColors.length);
+
+  constructor() {
+    this.bestPixels.fill(new PixelInfo());
+  }
+
+  public clear(): void {
+    for (let i = 0; i < this.bestPixels.length; i++) {
+      this.bestPixels[i].tag = 9999;
+    }
+  }
+
+  public addPixel(col: Vec3, pos: Point): void {
+    for (let i = 0; i < this.keyColors.length; i++) {
+      const d = col.dist(this.keyColors[i]);
+      if (d < this.bestPixels[i].tag) {
+        this.bestPixels[i].tag = d;
+        this.bestPixels[i].color.copyFrom(col);
+        this.bestPixels[i].pos.x = pos.x;
+        this.bestPixels[i].pos.y = pos.y;
+      }
+    }
+  }
+
+  public collect(map: Map<number, PixelInfo>): void {
+    for (let i = 0; i < this.bestPixels.length; i++) {
+      const pix = this.bestPixels[i];
+      if (pix.tag > 10) continue;
+      const r = clip(0, 255, Math.round(pix.color.x * 255));
+      const g = clip(0, 255, Math.round(pix.color.y * 255));
+      const b = clip(0, 255, Math.round(pix.color.z * 255));
+      const key = (b << 16) | (g << 8) | r;
+      if (!map.has(key)) {
+        map.set(key, pix.clone());
+      }
+    }
+  }
+}
+
 export class NormalizedImage {
   public color: Float32Array;
   public alpha: Float32Array;
   public numColorChannels: number;
+
   constructor(
       public width: number, public height: number,
       public colorSpace: ColorSpace) {
@@ -168,13 +252,73 @@ export class NormalizedImage {
     this.alpha = new Float32Array(width * height);
   }
 
-  clone(): NormalizedImage {
+  public clone(): NormalizedImage {
     const img = new NormalizedImage(this.width, this.height, this.colorSpace);
     img.color.set(this.color);
     img.alpha.set(this.alpha);
     return img;
   }
-};
+
+  // パレット作成用に色の代表値を収集する
+  public collectCharacteristicColors(numEdgeCells: number): PixelInfo[] {
+    const ccd = new CharacteristicPixelDetector();
+
+    const map = new Map<number, PixelInfo>();
+    const cols = Math.min(this.width, numEdgeCells);
+    const rows = Math.min(this.height, numEdgeCells);
+    const numCh = this.numColorChannels;
+    const rgb = new Vec3();
+    for (let iRow = 0; iRow < rows; iRow++) {
+      const yStart = Math.floor(this.height * iRow / rows);
+      const yEnd = Math.floor(this.height * (iRow + 1) / rows);
+      for (let iCol = 0; iCol < cols; iCol++) {
+        const xStart = Math.floor(this.width * iCol / cols);
+        const xEnd = Math.floor(this.width * (iCol + 1) / cols);
+
+        ccd.clear();
+
+        for (let y = yStart; y < yEnd; y++) {
+          for (let x = xStart; x < xEnd; x++) {
+            const idx = (y * this.width + x) * numCh;
+            switch (numCh) {
+              case 1:
+                rgb.set(this.color[idx], this.color[idx], this.color[idx]);
+                break;
+              case 3: {
+                rgb.set(
+                    this.color[idx], this.color[idx + 1], this.color[idx + 2]);
+                break;
+              }
+              default:
+                throw new Error('Invalid number of channels');
+            }
+            ccd.addPixel(rgb, {x, y});
+          }  // for x
+        }  // for y
+
+        ccd.collect(map);
+      }  // for iCol
+    }  // for iRow
+    return Array.from(map.values());
+  }
+
+  public getAverageColor(): Vec3 {
+    const avg = new Array<number>(this.numColorChannels).fill(0);
+    let numPixels = 0;
+    for (let i = 0; i < this.width * this.height; i++) {
+      if (this.alpha[i] == 0) continue;
+      for (let ch = 0; ch < this.numColorChannels; ch++) {
+        avg[ch] += this.color[i * this.numColorChannels + ch];
+      }
+      numPixels++;
+    }
+    const ret = new Vec3();
+    ret.x = avg[0] / numPixels;
+    ret.y = avg[1] / numPixels;
+    ret.z = avg[2] / numPixels;
+    return ret;
+  }
+}
 
 export class ReducedImage {
   public data: Uint8Array[];

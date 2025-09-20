@@ -24,18 +24,19 @@ const ditherPattern = new Float32Array([
 
 export const DEFAULT_DITHER_STRENGTH = 0.8;
 
-export class Arguments {
+export class ReduceArgs {
   public src: NormalizedImage|null = null;
   public colorDitherMethod: DitherMethod = DitherMethod.NONE;
-  public alphaDitherMethod: DitherMethod = DitherMethod.NONE;
   public colorDitherStrength: number = DEFAULT_DITHER_STRENGTH;
+  public colorDitherAntiSaturation = false;
+  public alphaDitherMethod: DitherMethod = DitherMethod.NONE;
   public alphaDitherStrength: number = DEFAULT_DITHER_STRENGTH;
   public palette: Palette|null = null;
   public format: PixelFormatInfo|null = null;
   public output: ReducedImage|null = null;
 }
 
-export function reduce(args: Arguments) {
+export function reduce(args: ReduceArgs) {
   const sw = new Debug.StopWatch(false);
   const norm = args.src as NormalizedImage;
   const outW = norm.width;
@@ -51,7 +52,14 @@ export function reduce(args: Arguments) {
   const alpErrDiffuse = args.alphaDitherMethod == DitherMethod.DIFFUSION;
   const colErrDiffuse = args.colorDitherMethod == DitherMethod.DIFFUSION;
 
-  if (args.colorDitherMethod == DitherMethod.PATTERN_GRAY) {
+  if (args.colorDitherMethod == DitherMethod.DIFFUSION) {
+    // 誤差拡散ディザの場合:
+    // 誤差が発散しないよう、変換先のパレットの色から成る凸包内に押し込んでおく
+    if (args.colorDitherAntiSaturation) {
+      palette.normalizeColor(norm.color);
+    }
+  } else if (args.colorDitherMethod == DitherMethod.PATTERN) {
+    // パターンディザの場合: パターンを加算
     const step = palette.getAverageStep();
     for (let y = 0; y < outH; y++) {
       const iPixelStep = y * outW * numColCh;
@@ -126,6 +134,10 @@ export function reduce(args: Arguments) {
   sw.lap('Reducer.reduce()');
 }
 
+function addError(target: Float32Array, index: number, error: number): void {
+  target[index] = clip(0, 1, target[index] + error);
+}
+
 function diffuseError(
     img: NormalizedImage, alpha: boolean, error: Float32Array, x: number,
     y: number, forward: boolean) {
@@ -141,28 +153,28 @@ function diffuseError(
     if (e == 0) continue;
     if (forward) {
       if (x < w - 1) {
-        target[i + numCh] += e * 7 / 16;
+        addError(target, i + numCh, e * 7 / 16);
       }
       if (y < h - 1) {
         if (x > 0) {
-          target[i + stride - numCh] += e * 3 / 16;
+          addError(target, i + stride - numCh, e * 3 / 16);
         }
-        target[i + stride] += e * 5 / 16;
+        addError(target, i + stride, e * 5 / 16);
         if (x < w - 1) {
-          target[i + stride + numCh] += e * 1 / 16;
+          addError(target, i + stride + numCh, e * 1 / 16);
         }
       }
     } else {
       if (x > 0) {
-        target[i - numCh] += e * 7 / 16;
+        addError(target, i - numCh, e * 7 / 16);
       }
       if (y < h - 1) {
         if (x < w - 1) {
-          target[i + stride + numCh] += e * 3 / 16;
+          addError(target, i + stride + numCh, e * 3 / 16);
         }
-        target[i + stride] += e * 5 / 16;
+        addError(target, i + stride, e * 5 / 16);
         if (x > 0) {
-          target[i + stride - numCh] += e * 1 / 16;
+          addError(target, i + stride - numCh, e * 1 / 16);
         }
       }
     }

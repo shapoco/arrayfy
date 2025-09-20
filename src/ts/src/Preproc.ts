@@ -2,6 +2,8 @@ import * as Colors from './Colors';
 import * as Debug from './Debug';
 import {Rect, Size} from './Geometries';
 import {ColorSpace, NormalizedImage} from './Images';
+import * as Math3D from './Math3D';
+import {Mat43, Vec3} from './Math3D';
 import {Palette} from './Palettes';
 import {clip} from './Utils';
 
@@ -12,11 +14,12 @@ export const enum AlphaMode {
   SET_KEY_COLOR,
 }
 
-export const enum ColorSpaceReductionMode {
-  NONE,
+export const enum CsrMode {
   CLIP,
-  FOLD,
-  TRANSFORM,
+  GRAYOUT,
+  FOLD_HUE_CIRCLE,
+  ROTATE_RGB_SPACE,
+  BEND_RGB_SPACE,
 }
 
 export type ScalarParam = {
@@ -34,14 +37,17 @@ export class PreProcArgs {
   public saturation: number = 1;
   public lightness: number = 1;
 
-  public csrMode: ColorSpaceReductionMode = ColorSpaceReductionMode.NONE;
+  public csrMode: CsrMode = CsrMode.CLIP;
   public csrHslRange: Colors.HslRange = new Colors.HslRange();
   public csrHueTolerance: number = 60 / 360;
-  public csrTransformMatrix: Float32Array = new Float32Array(12);
+  public csrTransformMatrix: Mat43 = new Mat43();
+  public csrBendVector: Vec3 = new Vec3(0, 0, 0);
+  public csrBendStrength: number = 1;
 
   public gamma: ScalarParam = {value: 1, automatic: true};
   public brightness: ScalarParam = {value: 0, automatic: true};
   public contrast: ScalarParam = {value: 0, automatic: true};
+  public unsharp: number = 0;
   public invert: boolean = false;
 
   public out: NormalizedImage = new NormalizedImage(0, 0, ColorSpace.RGB);
@@ -64,6 +70,7 @@ export function process(args: PreProcArgs): void {
   args.gamma = correctGamma(img, args.gamma);
   args.brightness = offsetBrightness(img, args.brightness);
   args.contrast = correctContrast(img, args.contrast);
+  unsharpen(img, args.unsharp);
 
   // 階調反転
   if (args.invert) {
@@ -74,15 +81,23 @@ export function process(args: PreProcArgs): void {
 
   // 色空間の縮退
   switch (args.csrMode) {
-    case ColorSpaceReductionMode.CLIP:
-      clipColorSpace(img, args.csrHslRange, args.csrHueTolerance);
+    case CsrMode.CLIP:
+      // nothing to do
       break;
-    case ColorSpaceReductionMode.FOLD:
-      foldColorSpace(img, args.csrHslRange);
+    case CsrMode.GRAYOUT:
+    case CsrMode.FOLD_HUE_CIRCLE:
+      roundHslColorSpace(
+          img, args.csrHslRange, args.csrMode == CsrMode.FOLD_HUE_CIRCLE,
+          args.csrHueTolerance);
       break;
-    case ColorSpaceReductionMode.TRANSFORM:
+    case CsrMode.ROTATE_RGB_SPACE:
       transformColorSpace(img, args.csrTransformMatrix);
       break;
+    case CsrMode.BEND_RGB_SPACE:
+      bendColorSpace(img, args.csrBendVector, args.csrBendStrength);
+      break;
+    default:
+      throw new Error('Invalid color space reduction mode');
   }
 
   args.out = img;
@@ -120,75 +135,30 @@ function correctHSL(
   }
 }
 
-function clipColorSpace(
-    img: NormalizedImage, hslRange: Colors.HslRange, hueTolerance: number) {
+function roundHslColorSpace(
+    img: NormalizedImage, hslRange: Colors.HslRange, fold: boolean,
+    hueTolerance: number) {
   const hMin = Colors.hueWrap(hslRange.hMin);
   const hRange = clip(0, 1, hslRange.hRange);
-  const sMin = clip(0, 1, hslRange.sMin);
-  const sMax = clip(sMin, 1, hslRange.sMax);
+  const sRange = clip(0, 1, hslRange.sMax);
   const lMin = clip(0, 1, hslRange.lMin);
-  const lMax = clip(lMin, 1, hslRange.lMax);
-  const hReduction = hRange < (1 - 1e-5);
-  const sReduction = sMin != 0 || sMax != 1;
-  const lReduction = lMin != 0 || lMax != 1;
+  const lRange = clip(0, 1, hslRange.lMax - lMin);
+  const hReduction = hRange < (1 - 1e-4);
+  const sReduction = sRange < (1 - 1e-4);
+  const lReduction = lMin != 0 || lRange != 1;
   const hslReduction = hReduction || sReduction || lReduction;
 
-  const numPixels = img.width * img.height;
-  switch (img.colorSpace) {
-    case ColorSpace.GRAYSCALE: {
-      if (!lReduction) return;
-      for (let i = 0; i < numPixels; i++) {
-        img.color[i] = clip(lMin, lMax, img.color[i]);
-      }
-    } break;
-
-    case ColorSpace.RGB: {
-      if (!hslReduction) return;
-      const hsl = new Float32Array(numPixels * 3);
-      Colors.rgbToHslArrayF32(img.color, 0, hsl, 0, numPixels);
-      for (let i = 0; i < numPixels; i++) {
-        let h = hsl[i * 3 + 0];
-        let s = hsl[i * 3 + 1];
-        let l = hsl[i * 3 + 2];
-        const hClipped = Colors.hueClip(hMin, hRange, h);
-        const hDiff = Math.abs(Colors.hueDiff(hClipped, h));
-        if (hDiff >= hueTolerance) {
-          s = 0;
-        } else {
-          s *= (1 - hDiff / hueTolerance);
-        }
-        hsl[i * 3 + 0] = hClipped;
-        hsl[i * 3 + 1] = clip(sMin, sMax, s);
-        hsl[i * 3 + 2] = clip(lMin, lMax, l);
-      }
-      Colors.hslToRgbArrayF32(hsl, 0, img.color, 0, numPixels);
-    } break;
-
-    default:
-      throw new Error('Invalid color space');
+  if (fold && hRange > 0.5) {
+    throw new Error(
+        '色空間の折り畳みは色相の広がりが 180° 以下のパレットでのみ使用できます。');
   }
-}
-
-function foldColorSpace(img: NormalizedImage, hslRange: Colors.HslRange) {
-  const hMin = Colors.hueWrap(hslRange.hMin);
-  const hRange = clip(0, 1, hslRange.hRange);
-  const sMin = clip(0, 1, hslRange.sMin);
-  const sMax = clip(sMin, 1, hslRange.sMax);
-  const lMin = clip(0, 1, hslRange.lMin);
-  const lMax = clip(lMin, 1, hslRange.lMax);
-  const hReduction = hRange < (1 - 1e-5);
-  const sReduction = sMin != 0 || sMax != 1;
-  const lReduction = lMin != 0 || lMax != 1;
-  const hslReduction = hReduction || sReduction || lReduction;
 
   const numPixels = img.width * img.height;
   switch (img.colorSpace) {
     case ColorSpace.GRAYSCALE: {
       if (!lReduction) return;
       for (let i = 0; i < numPixels; i++) {
-        let l = img.color[i];
-        l = lMin + (l - lMin) * (lMax - lMin);
-        img.color[i] = clip(0, 1, l);
+        img.color[i] = clip(0, 1, lMin + (img.color[i] - lMin) * lRange);
       }
     } break;
 
@@ -198,28 +168,45 @@ function foldColorSpace(img: NormalizedImage, hslRange: Colors.HslRange) {
       const hCenter = Colors.hueAdd(hMin, hHalfRange);
       const hsl = new Float32Array(numPixels * 3);
       Colors.rgbToHslArrayF32(img.color, 0, hsl, 0, numPixels);
-      for (let i = 0; i < numPixels; i++) {
-        let h = hsl[i * 3 + 0];
-        let s = hsl[i * 3 + 1];
-        let l = hsl[i * 3 + 2];
-        if (hHalfRange == 0) {
-          h = hMin;
-        } else {
-          let hDist = Colors.hueDiff(h, hCenter);
-          if (hDist < -hHalfRange || hHalfRange < hDist) {
-            const sign = hDist < 0 ? -1 : 1;
-            hDist = Math.abs(hDist);
-            hDist = (0.5 - hDist) / (0.5 - hHalfRange);
-            hDist *= sign * hHalfRange;
-            h = Colors.hueAdd(hCenter, hDist);
+
+      if (fold) {
+        // 色相環を折り畳む
+        for (let i = 0; i < numPixels; i++) {
+          let h = hsl[i * 3 + 0];
+          if (hHalfRange == 0) {
+            h = hMin;
+          } else {
+            let hDist = Colors.hueDiff(h, hCenter);
+            if (hDist < -hHalfRange || hHalfRange < hDist) {
+              const sign = hDist < 0 ? -1 : 1;
+              hDist = Math.abs(hDist);
+              hDist = (0.5 - hDist) / (0.5 - hHalfRange);
+              hDist *= sign * hHalfRange;
+              h = Colors.hueAdd(hCenter, hDist);
+            }
+          }
+          hsl[i * 3 + 0] = h;
+        }
+      } else {
+        // 範囲外を灰色にする
+        for (let i = 0; i < numPixels; i++) {
+          const h = hsl[i * 3 + 0];
+          const hClipped = Colors.hueClip(hMin, hRange, h);
+          const hDiff = Math.abs(Colors.hueDiff(hClipped, h));
+          hsl[i * 3 + 0] = hClipped;
+          if (hDiff >= hueTolerance) {
+            hsl[i * 3 + 1] = 0;
+          } else {
+            hsl[i * 3 + 1] *= (1 - hDiff / hueTolerance);
           }
         }
-        l = lMin + (l - lMin) * (lMax - lMin);
-        s = sMin + (s - sMin) * (sMax - sMin);
-        hsl[i * 3 + 0] = h;
-        hsl[i * 3 + 1] = clip(0, 1, s);
-        hsl[i * 3 + 2] = clip(0, 1, l);
       }
+
+      for (let i = 0; i < numPixels; i++) {
+        hsl[i * 3 + 1] = clip(0, 1, hsl[i * 3 + 1] * sRange);
+        hsl[i * 3 + 2] = clip(0, 1, lMin + (hsl[i * 3 + 2] - lMin) * lRange);
+      }
+
       Colors.hslToRgbArrayF32(hsl, 0, img.color, 0, numPixels);
     } break;
 
@@ -228,12 +215,45 @@ function foldColorSpace(img: NormalizedImage, hslRange: Colors.HslRange) {
   }
 }
 
-function transformColorSpace(img: NormalizedImage, matrix: Float32Array) {
+function transformColorSpace(img: NormalizedImage, matrix: Math3D.Mat43) {
+  const numPixels = img.width * img.height;
+  const v = new Vec3();
+  switch (img.colorSpace) {
+    case ColorSpace.RGB: {
+      for (let i = 0; i < numPixels * 3; i += 3) {
+        v.set(img.color[i + 0], img.color[i + 1], img.color[i + 2]);
+        matrix.mulV(v);
+        img.color[i + 0] = clip(0, 1, v.x);
+        img.color[i + 1] = clip(0, 1, v.y);
+        img.color[i + 2] = clip(0, 1, v.z);
+      }
+    } break;
+
+    default:
+      throw new Error('Invalid color space for transform');
+  }
+}
+
+function bendColorSpace(img: NormalizedImage, vector: Vec3, strength: number) {
   const numPixels = img.width * img.height;
   switch (img.colorSpace) {
     case ColorSpace.RGB: {
-      for (let i = 0; i < numPixels; i++) {
-        Colors.transformColor(matrix, img.color, i * 3);
+      for (let i = 0; i < numPixels * 3; i += 3) {
+        let r = img.color[i + 0];
+        let g = img.color[i + 1];
+        let b = img.color[i + 2];
+        let coeff: number;
+        if (true) {
+          const l = (Math.max(r, g, b) + Math.min(r, g, b)) / 2;
+          const d = Math.abs(l - 0.5) * 2;
+          coeff = strength * (1 - d * d);
+        } else {
+          const d = Math.max(r, g, b) - Math.min(r, g, b);
+          coeff = strength * d * 2;
+        }
+        img.color[i + 0] = clip(0, 1, r + vector.x * coeff);
+        img.color[i + 1] = clip(0, 1, g + vector.y * coeff);
+        img.color[i + 2] = clip(0, 1, b + vector.z * coeff);
       }
     } break;
 
@@ -369,6 +389,37 @@ function correctContrast(
     }
   }
   return param;
+}
+
+function unsharpen(img: NormalizedImage, strength: number): void {
+  strength = clip(0, 3, strength);
+  if (strength <= 0) return;
+
+  const w = img.width;
+  const h = img.height;
+  const numCh = img.numColorChannels;
+  const copy = img.color.slice();
+
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      for (let c = 0; c < numCh; c++) {
+        const i = (y * w + x) * numCh + c;
+        let sum = 0;
+        let count = 0;
+        for (let dy = -1; dy <= 1; dy++) {
+          const yy = y + dy;
+          if (yy < 0 || h <= yy) continue;
+          for (let dx = -1; dx <= 1; dx++) {
+            const xx = x + dx;
+            if (xx < 0 || w <= xx) continue;
+            sum += copy[(yy * w + xx) * numCh + c];
+            count++;
+          }
+        }
+        img.color[i] = clip(0, 1, copy[i] + (copy[i] - sum / count) * strength);
+      }
+    }
+  }
 }
 
 function getColorMinMax(img: NormalizedImage): {min: number, max: number} {

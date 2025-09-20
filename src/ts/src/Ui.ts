@@ -1,5 +1,7 @@
 import {clip} from './Utils';
 
+export const selectedColor = '#06F';
+
 export function toElementArray(children: any): HTMLElement[] {
   if (children == null) {
     return [];
@@ -103,7 +105,7 @@ export function makeTextBox(
   input.type = 'text';
   input.value = value;
   input.placeholder = placeholder;
-  input.style.width = '60px';
+  input.style.width = `${clip(50, 100, maxLength * 10 + 10)}px`;
   input.style.textAlign = 'right';
   input.maxLength = maxLength;
   input.inputMode = 'decimal';

@@ -175,9 +175,9 @@ const epd_kwr = (function(): Config {
   p.packUnit = Encoder.PackUnit.ALIGNMENT;
   p.farPixelFirst = true;
   p.palette = new Uint32Array([
-    Colors.hexStrToRgb('#000'),
-    Colors.hexStrToRgb('#FFF'),
-    Colors.hexStrToRgb('#F00'),
+    Colors.strToU32('#000'),
+    Colors.strToU32('#FFF'),
+    Colors.strToU32('#C00'),
   ]);
   p.planeCfgs = [
     makeIndexMatch(1, 'white'),
@@ -194,10 +194,95 @@ const epd_kwry = (function(): Config {
   p.packUnit = Encoder.PackUnit.ALIGNMENT;
   p.farPixelFirst = true;
   p.palette = new Uint32Array([
-    Colors.hexStrToRgb('#000'),
-    Colors.hexStrToRgb('#FFF'),
-    Colors.hexStrToRgb('#FF0'),
-    Colors.hexStrToRgb('#F00'),
+    Colors.strToU32('#000'),
+    Colors.strToU32('#FFF'),
+    Colors.strToU32('#FF0'),
+    Colors.strToU32('#C00'),
+  ]);
+  p.planeCfgs = [
+    makeDirectPlane('index'),
+  ];
+  return p;
+})();
+
+const epd_kwyrbg = (function(): Config {
+  let p = {...defaultConfig};
+  p.label = 'ePaper 6色 (仮)';
+  p.description = '6色電子ペーパー向けの形式。';
+  p.format = Images.PixelFormat.I4_RGB888;
+  p.packUnit = Encoder.PackUnit.ALIGNMENT;
+  p.farPixelFirst = true;
+  p.palette = new Uint32Array([
+    Colors.strToU32('#000'),
+    Colors.strToU32('#FFF'),
+    Colors.strToU32('#fdc811'),
+    Colors.strToU32('#d33711'),
+    Colors.strToU32('#33426f'),
+    Colors.strToU32('#407113'),
+  ]);
+  p.planeCfgs = [
+    makeDirectPlane('index'),
+  ];
+  return p;
+})();
+
+const epd_kwgbryo = (function(): Config {
+  let p = {...defaultConfig};
+  p.label = 'ePaper 7色 (仮)';
+  p.description =
+      '7色電子ペーパー E Ink Gallery Palette(TM) 4000 ePaper 向けの形式。';
+  p.format = Images.PixelFormat.I4_RGB888;
+  p.packUnit = Encoder.PackUnit.ALIGNMENT;
+  p.farPixelFirst = true;
+  p.palette = new Uint32Array([
+    Colors.strToU32('#000'),
+    Colors.strToU32('#FFF'),
+    Colors.strToU32('#407113'),
+    Colors.strToU32('#33426f'),
+    Colors.strToU32('#d33711'),
+    Colors.strToU32('#fdc811'),
+    Colors.strToU32('#f46211'),
+  ]);
+  p.planeCfgs = [
+    makeDirectPlane('index'),
+  ];
+  return p;
+})();
+
+const nes = (function(): Config {
+  let p = {...defaultConfig};
+  p.label = 'NESパレット';
+  p.description = 'ファミコンのパレット(テスト用)。';
+  p.format = Images.PixelFormat.I6_RGB888;
+  p.packUnit = Encoder.PackUnit.ALIGNMENT;
+  p.farPixelFirst = true;
+  p.palette = new Uint32Array([
+    Colors.strToU32('#ab0013'), Colors.strToU32('#e7005b'),
+    Colors.strToU32('#ff77b7'), Colors.strToU32('#ffc7db'),
+    Colors.strToU32('#a70000'), Colors.strToU32('#db2b00'),
+    Colors.strToU32('#ff7763'), Colors.strToU32('#ffbfb3'),
+    Colors.strToU32('#7f0b00'), Colors.strToU32('#cb4f0f'),
+    Colors.strToU32('#ff9b3b'), Colors.strToU32('#ffdbab'),
+    Colors.strToU32('#432f00'), Colors.strToU32('#8b7300'),
+    Colors.strToU32('#f3bf3f'), Colors.strToU32('#ffe7a3'),
+    Colors.strToU32('#004700'), Colors.strToU32('#009700'),
+    Colors.strToU32('#83d313'), Colors.strToU32('#e3ffa3'),
+    Colors.strToU32('#005100'), Colors.strToU32('#00ab00'),
+    Colors.strToU32('#4fdf4B'), Colors.strToU32('#abf3bf'),
+    Colors.strToU32('#003f17'), Colors.strToU32('#00933b'),
+    Colors.strToU32('#58f898'), Colors.strToU32('#b3ffcf'),
+    Colors.strToU32('#1b3f5f'), Colors.strToU32('#00838b'),
+    Colors.strToU32('#00ebdb'), Colors.strToU32('#9FFFF3'),
+    Colors.strToU32('#271b8f'), Colors.strToU32('#0073ef'),
+    Colors.strToU32('#3fbfff'), Colors.strToU32('#abe7ff'),
+    Colors.strToU32('#0000ab'), Colors.strToU32('#233bef'),
+    Colors.strToU32('#5f73ff'), Colors.strToU32('#c7d7ff'),
+    Colors.strToU32('#47009f'), Colors.strToU32('#8300f3'),
+    Colors.strToU32('#a78Bfd'), Colors.strToU32('#d7cbff'),
+    Colors.strToU32('#8f0077'), Colors.strToU32('#bf00bf'),
+    Colors.strToU32('#f77Bff'), Colors.strToU32('#ffc7ff'),
+    Colors.strToU32('#000000'), Colors.strToU32('#757575'),
+    Colors.strToU32('#bcbcbc'), Colors.strToU32('#ffffff'),
   ]);
   p.planeCfgs = [
     makeDirectPlane('index'),
@@ -219,4 +304,7 @@ export const presets: Record<string, Config> = {
   bw_vpack,
   epd_kwr,
   epd_kwry,
+  epd_kwyrbg,
+  epd_kwgbryo,
+  nes,
 };

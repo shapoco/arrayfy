@@ -1,13 +1,18 @@
 import {ArrayBlob} from './Blobs';
 import * as CodeGen from './CodeGen';
 import * as Colors from './Colors';
+import * as ColorSpaceUis from './ColorSpaceUis';
 import * as Configs from './Configs';
 import * as Debug from './Debug';
 import * as Encoder from './Encoder';
 import {Point, Rect, Size} from './Geometries';
 import * as Images from './Images';
 import {ChannelOrder, ColorSpace, PixelFormat} from './Images';
+import * as KMeans from './KMeans';
+import * as Math3D from './Math3D';
+import {Mat43, Vec3} from './Math3D';
 import {DitherMethod, FixedPalette, IndexedPalette, Palette, RoundMethod} from './Palettes';
+import * as PaletteUis from './PaletteUis';
 import * as Preproc from './Preproc';
 import * as Reducer from './Reducer';
 import * as Resizer from './Resizer';
@@ -210,12 +215,12 @@ const alphaThreshBox = Ui.makeTextBox('128', '(auto)', 5);
 const alphaSection = Ui.pro(Ui.makeSection(Ui.makeFloatList(([
   Ui.makeHeader('透過色'),
   Ui.tip(
-      ['透過色の扱い: ', alphaModeBox],
+      ['🏁透過色の扱い: ', alphaModeBox],
       '入力画像に対する透過色の取り扱いを指定します。'),
   Ui.tip(
-      ['背景色: ', backColorBox],
+      ['🎨背景色: ', backColorBox],
       '画像の透明部分をこの色で塗り潰して不透明化します。'),
-  Ui.tip(['キーカラー: ', keyColorBox], '透明にしたい色を指定します。'),
+  Ui.tip(['🔑キーカラー: ', keyColorBox], '透明にしたい色を指定します。'),
   Ui.tip(
       ['許容誤差: ', Ui.upDown(keyToleranceBox, 0, 255, 1)],
       'キーカラーからの許容誤差を指定します。'),
@@ -230,35 +235,39 @@ const lightnessBox = Ui.makeTextBox('100', '(100)', 4);
 const gammaBox = Ui.makeTextBox('1', '(auto)', 4);
 const brightnessBox = Ui.makeTextBox('0', '(auto)', 5);
 const contrastBox = Ui.makeTextBox('100', '(auto)', 5);
+const unsharpBox = Ui.makeTextBox('0', '(0)', 4);
 const invertBox = Ui.makeCheckBox('階調反転');
 
 const colorCorrectSection = Ui.makeSection(Ui.makeFloatList([
   Ui.makeHeader('色調補正'),
   Ui.pro(Ui.tip(
-      ['色相: ', Ui.upDown(hueBox, -360, 360, 5), '°'],
+      ['🎨色相: ', Ui.upDown(hueBox, -360, 360, 5), '°'],
       'デフォルトは 0° です。')),
   Ui.tip(
-      ['彩度: ', Ui.upDown(saturationBox, 0, 200, 5), '%'],
+      ['🌈彩度: ', Ui.upDown(saturationBox, 0, 200, 5), '%'],
       'デフォルトは 100% です。'),
   Ui.pro(Ui.tip(
-      ['明度: ', Ui.upDown(lightnessBox, 0, 200, 5), '%'],
+      ['🌞明度: ', Ui.upDown(lightnessBox, 0, 200, 5), '%'],
       'デフォルトは 100% です。')),
   Ui.tip(
-      ['ガンマ: ', Ui.upDown(gammaBox, 0.1, 2, 0.05)],
+      ['γ: ', Ui.upDown(gammaBox, 0.1, 2, 0.05)],
       'デフォルトは 1.0 です。\n空欄にすると、輝度 50% を中心にバランスが取れるように自動調整します。'),
   Ui.pro(Ui.tip(
-      ['輝度: ', Ui.upDown(brightnessBox, -255, 255, 8)],
+      ['💡輝度: ', Ui.upDown(brightnessBox, -255, 255, 8)],
       'デフォルトは 0 です。\n空欄にすると、輝度 50% を中心にバランスが取れるように自動調整します。')),
   Ui.tip(
-      ['コントラスト: ', Ui.upDown(contrastBox, 0, 200, 5), '%'],
+      ['🌓コントラスト: ', Ui.upDown(contrastBox, 0, 200, 5), '%'],
       'デフォルトは 100% です。\n空欄にすると、階調が失われない範囲でダイナミックレンジが最大となるように自動調整します。'),
+  Ui.tip(
+      ['シャープ: ', Ui.upDown(unsharpBox, 0, 300, 10), '%'],
+      'デフォルトは 0% です。'),
   Ui.pro(Ui.tip([invertBox.parentElement], '各チャネルの値を大小反転します。')),
 ]));
 
 const widthBox = Ui.makeTextBox('', '(auto)', 4);
 const heightBox = Ui.makeTextBox('', '(auto)', 4);
 
-const relaxSizeLimitBox = Ui.makeCheckBox('サイズ制限緩和');
+const relaxSizeLimitBox = Ui.makeCheckBox('⚠️サイズ制限緩和');
 
 const scalingMethodBox = Ui.makeSelectBox(
     [
@@ -301,7 +310,7 @@ const resizeSection = Ui.makeSection(Ui.makeFloatList([
   Ui.makeHeader('出力サイズ'),
   Ui.tip(
       [
-        'サイズ: ',
+        '↕️サイズ: ',
         Ui.upDown(widthBox, 1, 1024, 1),
         ' x ',
         Ui.upDown(heightBox, 1, 1024, 1),
@@ -322,44 +331,65 @@ Ui.hide(Ui.parentLiOf(relaxSizeLimitBox));
 const csrModeBox = Ui.makeSelectBox(
     [
       {
-        value: Preproc.ColorSpaceReductionMode.NONE,
-        label: '縮退しない',
+        value: Preproc.CsrMode.CLIP,
+        label: '切り捨て',
+        tip: '変換先の色空間で表現できない色は、最も近い色に丸められます。',
+      },
+      {
+        value: Preproc.CsrMode.BEND_RGB_SPACE,
+        label: 'RGB 空間を変形',
+        tip: '元の RGB 空間の腹部を曲げて変換先のパレットの重心に寄せます。',
+      },
+      {
+        value: Preproc.CsrMode.ROTATE_RGB_SPACE,
+        label: 'RGB 空間を回転',
+        tip: '元の RGB 空間全体をパレットの空間に変形します。',
+      },
+      {
+        value: Preproc.CsrMode.GRAYOUT,
+        label: '範囲外を灰色にする',
+        tip: '新しいパレットで表現できない色は灰色にします。',
+      },
+      {
+        value: Preproc.CsrMode.FOLD_HUE_CIRCLE,
+        label: '色相環を折り畳む',
         tip:
-            '元の色を保ったまま減色を行います。誤差拡散と組み合わせると不自然になることがあります。',
-      },
-      {
-        value: Preproc.ColorSpaceReductionMode.CLIP,
-        label: '切り捨てる',
-        tip: '新しい色空間で表現できない色は彩度を下げて灰色にします。',
-      },
-      {
-        value: Preproc.ColorSpaceReductionMode.FOLD,
-        label: '折り畳む',
-        tip:
-            '新しい色空間で表現できない色は色相環上で折り返して空間内に収めます。',
-      },
-      {
-        value: Preproc.ColorSpaceReductionMode.TRANSFORM,
-        label: '圧縮する',
-        tip: '元の色空間全体を変形してパレットの空間内に収まるようにします。',
+            '色相環のうち新しいパレットで表現できる範囲外を範囲内へ折り畳みます。',
       },
     ],
-    Preproc.ColorSpaceReductionMode.FOLD);
+    Preproc.CsrMode.BEND_RGB_SPACE);
+
 const csrHueToleranceBox = Ui.makeTextBox('60', '(60)', 4);
 
-const paletteTable = document.createElement('table');
+const csrRotateStrengthBox = Ui.makeTextBox('100', '(100)', 4);
+
+const csrBendStrengthBox = Ui.makeTextBox('100', '(100)', 4);
+
+const paletteUi = new PaletteUis.PaletteUi();
+paletteUi.container.style.float = 'left';
+paletteUi.container.style.width = 'calc(100% - 270px)';
+const colorSpaceUi = new ColorSpaceUis.ColorSpaceUi();
+const paletteFloatClear = document.createElement('br');
+paletteFloatClear.style.clear = 'both';
 
 const paletteSection = Ui.makeSection([
   Ui.makeFloatList([
     Ui.makeHeader('パレット'),
     Ui.tip(
-        ['色空間の縮退方法: ', csrModeBox],
+        ['色域の縮退: ', csrModeBox],
         'パレット内の色で表現できない色の扱いを指定します。'),
     Ui.tip(
         ['許容誤差: ', Ui.upDown(csrHueToleranceBox, 0, 180, 5), '°'],
         '新しい色空間の外側をどこまで空間内に丸めるかを色相の角度で指定します。'),
+    Ui.tip(
+        ['強度: ', Ui.upDown(csrRotateStrengthBox, 0, 300, 10), '%'],
+        '回転の強度を指定します。'),
+    Ui.tip(
+        ['強度: ', Ui.upDown(csrBendStrengthBox, 0, 300, 10), '%'],
+        '色空間の曲げの強度を指定します。'),
   ]),
-  Ui.pro(paletteTable),
+  Ui.pro(paletteUi.container),
+  Ui.pro(colorSpaceUi.container),
 ]);
 
 const pixelFormatBox = Ui.makeSelectBox(
@@ -377,6 +407,8 @@ const pixelFormatBox = Ui.makeSelectBox(
       {value: PixelFormat.GRAY2, label: 'Gray2'},
       {value: PixelFormat.BW, label: 'B/W'},
       {value: PixelFormat.I2_RGB888, label: 'Index2'},
+      {value: PixelFormat.I4_RGB888, label: 'Index4'},
+      {value: PixelFormat.I6_RGB888, label: 'Index6'},
     ],
     PixelFormat.RGB565);
 
@@ -384,16 +416,17 @@ const colorDitherMethodBox = Ui.makeSelectBox(
     [
       {value: DitherMethod.NONE, label: 'なし'},
       {value: DitherMethod.DIFFUSION, label: '誤差拡散'},
-      {value: DitherMethod.PATTERN_GRAY, label: 'パターン'},
+      {value: DitherMethod.PATTERN, label: 'パターン'},
     ],
     DitherMethod.NONE);
 const colorDitherStrengthBox =
     Ui.makeTextBox('80', `(${Reducer.DEFAULT_DITHER_STRENGTH * 100})`, 4);
+const colorDitherAntiSaturationBox = Ui.makeCheckBox('飽和防止処理');
 const alphaDitherMethodBox = Ui.makeSelectBox(
     [
       {value: DitherMethod.NONE, label: 'なし'},
       {value: DitherMethod.DIFFUSION, label: '誤差拡散'},
-      {value: DitherMethod.PATTERN_GRAY, label: 'パターン'},
+      {value: DitherMethod.PATTERN, label: 'パターン'},
     ],
     DitherMethod.NONE);
 const alphaDitherStrengthBox =
@@ -420,7 +453,7 @@ reductionErrorBox.style.color = 'red';
 Ui.hide(previewCanvas);
 Ui.hide(reductionErrorBox);
 
-const previewCopyButton = Ui.makeButton('コピー');
+const previewCopyButton = Ui.makeButton('📄コピー');
 previewCopyButton.addEventListener('click', () => {
   previewCanvas.toBlob((blob) => {
     if (!blob) return;
@@ -434,7 +467,7 @@ previewCopyButton.addEventListener('click', () => {
   });
 });
 
-const previewSaveButton = Ui.makeButton('保存');
+const previewSaveButton = Ui.makeButton('💾保存');
 previewSaveButton.addEventListener('click', () => {
   previewCanvas.toBlob((blob) => {
     if (!blob) return;
@@ -473,13 +506,16 @@ const colorReductionSection = Ui.makeSection([
         ['ディザ: ', colorDitherMethodBox],
         'あえてノイズを加えることでできるだけ元画像の色を再現します。'),
     Ui.tip(
-        ['強度: ', Ui.upDown(colorDitherStrengthBox, 0, 100, 10), '%'],
+        ['強度: ', Ui.upDown(colorDitherStrengthBox, 0, 100, 5), '%'],
         'ディザリングの強度を指定します。'),
+    Ui.tip(
+        [colorDitherAntiSaturationBox.parentElement],
+        'パレットの色域が狭い場合に誤差拡散の品質を向上します。\n大きな画像や色数の多いパレットでは非常に重くなることがあります。'),
     Ui.pro(Ui.tip(
         ['透明度のディザ: ', alphaDitherMethodBox],
         'あえてノイズを加えることでできるだけ元画像の透明度を再現します。')),
     Ui.pro(Ui.tip(
-        ['強度: ', Ui.upDown(alphaDitherStrengthBox, 0, 100, 10), '%'],
+        ['強度: ', Ui.upDown(alphaDitherStrengthBox, 0, 100, 5), '%'],
         '透明度に対するディザリングの強度を指定します。')),
   ]),
   previewContainer,
@@ -632,8 +668,6 @@ let trimUiState = TrimState.IDLE;
 
 let normImageCache: Images.NormalizedImage|null = null;
 
-let paletteColor: Uint32Array = new Uint32Array(256);
-let paletteEnabled: boolean[] = new Array(256).fill(false);
 let reducedImage: Images.ReducedImage|null = null;
 
 let trimCanvasWidth = 800;
@@ -678,7 +712,15 @@ async function onLoad() {
     });
   }
 
-  pixelFormatBox.addEventListener('change', () => requestTrimResize());
+  pixelFormatBox.addEventListener('change', () => {
+    const fmt = new Images.PixelFormatInfo(
+        parseInt(pixelFormatBox.value) as PixelFormat);
+    if (fmt.isIndexed) {
+      paletteUi.setSize(1 << fmt.indexBits);
+    }
+    paletteUi.setVisible(fmt.isIndexed);
+    requestTrimResize();
+  });
 
   const colorReductionSections = [
     colorCorrectSection,
@@ -855,7 +897,7 @@ async function onLoad() {
   loadPreset(Configs.presets['rgb565_be']);
   await loadFromString('gradient', './img/sample/gradient.png');
 
-  onRelayout();
+  window.requestAnimationFrame(() => onRelayout());
 }  // main
 
 function onAlphaProcChanged() {
@@ -1089,6 +1131,8 @@ function updateTrimCanvas(): void {
 }
 
 function loadPreset(preset: Configs.Config): void {
+  const fmt = new Images.PixelFormatInfo(preset.format);
+
   pixelFormatBox.value = preset.format.toString();
   channelOrderBox.value = preset.channelOrder.toString();
   farPixelFirstBox.value = preset.farPixelFirst ? '1' : '0';
@@ -1100,38 +1144,21 @@ function loadPreset(preset: Configs.Config): void {
   vertAddrBox.checked = preset.vertAddr;
 
   // パレットのロード
-  paletteTable.innerHTML = '';
-  if (preset.palette) {
-    for (let i = 0; i < 256; i++) {
-      if (i < preset.palette.length) {
-        paletteColor[i] = preset.palette[i];
-        paletteEnabled[i] = true;
-      } else {
-        paletteEnabled[i] = false;
+  if (fmt.isIndexed) {
+    paletteUi.setSize(1 << fmt.indexBits);
+    paletteUi.clear();
+    if (preset.palette) {
+      for (let i = 0; i < 256; i++) {
+        if (i < preset.palette.length) {
+          paletteUi.setEntry(i, {color: preset.palette[i], enabled: true});
+        }
       }
     }
-    const headerTr = document.createElement('tr');
-    for (let i = 0; i < preset.palette.length; i++) {
-      const th = document.createElement('th');
-      th.textContent = i.toString();
-      headerTr.appendChild(th);
-    }
-    const colorTr = document.createElement('tr');
-    for (let i = 0; i < preset.palette.length; i++) {
-      const {r, g, b} = Colors.rgbU32ToU8(preset.palette[i]);
-      const colorStr = Colors.rgbToHexStr(preset.palette[i]);
-      const td = document.createElement('td');
-      td.textContent = colorStr;
-      td.style.backgroundColor = colorStr;
-      if (r + g + b < 384) {
-        td.style.color = '#FFF';
-      } else {
-        td.style.color = '#000';
-      }
-      colorTr.appendChild(td);
-    }
-    paletteTable.appendChild(headerTr);
-    paletteTable.appendChild(colorTr);
+    paletteUi.setVisible(true);
+
+  } else {
+    paletteUi.setSize(0);
+    paletteUi.setVisible(false);
   }
 
   // プレーン設定のロード
@@ -1184,6 +1211,7 @@ function reduceColor(): void {
   }
 
   const swDetail = new Debug.StopWatch(false);
+  const quickPreview = (trimUiState != TrimState.IDLE);
 
   try {
     let outW = -1, outH = -1;
@@ -1213,18 +1241,14 @@ function reduceColor(): void {
     // パレットの作成
     let palette: Palette;
     if (fmt.isIndexed) {
-      const indexedPalette = new IndexedPalette(fmt.colorBits, fmt.indexBits);
-      palette = indexedPalette;
-      const numColors = (1 << indexedPalette.indexBits);
-      for (let i = 0; i < numColors; i++) {
-        const {r, g, b} = Colors.rgbU32ToF32(paletteColor[i]);
-        indexedPalette.colors[i * 3 + 0] = r;
-        indexedPalette.colors[i * 3 + 1] = g;
-        indexedPalette.colors[i * 3 + 2] = b;
-        indexedPalette.enabled[i] = paletteEnabled[i];
-      }
+      palette = paletteUi.getPalette(fmt);
     } else {
       palette = new FixedPalette(fmt.colorBits, roundMethod);
+    }
+
+    try {
+      colorSpaceUi.setPalette(palette);
+    } catch (e) {
     }
 
     const srcW = origCanvas.width;
@@ -1303,10 +1327,11 @@ function reduceColor(): void {
       }
 
       args.scalingMethod = parseInt(scalingMethodBox.value);
-      if (trimUiState == TrimState.IDLE) {
-        args.interpMethod = parseInt(interpMethodBox.value);
-      } else {
+      if (quickPreview) {
+        // トリミング操作中は補間なしで高速にする
         args.interpMethod = Resizer.InterpMethod.NEAREST_NEIGHBOR;
+      } else {
+        args.interpMethod = parseInt(interpMethodBox.value);
       }
 
       args.trimRect.x = trimL;
@@ -1320,7 +1345,7 @@ function reduceColor(): void {
       args.applyKeyColor =
           (parseInt(alphaModeBox.value) == Preproc.AlphaMode.SET_KEY_COLOR);
       if (keyColorBox.value) {
-        args.keyColor = Colors.hexStrToRgb(keyColorBox.value);
+        args.keyColor = Colors.strToU32(keyColorBox.value);
       }
       if (keyToleranceBox.value) {
         args.keyTolerance = parseInt(keyToleranceBox.value);
@@ -1329,6 +1354,9 @@ function reduceColor(): void {
       Resizer.resize(args);
       normImageCache = args.out;
     }
+
+    // 色の追跡のための代表ピクセルを抽出する
+    const samplePixels = normImageCache!.collectCharacteristicColors(32);
 
     // 補正処理
     {
@@ -1340,7 +1368,7 @@ function reduceColor(): void {
         args.alphaProc = parseInt(alphaModeBox.value);
         args.alphaThresh = parseInt(alphaThreshBox.value);
         if (backColorBox.value) {
-          args.backColor = Colors.hexStrToRgb(backColorBox.value);
+          args.backColor = Colors.strToU32(backColorBox.value);
         }
         if (hueBox.value && fmt.numColorChannels > 1) {
           args.hue = parseFloat(hueBox.value) / 360;
@@ -1363,6 +1391,9 @@ function reduceColor(): void {
           args.contrast.automatic = false;
           args.contrast.value = parseFloat(contrastBox.value) / 100;
         }
+        if (unsharpBox.value) {
+          args.unsharp = parseFloat(unsharpBox.value) / 100;
+        }
         args.invert = invertBox.checked;
       }
 
@@ -1374,92 +1405,52 @@ function reduceColor(): void {
 
         Ui.setVisible(
             Ui.parentLiOf(csrHueToleranceBox),
-            args.csrMode == Preproc.ColorSpaceReductionMode.CLIP);
+            args.csrMode == Preproc.CsrMode.GRAYOUT);
 
-        if (args.csrMode == Preproc.ColorSpaceReductionMode.CLIP) {
+        const csrRotateMode = args.csrMode == Preproc.CsrMode.ROTATE_RGB_SPACE;
+        Ui.setVisible(Ui.parentLiOf(csrRotateStrengthBox), csrRotateMode);
+
+        const csrBendMode = args.csrMode == Preproc.CsrMode.BEND_RGB_SPACE;
+        Ui.setVisible(Ui.parentLiOf(csrBendStrengthBox), csrBendMode);
+
+        if (args.csrMode == Preproc.CsrMode.GRAYOUT) {
           args.csrHueTolerance = parseFloat(csrHueToleranceBox.value) / 360;
-        } else if (args.csrMode == Preproc.ColorSpaceReductionMode.TRANSFORM) {
-          // パレット内の色を RGB 空間の四隅に割り当てる
-          const indexedPalette = palette as IndexedPalette;
-          const numColors = 1 << indexedPalette.indexBits;
-          const vecs = [[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1]];
-          let remainingVecIndexes:
-              {[key: number]: boolean} = {0: true, 1: true, 2: true, 3: true};
-          let mappedVecIndices: {[key: number]: number} = {};
-          let mappedPalIndices: {[key: number]: number} = {};
-          while (Object.keys(remainingVecIndexes).length > 0) {
-            let bestPalIndex = -1;
-            let bestVecIndex = -1;
-            let bestDist = 999;
-            for (const ivStr in remainingVecIndexes) {
-              const iv = parseInt(ivStr);
-              const vr = vecs[iv][0];
-              const vg = vecs[iv][1];
-              const vb = vecs[iv][2];
-              for (let ip = 0; ip < numColors; ip++) {
-                if (!indexedPalette.enabled[ip]) continue;
-                const pr = indexedPalette.colors[ip * 3 + 0];
-                const pg = indexedPalette.colors[ip * 3 + 1];
-                const pb = indexedPalette.colors[ip * 3 + 2];
-                const dist = Math.abs(pr - vr) * 0.299 +
-                    Math.abs(pg - vg) * 0.587 + Math.abs(pb - vb) * 0.114;
-                if (dist < bestDist && !(ip in mappedPalIndices)) {
-                  bestDist = dist;
-                  bestPalIndex = ip;
-                  bestVecIndex = iv;
-                }
-              }
-            }
+        } else if (args.csrMode == Preproc.CsrMode.ROTATE_RGB_SPACE) {
+          let srcWeight = new Vec3(0.5, 0.5, 0.5);
 
-            if (bestVecIndex >= 0) {
-              mappedVecIndices[bestVecIndex] = bestPalIndex;
-              mappedPalIndices[bestPalIndex] = bestVecIndex;
-              delete remainingVecIndexes[bestVecIndex];
-            } else {
-              throw new Error('色空間の圧縮には 4 色以上のパレットが必要です');
-            }
+          // const dstOrig = new Vec3();
+          // palette.nearest(dstOrig, dstOrig);
+          // console.log('dstOrig:', dstOrig.toString());
+          const dstWeight = new Vec3(
+              palette.convexHull.areaWeight.x, palette.convexHull.areaWeight.y,
+              palette.convexHull.areaWeight.z);
+          // dstWeight.sub(dstOrig);
+
+          let {axis, angle} = srcWeight.angleAndAxisTo(dstWeight);
+
+          if (csrRotateStrengthBox.value) {
+            angle *= parseFloat(csrRotateStrengthBox.value) / 100;
           }
 
-          const io = mappedVecIndices[0];
-          const ir = mappedVecIndices[1];
-          const ig = mappedVecIndices[2];
-          const ib = mappedVecIndices[3];
-          const o0 = indexedPalette.colors[io * 3 + 0];
-          const o1 = indexedPalette.colors[io * 3 + 1];
-          const o2 = indexedPalette.colors[io * 3 + 2];
-          const r0 = indexedPalette.colors[ir * 3 + 0] - o0;
-          const r1 = indexedPalette.colors[ir * 3 + 1] - o1;
-          const r2 = indexedPalette.colors[ir * 3 + 2] - o2;
-          const g0 = indexedPalette.colors[ig * 3 + 0] - o0;
-          const g1 = indexedPalette.colors[ig * 3 + 1] - o1;
-          const g2 = indexedPalette.colors[ig * 3 + 2] - o2;
-          const b0 = indexedPalette.colors[ib * 3 + 0] - o0;
-          const b1 = indexedPalette.colors[ib * 3 + 1] - o1;
-          const b2 = indexedPalette.colors[ib * 3 + 2] - o2;
-
-          const dr = Math.sqrt(r0 * r0 + r1 * r1 + r2 * r2) * Math.sqrt(3);
-          const dg = Math.sqrt(g0 * g0 + g1 * g1 + g2 * g2) * Math.sqrt(3);
-          const db = Math.sqrt(b0 * b0 + b1 * b1 + b2 * b2) * Math.sqrt(3);
-
-          const mat = new Float32Array([
-            r0 / dr,
-            g0 / dg,
-            b0 / db,
-            o0,
-            r1 / dr,
-            g1 / dg,
-            b1 / db,
-            o1,
-            r2 / dr,
-            g2 / dg,
-            b2 / db,
-            o2,
-          ]);
-
-          args.csrTransformMatrix = mat;
+          const m = new Mat43();
+          m.rotate(axis, angle);
+          args.csrTransformMatrix = m;
+        } else if (args.csrMode == Preproc.CsrMode.BEND_RGB_SPACE) {
+          let {x, y, z} = palette.convexHull.areaWeight;
+          // const mid = (Math.max(x, y, z) + Math.min(x, y, z)) / 2;
+          const mid = (x + y + z) / 3;
+          x -= mid;
+          y -= mid;
+          z -= mid;
+          args.csrBendVector = new Vec3(x, y, z);
+          if (csrBendStrengthBox.value) {
+            args.csrBendStrength =
+                clip(0, 3, parseFloat(csrBendStrengthBox.value) / 100);
+          }
         }
+
       } else {
-        args.csrMode = Preproc.ColorSpaceReductionMode.NONE;
+        args.csrMode = Preproc.CsrMode.CLIP;
         Ui.hide(Ui.parentLiOf(csrHueToleranceBox));
       }
 
@@ -1476,6 +1467,15 @@ function reduceColor(): void {
           `(${Math.round(args.brightness.value * 255)})`;
       contrastBox.placeholder = `(${Math.round(args.contrast.value * 100)})`;
     }
+
+    // サンプルピクセルの色を確認
+    const sampleColors: Vec3[] = [];
+    for (const sp of samplePixels) {
+      const idx = (sp.pos.y * norm.width + sp.pos.x) * norm.numColorChannels;
+      sampleColors.push(new Vec3(
+          norm.color[idx + 0], norm.color[idx + 1], norm.color[idx + 2]));
+    }
+    colorSpaceUi.setSampleColors(sampleColors);
 
     // 減色の適用
     {
@@ -1499,11 +1499,14 @@ function reduceColor(): void {
           Ui.parentLiOf(colorDitherStrengthBox),
           colDither != DitherMethod.NONE);
       Ui.setVisible(
+          Ui.parentLiOf(colorDitherAntiSaturationBox),
+          colDither == DitherMethod.DIFFUSION && fmt.isIndexed);
+      Ui.setVisible(
           Ui.parentLiOf(alphaDitherStrengthBox),
           alpDither != DitherMethod.NONE);
 
       // 減色
-      const args = new Reducer.Arguments();
+      const args = new Reducer.ReduceArgs();
       args.src = norm;
       args.format = fmt;
       args.palette = palette;
@@ -1511,6 +1514,9 @@ function reduceColor(): void {
       if (colorDitherStrengthBox.value) {
         args.colorDitherStrength =
             parseFloat(colorDitherStrengthBox.value) / 100;
+      }
+      if (!quickPreview) {
+        args.colorDitherAntiSaturation = colorDitherAntiSaturationBox.checked;
       }
       args.alphaDitherMethod = alpDither;
       if (alphaDitherStrengthBox.value) {
@@ -1819,11 +1825,11 @@ function generateCode(): void {
 
     codePlaneContainer.innerHTML = '';
     for (const code of args.codes) {
-      const copyButton = Ui.makeButton('コピー');
+      const copyButton = Ui.makeButton('📄コピー');
       copyButton.style.float = 'right';
       copyButton.style.marginRight = '5px';
 
-      const saveButton = Ui.makeButton('保存');
+      const saveButton = Ui.makeButton('💾保存');
       saveButton.style.float = 'right';
       saveButton.style.marginRight = '5px';
 
@@ -1918,6 +1924,7 @@ function onRelayout() {
     previewCanvasWidth = rect.width;
     previewCanvasHeight = rect.height;
   }
+  paletteUi.onRelayout();
   requestUpdateTrimCanvas();
 }
 

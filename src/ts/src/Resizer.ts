@@ -152,7 +152,7 @@ function trim(
 
 function applyKeyColor(
     data: Uint8Array, size: Size, key: number, tol: number): void {
-  const {r: keyR, g: keyG, b: keyB} = Colors.rgbU32ToU8(key);
+  const {r: keyR, g: keyG, b: keyB} = Colors.unpackU32ToU8(key);
   for (let y = 0; y < size.height; y++) {
     let i = y * size.width * 4;
     for (let x = 0; x < size.width; x++, i += 4) {
