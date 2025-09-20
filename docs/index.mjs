@@ -4035,7 +4035,7 @@ const csrModeBox = makeSelectBox([
 	{
 		value: CsrMode.ROTATE_RGB_SPACE,
 		label: "RGB 空間を回転",
-		tip: "元の RGB 空間全体をパレットの空間に変形します。"
+		tip: "元の RGB 空間全体を回転します。"
 	},
 	{
 		value: CsrMode.GRAYOUT,
