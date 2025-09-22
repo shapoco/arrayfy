@@ -328,7 +328,7 @@ export class IndexedPalette extends Palette {
     hull.hitCount = 0;
     for (let i = 0; i < dest.length; i += 3) {
       rayOrigin.set(dest[i], dest[i + 1], dest[i + 2]);
-      if (false) {
+      if (true) {
         rayDir.copyFrom(Math3D.projectPointToLine(black, white, rayOrigin));
       } else {
         rayDir.copyFrom(hull.areaWeight);
@@ -364,7 +364,7 @@ export class IndexedPalette extends Palette {
       console.log(`IndexedPalette: octree hit rate = ${hitRate.toFixed(1)}%`);
       console.log(`IndexedPalette: inside rate = ${insideRate.toFixed(1)}%`);
     }
-    
+
     sw.lap('IndexedPalette.normalizeColor()');
   }
 }

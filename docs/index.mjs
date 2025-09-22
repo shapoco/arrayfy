@@ -1459,6 +1459,14 @@ function makeRotationMatrix(axis, angle) {
 	const z = axis.z;
 	return new Mat43(t * x * x + c, t * x * y - s * z, t * x * z + s * y, 0, t * x * y + s * z, t * y * y + c, t * y * z - s * x, 0, t * x * z - s * y, t * y * z + s * x, t * z * z + c, 0);
 }
+function projectPointToLine(linePoint0, linePoint1, p) {
+	const lineDir = subV(linePoint1, linePoint0).norm();
+	const v = subV(p, linePoint0);
+	const d = v.dot(lineDir);
+	lineDir.mul(d);
+	lineDir.add(linePoint0);
+	return lineDir;
+}
 new Vec3();
 new Vec3();
 new Vec3();
@@ -2813,8 +2821,8 @@ var IndexedPalette = class extends Palette {
 		const hull = this.convexHull;
 		const numCh = this.channelBits.length;
 		if (numCh != 3) return;
-		new Vec3(0, 0, 0);
-		new Vec3(1, 1, 1);
+		const black = new Vec3(0, 0, 0);
+		const white = new Vec3(1, 1, 1);
 		const rayOrigin = new Vec3();
 		const rayDir = new Vec3();
 		let numInside = 0;
@@ -2823,7 +2831,7 @@ var IndexedPalette = class extends Palette {
 		hull.hitCount = 0;
 		for (let i = 0; i < dest.length; i += 3) {
 			rayOrigin.set(dest[i], dest[i + 1], dest[i + 2]);
-			rayDir.copyFrom(hull.areaWeight);
+			rayDir.copyFrom(projectPointToLine(black, white, rayOrigin));
 			rayDir.sub(rayOrigin);
 			if (rayDir.len() <= 1e-6) {
 				numInside++;
