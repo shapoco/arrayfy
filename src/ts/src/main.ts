@@ -608,7 +608,12 @@ const encodeSection = Ui.makeSection([
   pStructCanvas,
 ]);
 
-
+const codeFormatBox = Ui.makeSelectBox(
+    [
+      {value: CodeGen.CodeFormat.C_ARRAY, label: 'C/C++ 配列'},
+      {value: CodeGen.CodeFormat.RAW_BINARY, label: '生バイナリ'},
+    ],
+    CodeGen.CodeFormat.C_ARRAY);
 const codeUnitBox = Ui.makeSelectBox(
     [
       {value: CodeGen.CodeUnit.FILE, label: 'ファイル全体'},
@@ -646,6 +651,7 @@ Ui.hide(codeErrorBox);
 const codeGenSection = Ui.makeSection([
   Ui.makeFloatList([
     Ui.makeHeader('コード生成'),
+    Ui.tip(['形式: ', codeFormatBox], '生成するコードの形式を指定します。'),
     Ui.tip(['生成範囲: ', codeUnitBox], '生成するコードの範囲を指定します。'),
     Ui.tip(['列数: ', codeColsBox], '1 行に詰め込む要素数を指定します。'),
     Ui.tip(
@@ -1817,11 +1823,14 @@ function generateCode(): void {
     args.name = inputFileName.split('.')[0].replaceAll(/[-\s]/g, '_');
     args.src = reducedImage;
     args.blobs = blobs;
+    args.format = parseInt(codeFormatBox.value);
     args.codeUnit = parseInt(codeUnitBox.value);
     args.indent = parseInt(indentBox.value);
     args.arrayCols = Math.max(1, parseInt(codeColsBox.value));
 
     CodeGen.generate(args);
+
+    const isBinary = (args.format == CodeGen.CodeFormat.RAW_BINARY);
 
     codePlaneContainer.innerHTML = '';
     for (const code of args.codes) {
@@ -1832,6 +1841,7 @@ function generateCode(): void {
       const saveButton = Ui.makeButton('💾保存');
       saveButton.style.float = 'right';
       saveButton.style.marginRight = '5px';
+      copyButton.disabled = isBinary;
 
       const title = document.createElement('div');
       title.classList.add('codePlaneTitle');
@@ -1885,7 +1895,17 @@ function generateCode(): void {
       saveButton.addEventListener('click', () => {
         const text = pre.textContent;
         if (!text) return;
-        const blob = new Blob([text], {type: 'text/plain'});
+        let blob: Blob;
+        if (isBinary) {
+          const hexStrArray = text.split(/\s+/);
+          const bytes = new Uint8Array(hexStrArray.length);
+          for (let i = 0; i < hexStrArray.length; i++) {
+            bytes[i] = parseInt(hexStrArray[i], 16);
+          }
+          blob = new Blob([bytes], {type: 'application/octet-stream'});
+        } else {
+          blob = new Blob([text], {type: 'text/plain'});
+        }
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;

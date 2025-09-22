@@ -17,6 +17,11 @@ var StopWatch = class {
 
 //#endregion
 //#region src/CodeGen.ts
+let CodeFormat = /* @__PURE__ */ function(CodeFormat$1) {
+	CodeFormat$1[CodeFormat$1["C_ARRAY"] = 0] = "C_ARRAY";
+	CodeFormat$1[CodeFormat$1["RAW_BINARY"] = 1] = "RAW_BINARY";
+	return CodeFormat$1;
+}({});
 let CodeUnit = /* @__PURE__ */ function(CodeUnit$1) {
 	CodeUnit$1[CodeUnit$1["ELEMENTS"] = 0] = "ELEMENTS";
 	CodeUnit$1[CodeUnit$1["ARRAY_DEF"] = 1] = "ARRAY_DEF";
@@ -38,6 +43,7 @@ var CodeGenArgs = class {
 	name = "";
 	src = null;
 	blobs = [];
+	format = CodeFormat.C_ARRAY;
 	codeUnit = CodeUnit.FILE;
 	indent = Indent.SPACE_X2;
 	arrayCols = 16;
@@ -75,6 +81,17 @@ var StringBuilder = class {
 	}
 };
 function generate(args) {
+	switch (args.format) {
+		case CodeFormat.C_ARRAY:
+			generateCArray(args);
+			break;
+		case CodeFormat.RAW_BINARY:
+			generateRawBinary(args);
+			break;
+		default: throw new Error("Unknown code format");
+	}
+}
+function generateCArray(args) {
 	const sw = new StopWatch(false);
 	let indent = "  ";
 	switch (args.indent) {
@@ -133,6 +150,37 @@ function generate(args) {
 		}
 	}
 	sw.lap("CodeGen.generate()");
+}
+function generateRawBinary(args) {
+	let buff = new Uint8Array(0);
+	let hexTable = [];
+	for (let i = 0; i < 256; i++) hexTable.push(i.toString(16).padStart(2, "0"));
+	for (let iBlob = 0; iBlob < args.blobs.length; iBlob++) {
+		const blob = args.blobs[iBlob];
+		const array = blob.array;
+		const newBuff = new Uint8Array(buff.length + array.length);
+		newBuff.set(buff, 0);
+		newBuff.set(array, buff.length);
+		buff = newBuff;
+		const lastBlob = iBlob + 1 >= args.blobs.length;
+		if (args.codeUnit < CodeUnit.FILE || lastBlob) {
+			const code = new Code();
+			if (args.codeUnit >= CodeUnit.FILE) code.name = args.name + ".bin";
+			else code.name = args.name + "_" + blob.name + ".bin";
+			const len = buff.length;
+			const sbLen = 100 + len * 2 + Math.ceil(len / args.arrayCols) * 2;
+			const sb = new StringBuilder(sbLen);
+			for (let i = 0; i < buff.length; i++) {
+				sb.push(hexTable[buff[i]]);
+				if (i + 1 < buff.length) if ((i + 1) % args.arrayCols == 0) sb.push("\n");
+				else sb.push(" ");
+			}
+			code.code = sb.join("");
+			code.numLines = sb.numLines();
+			args.codes.push(code);
+			if (!lastBlob) buff = new Uint8Array(0);
+		}
+	}
 }
 
 //#endregion
@@ -4339,6 +4387,13 @@ const encodeSection = makeSection([
 	pro(planeGroupBox),
 	pStructCanvas
 ]);
+const codeFormatBox = makeSelectBox([{
+	value: CodeFormat.C_ARRAY,
+	label: "C/C++ 配列"
+}, {
+	value: CodeFormat.RAW_BINARY,
+	label: "生バイナリ"
+}], CodeFormat.C_ARRAY);
 const codeUnitBox = makeSelectBox([
 	{
 		value: CodeUnit.FILE,
@@ -4392,6 +4447,7 @@ hide(codeErrorBox);
 const codeGenSection = makeSection([
 	makeFloatList([
 		makeHeader("コード生成"),
+		tip(["形式: ", codeFormatBox], "生成するコードの形式を指定します。"),
 		tip(["生成範囲: ", codeUnitBox], "生成するコードの範囲を指定します。"),
 		tip(["列数: ", codeColsBox], "1 行に詰め込む要素数を指定します。"),
 		tip(["インデント: ", indentBox], "インデントの形式とサイズを指定します。")
@@ -5236,10 +5292,12 @@ function generateCode() {
 		args.name = inputFileName.split(".")[0].replaceAll(/[-\s]/g, "_");
 		args.src = reducedImage;
 		args.blobs = blobs;
+		args.format = parseInt(codeFormatBox.value);
 		args.codeUnit = parseInt(codeUnitBox.value);
 		args.indent = parseInt(indentBox.value);
 		args.arrayCols = Math.max(1, parseInt(codeColsBox.value));
 		generate(args);
+		const isBinary = args.format == CodeFormat.RAW_BINARY;
 		codePlaneContainer.innerHTML = "";
 		for (const code of args.codes) {
 			const copyButton = makeButton("📄コピー");
@@ -5248,6 +5306,7 @@ function generateCode() {
 			const saveButton = makeButton("💾保存");
 			saveButton.style.float = "right";
 			saveButton.style.marginRight = "5px";
+			copyButton.disabled = isBinary;
 			const title = document.createElement("div");
 			title.classList.add("codePlaneTitle");
 			title.appendChild(document.createTextNode(code.name));
@@ -5289,7 +5348,13 @@ function generateCode() {
 			saveButton.addEventListener("click", () => {
 				const text = pre.textContent;
 				if (!text) return;
-				const blob = new Blob([text], { type: "text/plain" });
+				let blob;
+				if (isBinary) {
+					const hexStrArray = text.split(/\s+/);
+					const bytes = new Uint8Array(hexStrArray.length);
+					for (let i = 0; i < hexStrArray.length; i++) bytes[i] = parseInt(hexStrArray[i], 16);
+					blob = new Blob([bytes], { type: "application/octet-stream" });
+				} else blob = new Blob([text], { type: "text/plain" });
 				const url = URL.createObjectURL(blob);
 				const a = document.createElement("a");
 				a.href = url;
