@@ -356,14 +356,19 @@ const csrModeBox = Ui.makeSelectBox(
         tip:
             '色相環のうち新しいパレットで表現できる範囲外を範囲内へ折り畳みます。',
       },
+      {
+        value: Preproc.CsrMode.LANDS_TWO_COLOR_METHOD,
+        label: 'Land の 2 色法',
+        tip:
+            '赤黒電子ペーパー向け。\n緑のチャンネルはグレーに変換し、青のチャンネルは捨てます。\nガンマ低め、コントラストを高め、誤差拡散法の強度 100% にすると良い感じになりやすいです。',
+      },
     ],
     Preproc.CsrMode.BEND_RGB_SPACE);
 
 const csrHueToleranceBox = Ui.makeTextBox('60', '(60)', 4);
-
 const csrRotateStrengthBox = Ui.makeTextBox('100', '(100)', 4);
-
 const csrBendStrengthBox = Ui.makeTextBox('100', '(100)', 4);
+const csrLandsMethodCoeffBox = Ui.makeTextBox('50', '(50)', 4);
 
 const paletteUi = new PaletteUis.PaletteUi();
 paletteUi.container.style.float = 'left';
@@ -387,6 +392,9 @@ const paletteSection = Ui.makeSection([
     Ui.tip(
         ['強度: ', Ui.upDown(csrBendStrengthBox, 0, 300, 10), '%'],
         '色空間の曲げの強度を指定します。'),
+    Ui.tip(
+        ['赤/灰比: ', Ui.upDown(csrLandsMethodCoeffBox, 0, 100, 5), '%'],
+        'Land の 2 色法における赤と灰色の混合比を指定します。。'),
   ]),
   Ui.pro(paletteUi.container),
   Ui.pro(colorSpaceUi.container),
@@ -1431,10 +1439,14 @@ function reduceColor(): void {
             args.csrMode == Preproc.CsrMode.GRAYOUT);
 
         const csrRotateMode = args.csrMode == Preproc.CsrMode.ROTATE_RGB_SPACE;
-        Ui.setVisible(Ui.parentLiOf(csrRotateStrengthBox), csrRotateMode);
-
         const csrBendMode = args.csrMode == Preproc.CsrMode.BEND_RGB_SPACE;
+        const csrLandsMethodMode =
+            args.csrMode == Preproc.CsrMode.LANDS_TWO_COLOR_METHOD;
+
+        Ui.setVisible(Ui.parentLiOf(csrRotateStrengthBox), csrRotateMode);
         Ui.setVisible(Ui.parentLiOf(csrBendStrengthBox), csrBendMode);
+        Ui.setVisible(
+            Ui.parentLiOf(csrLandsMethodCoeffBox), csrLandsMethodMode);
 
         if (args.csrMode == Preproc.CsrMode.GRAYOUT) {
           args.csrHueTolerance = parseFloat(csrHueToleranceBox.value) / 360;
@@ -1469,6 +1481,11 @@ function reduceColor(): void {
           if (csrBendStrengthBox.value) {
             args.csrBendStrength =
                 clip(0, 3, parseFloat(csrBendStrengthBox.value) / 100);
+          }
+        } else if (args.csrMode == Preproc.CsrMode.LANDS_TWO_COLOR_METHOD) {
+          if (csrLandsMethodCoeffBox.value) {
+            args.csrLandsMethodCoeff =
+                clip(0, 1, parseFloat(csrLandsMethodCoeffBox.value) / 100);
           }
         }
 

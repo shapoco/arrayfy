@@ -20,6 +20,7 @@ export const enum CsrMode {
   FOLD_HUE_CIRCLE,
   ROTATE_RGB_SPACE,
   BEND_RGB_SPACE,
+  LANDS_TWO_COLOR_METHOD,
 }
 
 export type ScalarParam = {
@@ -43,6 +44,7 @@ export class PreProcArgs {
   public csrTransformMatrix: Mat43 = new Mat43();
   public csrBendVector: Vec3 = new Vec3(0, 0, 0);
   public csrBendStrength: number = 1;
+  public csrLandsMethodCoeff: number = 0.5;
 
   public gamma: ScalarParam = {value: 1, automatic: true};
   public brightness: ScalarParam = {value: 0, automatic: true};
@@ -95,6 +97,9 @@ export function process(args: PreProcArgs): void {
       break;
     case CsrMode.BEND_RGB_SPACE:
       bendColorSpace(img, args.csrBendVector, args.csrBendStrength);
+      break;
+    case CsrMode.LANDS_TWO_COLOR_METHOD:
+      reduceByLandsTwoColorMethod(img, args.csrLandsMethodCoeff);
       break;
     default:
       throw new Error('Invalid color space reduction mode');
@@ -259,6 +264,25 @@ function bendColorSpace(img: NormalizedImage, vector: Vec3, strength: number) {
 
     default:
       throw new Error('Invalid color space for transform');
+  }
+}
+
+function reduceByLandsTwoColorMethod(img: NormalizedImage, coeff: number) {
+  const numPixels = img.width * img.height;
+  switch (img.colorSpace) {
+    case ColorSpace.RGB: {
+      for (let i = 0; i < numPixels * 3; i += 3) {
+        let r = img.color[i + 0];
+        let g = img.color[i + 1];
+        let b = img.color[i + 2];
+        img.color[i + 0] = clip(0, 1, r * coeff + g * (1 - coeff));
+        img.color[i + 1] = clip(0, 1, g * (1 - coeff));
+        img.color[i + 2] = clip(0, 1, g * (1 - coeff));
+      }
+    } break;
+
+    default:
+      throw new Error('Invalid color space for Land\'s two-color method');
   }
 }
 

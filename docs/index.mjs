@@ -3118,6 +3118,7 @@ let CsrMode = /* @__PURE__ */ function(CsrMode$1) {
 	CsrMode$1[CsrMode$1["FOLD_HUE_CIRCLE"] = 2] = "FOLD_HUE_CIRCLE";
 	CsrMode$1[CsrMode$1["ROTATE_RGB_SPACE"] = 3] = "ROTATE_RGB_SPACE";
 	CsrMode$1[CsrMode$1["BEND_RGB_SPACE"] = 4] = "BEND_RGB_SPACE";
+	CsrMode$1[CsrMode$1["LANDS_TWO_COLOR_METHOD"] = 5] = "LANDS_TWO_COLOR_METHOD";
 	return CsrMode$1;
 }({});
 var PreProcArgs = class {
@@ -3134,6 +3135,7 @@ var PreProcArgs = class {
 	csrTransformMatrix = new Mat43();
 	csrBendVector = new Vec3(0, 0, 0);
 	csrBendStrength = 1;
+	csrLandsMethodCoeff = .5;
 	gamma = {
 		value: 1,
 		automatic: true
@@ -3172,6 +3174,9 @@ function process(args) {
 			break;
 		case CsrMode.BEND_RGB_SPACE:
 			bendColorSpace(img, args.csrBendVector, args.csrBendStrength);
+			break;
+		case CsrMode.LANDS_TWO_COLOR_METHOD:
+			reduceByLandsTwoColorMethod(img, args.csrLandsMethodCoeff);
 			break;
 		default: throw new Error("Invalid color space reduction mode");
 	}
@@ -3294,6 +3299,22 @@ function bendColorSpace(img, vector, strength) {
 			}
 			break;
 		default: throw new Error("Invalid color space for transform");
+	}
+}
+function reduceByLandsTwoColorMethod(img, coeff) {
+	const numPixels = img.width * img.height;
+	switch (img.colorSpace) {
+		case ColorSpace.RGB:
+			for (let i = 0; i < numPixels * 3; i += 3) {
+				let r = img.color[i + 0];
+				let g = img.color[i + 1];
+				img.color[i + 2];
+				img.color[i + 0] = clip(0, 1, r * coeff + g * (1 - coeff));
+				img.color[i + 1] = clip(0, 1, g * (1 - coeff));
+				img.color[i + 2] = clip(0, 1, g * (1 - coeff));
+			}
+			break;
+		default: throw new Error("Invalid color space for Land's two-color method");
 	}
 }
 function makeHistogramF32(img, histogramSize) {
@@ -4176,11 +4197,17 @@ const csrModeBox = makeSelectBox([
 		value: CsrMode.FOLD_HUE_CIRCLE,
 		label: "色相環を折り畳む",
 		tip: "色相環のうち新しいパレットで表現できる範囲外を範囲内へ折り畳みます。"
+	},
+	{
+		value: CsrMode.LANDS_TWO_COLOR_METHOD,
+		label: "Land の 2 色法",
+		tip: "赤黒電子ペーパー向け。\n緑のチャンネルはグレーに変換し、青のチャンネルは捨てます。\nガンマ低め、コントラストを高め、誤差拡散法の強度 100% にすると良い感じになりやすいです。"
 	}
 ], CsrMode.BEND_RGB_SPACE);
 const csrHueToleranceBox = makeTextBox("60", "(60)", 4);
 const csrRotateStrengthBox = makeTextBox("100", "(100)", 4);
 const csrBendStrengthBox = makeTextBox("100", "(100)", 4);
+const csrLandsMethodCoeffBox = makeTextBox("50", "(50)", 4);
 const paletteUi = new PaletteUi();
 paletteUi.container.style.float = "left";
 paletteUi.container.style.width = "calc(100% - 270px)";
@@ -4205,7 +4232,12 @@ const paletteSection = makeSection([
 			"強度: ",
 			upDown(csrBendStrengthBox, 0, 300, 10),
 			"%"
-		], "色空間の曲げの強度を指定します。")
+		], "色空間の曲げの強度を指定します。"),
+		tip([
+			"赤/灰比: ",
+			upDown(csrLandsMethodCoeffBox, 0, 100, 5),
+			"%"
+		], "Land の 2 色法における赤と灰色の混合比を指定します。。")
 	]),
 	pro(paletteUi.container),
 	pro(colorSpaceUi.container)
@@ -5117,9 +5149,11 @@ function reduceColor() {
 				args.csrHslRange = palette.getHslRange();
 				setVisible(parentLiOf(csrHueToleranceBox), args.csrMode == CsrMode.GRAYOUT);
 				const csrRotateMode = args.csrMode == CsrMode.ROTATE_RGB_SPACE;
-				setVisible(parentLiOf(csrRotateStrengthBox), csrRotateMode);
 				const csrBendMode = args.csrMode == CsrMode.BEND_RGB_SPACE;
+				const csrLandsMethodMode = args.csrMode == CsrMode.LANDS_TWO_COLOR_METHOD;
+				setVisible(parentLiOf(csrRotateStrengthBox), csrRotateMode);
 				setVisible(parentLiOf(csrBendStrengthBox), csrBendMode);
+				setVisible(parentLiOf(csrLandsMethodCoeffBox), csrLandsMethodMode);
 				if (args.csrMode == CsrMode.GRAYOUT) args.csrHueTolerance = parseFloat(csrHueToleranceBox.value) / 360;
 				else if (args.csrMode == CsrMode.ROTATE_RGB_SPACE) {
 					let srcWeight = new Vec3(.5, .5, .5);
@@ -5137,6 +5171,8 @@ function reduceColor() {
 					z -= mid;
 					args.csrBendVector = new Vec3(x, y, z);
 					if (csrBendStrengthBox.value) args.csrBendStrength = clip(0, 3, parseFloat(csrBendStrengthBox.value) / 100);
+				} else if (args.csrMode == CsrMode.LANDS_TWO_COLOR_METHOD) {
+					if (csrLandsMethodCoeffBox.value) args.csrLandsMethodCoeff = clip(0, 1, parseFloat(csrLandsMethodCoeffBox.value) / 100);
 				}
 			} else {
 				args.csrMode = CsrMode.CLIP;
