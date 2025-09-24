@@ -3427,6 +3427,26 @@ function getColorMinMax(img) {
 
 //#endregion
 //#region src/Reducer.ts
+const DEFAULT_DITHER_STRENGTH = .8;
+let DiffusionKernel = /* @__PURE__ */ function(DiffusionKernel$1) {
+	DiffusionKernel$1[DiffusionKernel$1["FLOYD_STEINBERG"] = 0] = "FLOYD_STEINBERG";
+	DiffusionKernel$1[DiffusionKernel$1["JARVIS_JUDICE_NINKE"] = 1] = "JARVIS_JUDICE_NINKE";
+	DiffusionKernel$1[DiffusionKernel$1["STUCKI"] = 2] = "STUCKI";
+	DiffusionKernel$1[DiffusionKernel$1["SIERRA"] = 3] = "SIERRA";
+	return DiffusionKernel$1;
+}({});
+var ReduceArgs = class {
+	src = null;
+	colorDitherMethod = DitherMethod.NONE;
+	colorDitherStrength = DEFAULT_DITHER_STRENGTH;
+	colorDitherAntiSaturation = false;
+	alphaDitherMethod = DitherMethod.NONE;
+	alphaDitherStrength = DEFAULT_DITHER_STRENGTH;
+	diffusionKernel = DiffusionKernel.STUCKI;
+	palette = null;
+	format = null;
+	output = null;
+};
 const ditherPattern = new Float32Array([
 	.5 / 16 - .5,
 	8.5 / 16 - .5,
@@ -3445,17 +3465,75 @@ const ditherPattern = new Float32Array([
 	13.5 / 16 - .5,
 	5.5 / 16 - .5
 ]);
-const DEFAULT_DITHER_STRENGTH = .8;
-var ReduceArgs = class {
-	src = null;
-	colorDitherMethod = DitherMethod.NONE;
-	colorDitherStrength = DEFAULT_DITHER_STRENGTH;
-	colorDitherAntiSaturation = false;
-	alphaDitherMethod = DitherMethod.NONE;
-	alphaDitherStrength = DEFAULT_DITHER_STRENGTH;
-	palette = null;
-	format = null;
-	output = null;
+const diffuseKernels = {
+	[DiffusionKernel.FLOYD_STEINBERG]: [
+		0 / 16,
+		0 / 16,
+		0 / 16,
+		7 / 16,
+		0 / 16,
+		0 / 16,
+		3 / 16,
+		5 / 16,
+		1 / 16,
+		0 / 16,
+		0 / 16,
+		0 / 16,
+		0 / 16,
+		0 / 16,
+		0 / 16
+	],
+	[DiffusionKernel.JARVIS_JUDICE_NINKE]: [
+		0 / 48,
+		0 / 48,
+		0 / 48,
+		7 / 48,
+		5 / 48,
+		3 / 48,
+		5 / 48,
+		7 / 48,
+		5 / 48,
+		3 / 48,
+		1 / 48,
+		3 / 48,
+		5 / 48,
+		3 / 48,
+		1 / 48
+	],
+	[DiffusionKernel.STUCKI]: [
+		0 / 42,
+		0 / 42,
+		0 / 42,
+		8 / 42,
+		4 / 42,
+		2 / 42,
+		4 / 42,
+		8 / 42,
+		4 / 42,
+		2 / 42,
+		1 / 42,
+		2 / 42,
+		4 / 42,
+		2 / 42,
+		1 / 42
+	],
+	[DiffusionKernel.SIERRA]: [
+		0 / 32,
+		0 / 32,
+		0 / 32,
+		5 / 32,
+		3 / 32,
+		2 / 32,
+		4 / 32,
+		5 / 32,
+		4 / 32,
+		2 / 32,
+		0 / 32,
+		2 / 32,
+		3 / 32,
+		2 / 32,
+		0 / 32
+	]
 };
 function reduce(args) {
 	const sw = new StopWatch(false);
@@ -3510,11 +3588,11 @@ function reduce(args) {
 		if (fmt.hasAlpha) outData[numColCh][iPix] = alpOut;
 		if (alpErrDiffuse && fmt.hasAlpha) {
 			if (args.alphaDitherStrength < 1) alpErr[0] *= args.alphaDitherStrength;
-			diffuseError(norm, true, alpErr, x, y, fwd);
+			diffuseError(norm, args.diffusionKernel, true, alpErr, x, y, fwd);
 		}
 		if (colErrDiffuse && !transparent) {
 			if (args.colorDitherStrength < 1) for (let ch = 0; ch < numColCh; ch++) colErr[ch] *= args.colorDitherStrength;
-			diffuseError(norm, false, colErr, x, y, fwd);
+			diffuseError(norm, args.diffusionKernel, false, colErr, x, y, fwd);
 		}
 	}
 	sw.lap("Reducer.reduce()");
@@ -3522,29 +3600,25 @@ function reduce(args) {
 function addError(target, index, error) {
 	target[index] = clip(0, 1, target[index] + error);
 }
-function diffuseError(img, alpha, error, x, y, forward) {
+function diffuseError(img, kernel, alpha, error, x, y, forward) {
 	const target = alpha ? img.alpha : img.color;
 	const numCh = alpha ? 1 : img.numColorChannels;
 	const w = img.width;
 	const h = img.height;
 	const stride = img.width * numCh;
 	for (let ch = 0; ch < numCh; ch++) {
-		const i = y * stride + x * numCh + ch;
 		const e = error[ch];
 		if (e == 0) continue;
-		if (forward) {
-			if (x < w - 1) addError(target, i + numCh, e * 7 / 16);
-			if (y < h - 1) {
-				if (x > 0) addError(target, i + stride - numCh, e * 3 / 16);
-				addError(target, i + stride, e * 5 / 16);
-				if (x < w - 1) addError(target, i + stride + numCh, e * 1 / 16);
-			}
-		} else {
-			if (x > 0) addError(target, i - numCh, e * 7 / 16);
-			if (y < h - 1) {
-				if (x < w - 1) addError(target, i + stride + numCh, e * 3 / 16);
-				addError(target, i + stride, e * 5 / 16);
-				if (x > 0) addError(target, i + stride - numCh, e * 1 / 16);
+		for (let ky = 0; ky < 3; ky++) {
+			const ty = y + ky;
+			if (ty < 0 || ty >= h) continue;
+			for (let kx = -2; kx <= 2; kx++) {
+				const tx = forward ? x + kx : x - kx;
+				if (tx < 0 || tx >= w) continue;
+				const ik = ky * 5 + (kx + 2);
+				const coeff = diffuseKernels[kernel][ik];
+				if (coeff == 0) continue;
+				addError(target, ty * stride + tx * numCh + ch, e * coeff);
 			}
 		}
 	}
@@ -4221,6 +4295,24 @@ const alphaDitherMethodBox = makeSelectBox([
 	}
 ], DitherMethod.NONE);
 const alphaDitherStrengthBox = makeTextBox("80", `(${DEFAULT_DITHER_STRENGTH * 100})`, 4);
+const diffusionKernelBox = makeSelectBox([
+	{
+		value: DiffusionKernel.FLOYD_STEINBERG,
+		label: "Floyd-Steinberg"
+	},
+	{
+		value: DiffusionKernel.JARVIS_JUDICE_NINKE,
+		label: "Jarvis-Judice-Ninke"
+	},
+	{
+		value: DiffusionKernel.STUCKI,
+		label: "Stucki"
+	},
+	{
+		value: DiffusionKernel.SIERRA,
+		label: "Sierra"
+	}
+], DiffusionKernel.STUCKI);
 const roundMethodBox = makeSelectBox([{
 	value: RoundMethod.NEAREST,
 	label: "近似値",
@@ -4289,7 +4381,8 @@ const colorReductionSection = makeSection([makeFloatList([
 		"強度: ",
 		upDown(alphaDitherStrengthBox, 0, 100, 5),
 		"%"
-	], "透明度に対するディザリングの強度を指定します。"))
+	], "透明度に対するディザリングの強度を指定します。")),
+	pro(tip(["方式: ", diffusionKernelBox], "誤差拡散の方式を指定します。"))
 ]), previewContainer]);
 const channelOrderBox = makeSelectBox([
 	{
@@ -5076,6 +5169,7 @@ function reduceColor() {
 			setVisible(parentLiOf(colorDitherStrengthBox), colDither != DitherMethod.NONE);
 			setVisible(parentLiOf(colorDitherAntiSaturationBox), colDither == DitherMethod.DIFFUSION && fmt.isIndexed);
 			setVisible(parentLiOf(alphaDitherStrengthBox), alpDither != DitherMethod.NONE);
+			setVisible(parentLiOf(diffusionKernelBox), colDither == DitherMethod.DIFFUSION);
 			const args = new ReduceArgs();
 			args.src = norm;
 			args.format = fmt;
@@ -5085,6 +5179,7 @@ function reduceColor() {
 			if (!quickPreview) args.colorDitherAntiSaturation = colorDitherAntiSaturationBox.checked;
 			args.alphaDitherMethod = alpDither;
 			if (alphaDitherStrengthBox.value) args.alphaDitherStrength = parseFloat(alphaDitherStrengthBox.value) / 100;
+			args.diffusionKernel = parseInt(diffusionKernelBox.value);
 			reduce(args);
 			reducedImage = args.output;
 			swDetail.lap("Quantization");

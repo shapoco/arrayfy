@@ -431,6 +431,21 @@ const alphaDitherMethodBox = Ui.makeSelectBox(
     DitherMethod.NONE);
 const alphaDitherStrengthBox =
     Ui.makeTextBox('80', `(${Reducer.DEFAULT_DITHER_STRENGTH * 100})`, 4);
+const diffusionKernelBox = Ui.makeSelectBox(
+    [
+      {
+        value: Reducer.DiffusionKernel.FLOYD_STEINBERG,
+        label: 'Floyd-Steinberg'
+      },
+      {
+        value: Reducer.DiffusionKernel.JARVIS_JUDICE_NINKE,
+        label: 'Jarvis-Judice-Ninke'
+      },
+      {value: Reducer.DiffusionKernel.STUCKI, label: 'Stucki'},
+      {value: Reducer.DiffusionKernel.SIERRA, label: 'Sierra'},
+    ],
+    Reducer.DiffusionKernel.STUCKI);
+
 const roundMethodBox = Ui.makeSelectBox(
     [
       {
@@ -517,6 +532,8 @@ const colorReductionSection = Ui.makeSection([
     Ui.pro(Ui.tip(
         ['強度: ', Ui.upDown(alphaDitherStrengthBox, 0, 100, 5), '%'],
         '透明度に対するディザリングの強度を指定します。')),
+    Ui.pro(
+        Ui.tip(['方式: ', diffusionKernelBox], '誤差拡散の方式を指定します。')),
   ]),
   previewContainer,
 ]);
@@ -1510,6 +1527,9 @@ function reduceColor(): void {
       Ui.setVisible(
           Ui.parentLiOf(alphaDitherStrengthBox),
           alpDither != DitherMethod.NONE);
+      Ui.setVisible(
+          Ui.parentLiOf(diffusionKernelBox),
+          colDither == DitherMethod.DIFFUSION);
 
       // 減色
       const args = new Reducer.ReduceArgs();
@@ -1529,6 +1549,7 @@ function reduceColor(): void {
         args.alphaDitherStrength =
             parseFloat(alphaDitherStrengthBox.value) / 100;
       }
+      args.diffusionKernel = parseInt(diffusionKernelBox.value);
 
       Reducer.reduce(args);
 

@@ -3,6 +3,28 @@ import {NormalizedImage, PixelFormatInfo, ReducedImage} from './Images';
 import {DitherMethod, Palette} from './Palettes';
 import {clip} from './Utils';
 
+export const DEFAULT_DITHER_STRENGTH = 0.8;
+
+export const enum DiffusionKernel {
+  FLOYD_STEINBERG,
+  JARVIS_JUDICE_NINKE,
+  STUCKI,
+  SIERRA,
+}
+
+export class ReduceArgs {
+  public src: NormalizedImage|null = null;
+  public colorDitherMethod: DitherMethod = DitherMethod.NONE;
+  public colorDitherStrength: number = DEFAULT_DITHER_STRENGTH;
+  public colorDitherAntiSaturation = false;
+  public alphaDitherMethod: DitherMethod = DitherMethod.NONE;
+  public alphaDitherStrength: number = DEFAULT_DITHER_STRENGTH;
+  public diffusionKernel: DiffusionKernel = DiffusionKernel.STUCKI;
+  public palette: Palette|null = null;
+  public format: PixelFormatInfo|null = null;
+  public output: ReducedImage|null = null;
+}
+
 const ditherPattern = new Float32Array([
   0.5 / 16 - 0.5,
   8.5 / 16 - 0.5,
@@ -22,19 +44,24 @@ const ditherPattern = new Float32Array([
   5.5 / 16 - 0.5,
 ]);
 
-export const DEFAULT_DITHER_STRENGTH = 0.8;
-
-export class ReduceArgs {
-  public src: NormalizedImage|null = null;
-  public colorDitherMethod: DitherMethod = DitherMethod.NONE;
-  public colorDitherStrength: number = DEFAULT_DITHER_STRENGTH;
-  public colorDitherAntiSaturation = false;
-  public alphaDitherMethod: DitherMethod = DitherMethod.NONE;
-  public alphaDitherStrength: number = DEFAULT_DITHER_STRENGTH;
-  public palette: Palette|null = null;
-  public format: PixelFormatInfo|null = null;
-  public output: ReducedImage|null = null;
-}
+const diffuseKernels: {[key in DiffusionKernel]: number[]} = {
+  [DiffusionKernel.FLOYD_STEINBERG]: [
+    0 / 16, 0 / 16, 0 / 16, 7 / 16, 0 / 16, 0 / 16, 3 / 16, 5 / 16, 1 / 16,
+    0 / 16, 0 / 16, 0 / 16, 0 / 16, 0 / 16, 0 / 16
+  ],
+  [DiffusionKernel.JARVIS_JUDICE_NINKE]: [
+    0 / 48, 0 / 48, 0 / 48, 7 / 48, 5 / 48, 3 / 48, 5 / 48, 7 / 48, 5 / 48,
+    3 / 48, 1 / 48, 3 / 48, 5 / 48, 3 / 48, 1 / 48
+  ],
+  [DiffusionKernel.STUCKI]: [
+    0 / 42, 0 / 42, 0 / 42, 8 / 42, 4 / 42, 2 / 42, 4 / 42, 8 / 42, 4 / 42,
+    2 / 42, 1 / 42, 2 / 42, 4 / 42, 2 / 42, 1 / 42
+  ],
+  [DiffusionKernel.SIERRA]: [
+    0 / 32, 0 / 32, 0 / 32, 5 / 32, 3 / 32, 2 / 32, 4 / 32, 5 / 32, 4 / 32,
+    2 / 32, 0 / 32, 2 / 32, 3 / 32, 2 / 32, 0 / 32
+  ],
+};
 
 export function reduce(args: ReduceArgs) {
   const sw = new Debug.StopWatch(false);
@@ -116,7 +143,7 @@ export function reduce(args: ReduceArgs) {
         if (args.alphaDitherStrength < 1.0) {
           alpErr[0] *= args.alphaDitherStrength;
         }
-        diffuseError(norm, true, alpErr, x, y, fwd);
+        diffuseError(norm, args.diffusionKernel, true, alpErr, x, y, fwd);
       }
 
       if (colErrDiffuse && !transparent) {
@@ -126,7 +153,7 @@ export function reduce(args: ReduceArgs) {
             colErr[ch] *= args.colorDitherStrength;
           }
         }
-        diffuseError(norm, false, colErr, x, y, fwd);
+        diffuseError(norm, args.diffusionKernel, false, colErr, x, y, fwd);
       }
     }  // for ix
   }  // for y
@@ -139,8 +166,8 @@ function addError(target: Float32Array, index: number, error: number): void {
 }
 
 function diffuseError(
-    img: NormalizedImage, alpha: boolean, error: Float32Array, x: number,
-    y: number, forward: boolean) {
+    img: NormalizedImage, kernel: DiffusionKernel, alpha: boolean,
+    error: Float32Array, x: number, y: number, forward: boolean) {
   const target = alpha ? img.alpha : img.color;
   const numCh = alpha ? 1 : img.numColorChannels;
 
@@ -148,35 +175,49 @@ function diffuseError(
   const h = img.height;
   const stride = img.width * numCh;
   for (let ch = 0; ch < numCh; ch++) {
-    const i = y * stride + x * numCh + ch;
+    // const i = y * stride + x * numCh + ch;
     const e = error[ch];
     if (e == 0) continue;
-    if (forward) {
-      if (x < w - 1) {
-        addError(target, i + numCh, e * 7 / 16);
-      }
-      if (y < h - 1) {
-        if (x > 0) {
-          addError(target, i + stride - numCh, e * 3 / 16);
-        }
-        addError(target, i + stride, e * 5 / 16);
-        if (x < w - 1) {
-          addError(target, i + stride + numCh, e * 1 / 16);
-        }
-      }
-    } else {
-      if (x > 0) {
-        addError(target, i - numCh, e * 7 / 16);
-      }
-      if (y < h - 1) {
-        if (x < w - 1) {
-          addError(target, i + stride + numCh, e * 3 / 16);
-        }
-        addError(target, i + stride, e * 5 / 16);
-        if (x > 0) {
-          addError(target, i + stride - numCh, e * 1 / 16);
-        }
+    for (let ky = 0; ky < 3; ky++) {
+      const ty = y + ky;
+      if (ty < 0 || ty >= h) continue;
+      for (let kx = -2; kx <= 2; kx++) {
+        const tx = forward ? (x + kx) : (x - kx);
+        if (tx < 0 || tx >= w) continue;
+
+        const ik = ky * 5 + (kx + 2);
+        const coeff = diffuseKernels[kernel][ik];
+        if (coeff == 0) continue;
+
+        addError(target, ty * stride + tx * numCh + ch, e * coeff);
       }
     }
+    // if (forward) {
+    //   if (x < w - 1) {
+    //     addError(target, i + numCh, e * 7 / 16);
+    //   }
+    //   if (y < h - 1) {
+    //     if (x > 0) {
+    //       addError(target, i + stride - numCh, e * 3 / 16);
+    //     }
+    //     addError(target, i + stride, e * 5 / 16);
+    //     if (x < w - 1) {
+    //       addError(target, i + stride + numCh, e * 1 / 16);
+    //     }
+    //   }
+    // } else {
+    //   if (x > 0) {
+    //     addError(target, i - numCh, e * 7 / 16);
+    //   }
+    //   if (y < h - 1) {
+    //     if (x < w - 1) {
+    //       addError(target, i + stride + numCh, e * 3 / 16);
+    //     }
+    //     addError(target, i + stride, e * 5 / 16);
+    //     if (x > 0) {
+    //       addError(target, i + stride - numCh, e * 1 / 16);
+    //     }
+    //   }
+    // }
   }
 }
