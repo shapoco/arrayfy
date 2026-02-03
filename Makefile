@@ -1,4 +1,4 @@
-.PHONY: all build
+.PHONY: all build test setup
 
 REPO_DIR := $(shell pwd)
 TEST_PORT := 52080
@@ -26,3 +26,7 @@ $(APP_JS): $(APP_TS_LIST) $(EXTRA_DEPENDENCIES)
 
 test:
 	python3 -m http.server -d $(APP_DIST_DIR) $(TEST_PORT)
+
+setup:
+	cd $(APP_TS_DIR) && npm install -D tsdown typescript
+	
